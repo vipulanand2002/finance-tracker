@@ -8,9 +8,10 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, CheckCircle2, Circle, Trash2, Users } from 'lucide-react'
+import { Plus, CheckCircle2, Circle, Trash2, Users, UserPlus } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import SplitModal from '@/components/splits/SplitModal'
+import FriendsSheet from '@/components/friends/FriendsSheet'
 
 interface Participant {
   id: string
@@ -38,6 +39,7 @@ export default function SplitsPage() {
   const [splits, setSplits] = useState<Split[]>([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
+  const [friendsOpen, setFriendsOpen] = useState(false)
 
   const fetchSplits = useCallback(async () => {
     setLoading(true)
@@ -176,9 +178,14 @@ export default function SplitsPage() {
           <h1 className="text-2xl font-bold">Splits</h1>
           <p className="text-muted-foreground text-sm">Split expenses with friends and family</p>
         </div>
-        <Button onClick={() => setModalOpen(true)}>
-          <Plus className="w-4 h-4 mr-1" /> New Split
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setFriendsOpen(true)}>
+            <UserPlus className="w-4 h-4 mr-1" /> Friends
+          </Button>
+          <Button onClick={() => setModalOpen(true)}>
+            <Plus className="w-4 h-4 mr-1" /> New Split
+          </Button>
+        </div>
       </div>
 
       {/* Summary */}
@@ -243,6 +250,7 @@ export default function SplitsPage() {
       )}
 
       <SplitModal open={modalOpen} onClose={() => setModalOpen(false)} onSaved={fetchSplits} />
+      <FriendsSheet open={friendsOpen} onClose={() => setFriendsOpen(false)} />
     </div>
   )
 }

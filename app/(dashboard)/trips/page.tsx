@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Plus, MapPin, Calendar, Pencil, Trash2, Plane, Receipt } from 'lucide-react'
+import { Plus, MapPin, Calendar, Pencil, Trash2, Plane, Receipt, LockKeyhole } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import TripModal from '@/components/trips/TripModal'
 import TripDetailSheet from '@/components/trips/TripDetailSheet'
@@ -171,8 +171,13 @@ export default function TripsPage() {
                   </div>
 
                   {/* Trip name overlay */}
-                  <div className="absolute bottom-2 left-3 right-3">
+                  <div className="absolute bottom-2 left-3 right-3 flex items-end justify-between gap-1">
                     <p className="text-white font-semibold text-sm leading-tight truncate">{trip.name}</p>
+                    {trip.is_closed && (
+                      <span className="flex items-center gap-1 shrink-0 text-white/80 text-xs bg-black/30 rounded px-1.5 py-0.5">
+                        <LockKeyhole className="w-3 h-3" /> Closed
+                      </span>
+                    )}
                   </div>
                 </div>
 

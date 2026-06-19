@@ -7,9 +7,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Loader2, Plus, Trash2, Upload, Image as ImageIcon } from 'lucide-react'
+import { Loader2, Plus, Trash2, Upload, Image as ImageIcon, Users } from 'lucide-react'
 import { EXPENSE_CATEGORIES } from '@/lib/constants'
-import type { Trip, TripBudget } from '@/types'
+import { FriendPicker } from '@/components/friends/FriendPicker'
+import type { Trip, Friend } from '@/types'
 
 interface Props {
   open: boolean
@@ -30,6 +31,10 @@ const empty = {
 export default function TripModal({ open, onClose, onSaved, trip }: Props) {
   const [form, setForm] = useState(empty)
   const [budgets, setBudgets] = useState<{ category: string; amount: string }[]>([])
+  const [members, setMembers] = useState<{ email: string; name: string }[]>([])
+  const [memberEmail, setMemberEmail] = useState('')
+  const [memberName, setMemberName] = useState('')
+  const [friends, setFriends] = useState<Friend[]>([])
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string>('')
   const [saving, setSaving] = useState(false)
@@ -37,6 +42,7 @@ export default function TripModal({ open, onClose, onSaved, trip }: Props) {
 
   useEffect(() => {
     if (!open) return
+    fetch('/api/friends').then(r => r.json()).then(d => setFriends(Array.isArray(d) ? d : [])).catch(() => {})
     if (trip) {
       setForm({
         name: trip.name,
@@ -49,12 +55,16 @@ export default function TripModal({ open, onClose, onSaved, trip }: Props) {
       setBudgets(
         (trip.trip_budgets ?? []).map(b => ({ category: b.category, amount: String(b.amount) }))
       )
+      setMembers((trip.trip_members ?? []).map(m => ({ email: m.email, name: m.name ?? '' })))
       setImagePreview(trip.image_url ?? '')
     } else {
       setForm(empty)
       setBudgets([])
+      setMembers([])
       setImagePreview('')
     }
+    setMemberEmail('')
+    setMemberName('')
     setImageFile(null)
   }, [trip, open])
 
@@ -99,6 +109,8 @@ export default function TripModal({ open, onClose, onSaved, trip }: Props) {
         .filter(b => b.category && parseFloat(b.amount) > 0)
         .map(b => ({ category: b.category, amount: parseFloat(b.amount) }))
 
+      const validMembers = members.filter(m => m.email.trim())
+
       const payload = {
         name: form.name.trim(),
         destination: form.destination.trim() || null,
@@ -108,6 +120,7 @@ export default function TripModal({ open, onClose, onSaved, trip }: Props) {
         image_url: imageUrl,
         budget_total: form.budget_total ? parseFloat(form.budget_total) : null,
         trip_budgets: validBudgets,
+        trip_members: validMembers.map(m => ({ email: m.email.trim().toLowerCase(), name: m.name.trim() || null })),
       }
 
       const url = trip ? `/api/trips?id=${trip.id}` : '/api/trips'
@@ -272,6 +285,89 @@ export default function TripModal({ open, onClose, onSaved, trip }: Props) {
                 </button>
               </div>
             ))}
+          </div>
+
+          {/* Trip Members */}
+          <div className="space-y-2">
+            <Label className="flex items-center gap-1.5">
+              <Users className="w-3.5 h-3.5" /> Members
+              <span className="text-muted-foreground font-normal text-xs">(for quick split)</span>
+            </Label>
+
+            {/* Quick-add from friends */}
+            <FriendPicker
+              friends={friends}
+              isSelected={email => members.some(m => m.email.toLowerCase() === email.toLowerCase())}
+              onSelect={f => setMembers(prev => [...prev, { email: f.email, name: f.email.split('@')[0] }])}
+              placeholder="Search friends to add as member…"
+            />
+
+            {/* Manual add */}
+            <div className="flex gap-2">
+              <Input
+                placeholder="Email"
+                type="email"
+                value={memberEmail}
+                onChange={e => setMemberEmail(e.target.value)}
+                className="flex-1 h-8 text-sm"
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    if (!memberEmail.trim()) return
+                    const email = memberEmail.trim().toLowerCase()
+                    if (members.some(m => m.email.toLowerCase() === email)) return
+                    setMembers(prev => [...prev, { email, name: memberName.trim() }])
+                    setMemberEmail('')
+                    setMemberName('')
+                  }
+                }}
+              />
+              <Input
+                placeholder="Name (optional)"
+                value={memberName}
+                onChange={e => setMemberName(e.target.value)}
+                className="w-32 h-8 text-sm"
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 px-2.5"
+                onClick={() => {
+                  if (!memberEmail.trim()) return
+                  const email = memberEmail.trim().toLowerCase()
+                  if (members.some(m => m.email.toLowerCase() === email)) return
+                  setMembers(prev => [...prev, { email, name: memberName.trim() }])
+                  setMemberEmail('')
+                  setMemberName('')
+                }}
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+
+            {/* Members list */}
+            {members.length > 0 && (
+              <div className="space-y-1">
+                {members.map((m, i) => (
+                  <div key={i} className="flex items-center gap-2 text-sm bg-muted/50 rounded-md px-2.5 py-1.5">
+                    <span className="w-6 h-6 rounded-full bg-primary/20 text-primary flex items-center justify-center font-semibold text-[10px] shrink-0">
+                      {(m.name || m.email).charAt(0).toUpperCase()}
+                    </span>
+                    <span className="flex-1 min-w-0 truncate text-xs">
+                      {m.name ? <><span className="font-medium">{m.name}</span> <span className="text-muted-foreground">{m.email}</span></> : m.email}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setMembers(prev => prev.filter((_, idx) => idx !== i))}
+                      className="text-muted-foreground hover:text-destructive shrink-0"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <DialogFooter>

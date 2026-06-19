@@ -13,7 +13,7 @@ export async function GET() {
 
   const { data: trips, error } = await supabase
     .from('trips')
-    .select('*, trip_budgets(*), transactions(amount, type)')
+    .select('*, trip_budgets(*), trip_members(*), transactions(amount, type)')
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
 
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await request.json()
-  const { trip_budgets: budgets, ...tripData } = body
+  const { trip_budgets: budgets, trip_members: members, ...tripData } = body
 
   const { data: trip, error } = await supabase
     .from('trips')
@@ -50,9 +50,15 @@ export async function POST(request: Request) {
   if (Array.isArray(budgets) && budgets.length > 0) {
     await supabase.from('trip_budgets').insert(
       budgets.map((b: { category: string; amount: number }) => ({
-        trip_id: trip.id,
-        category: b.category,
-        amount: b.amount,
+        trip_id: trip.id, category: b.category, amount: b.amount,
+      }))
+    )
+  }
+
+  if (Array.isArray(members) && members.length > 0) {
+    await supabase.from('trip_members').insert(
+      members.map((m: { email: string; name?: string }) => ({
+        trip_id: trip.id, email: m.email, name: m.name ?? null,
       }))
     )
   }
@@ -69,7 +75,7 @@ export async function PATCH(request: Request) {
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
   const body = await request.json()
-  const { trip_budgets: budgets, ...tripData } = body
+  const { trip_budgets: budgets, trip_members: members, ...tripData } = body
 
   const { error } = await supabase
     .from('trips')
@@ -84,9 +90,18 @@ export async function PATCH(request: Request) {
     if (budgets.length > 0) {
       await supabase.from('trip_budgets').insert(
         budgets.map((b: { category: string; amount: number }) => ({
-          trip_id: id,
-          category: b.category,
-          amount: b.amount,
+          trip_id: id, category: b.category, amount: b.amount,
+        }))
+      )
+    }
+  }
+
+  if (Array.isArray(members)) {
+    await supabase.from('trip_members').delete().eq('trip_id', id)
+    if (members.length > 0) {
+      await supabase.from('trip_members').insert(
+        members.map((m: { email: string; name?: string }) => ({
+          trip_id: id, email: m.email, name: m.name ?? null,
         }))
       )
     }

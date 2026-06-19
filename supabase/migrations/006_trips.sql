@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS trips (
   end_date      date,
   image_url     text,
   budget_total  numeric(12,2),
+  is_closed     boolean NOT NULL DEFAULT false,
   created_at    timestamptz NOT NULL DEFAULT now()
 );
 

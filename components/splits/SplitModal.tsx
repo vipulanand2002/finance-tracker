@@ -11,6 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, Plus, Trash2 } from 'lucide-react'
 import { EXPENSE_CATEGORIES } from '@/lib/constants'
 import { formatCurrency } from '@/lib/utils'
+import { FriendPicker } from '@/components/friends/FriendPicker'
+import type { Friend } from '@/types'
 
 interface Participant { name: string; email: string; amount: string }
 
@@ -21,11 +23,12 @@ interface Props {
   defaultTitle?: string
   defaultAmount?: string | number
   tripId?: string | null
+  defaultParticipants?: { name: string; email: string }[]
 }
 
 const emptyParticipant = (): Participant => ({ name: '', email: '', amount: '' })
 
-export default function SplitModal({ open, onClose, onSaved, defaultTitle, defaultAmount, tripId }: Props) {
+export default function SplitModal({ open, onClose, onSaved, defaultTitle, defaultAmount, tripId, defaultParticipants }: Props) {
   const [title, setTitle] = useState('')
   const [totalAmount, setTotalAmount] = useState('')
   const [category, setCategory] = useState('Food & Dining')
@@ -33,6 +36,13 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [participants, setParticipants] = useState<Participant[]>([emptyParticipant(), emptyParticipant()])
   const [saving, setSaving] = useState(false)
+  const [friends, setFriends] = useState<Friend[]>([])
+
+  useEffect(() => {
+    if (open) {
+      fetch('/api/friends').then(r => r.json()).then(d => setFriends(Array.isArray(d) ? d : [])).catch(() => {})
+    }
+  }, [open])
 
   useEffect(() => {
     if (open) {
@@ -41,9 +51,14 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
       setDate(format(new Date(), 'yyyy-MM-dd'))
       setCategory('Food & Dining')
       setDescription('')
-      setParticipants([emptyParticipant(), emptyParticipant()])
+      if (defaultParticipants && defaultParticipants.length > 0) {
+        const pre = defaultParticipants.map(p => ({ name: p.name || p.email.split('@')[0], email: p.email, amount: '' }))
+        setParticipants(pre.length >= 2 ? pre : [...pre, emptyParticipant()])
+      } else {
+        setParticipants([emptyParticipant(), emptyParticipant()])
+      }
     }
-  }, [open, defaultTitle, defaultAmount])
+  }, [open, defaultTitle, defaultAmount, defaultParticipants])
 
   function reset() {
     setTitle(''); setTotalAmount(''); setCategory('Food & Dining')
@@ -64,6 +79,19 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
 
   function addParticipant() { setParticipants(p => [...p, emptyParticipant()]) }
   function removeParticipant(i: number) { setParticipants(p => p.filter((_, idx) => idx !== i)) }
+
+  function addFriendAsParticipant(friend: Friend) {
+    // If there's an empty slot, fill it; otherwise append
+    const emptyIdx = participants.findIndex(p => !p.name && !p.email)
+    const alreadyAdded = participants.some(p => p.email === friend.email)
+    if (alreadyAdded) { toast.error(`${friend.email} is already added`); return }
+    const newRow: Participant = { name: friend.email.split('@')[0], email: friend.email, amount: '' }
+    if (emptyIdx !== -1) {
+      setParticipants(prev => prev.map((p, i) => i === emptyIdx ? newRow : p))
+    } else {
+      setParticipants(prev => [...prev, newRow])
+    }
+  }
 
   const allocatedTotal = participants.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
   const total = parseFloat(totalAmount) || 0
@@ -152,6 +180,14 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
                 Split equally
               </Button>
             </div>
+
+            {/* Quick-add from friends */}
+            <FriendPicker
+              friends={friends}
+              isSelected={email => participants.some(p => p.email === email)}
+              onSelect={addFriendAsParticipant}
+              placeholder="Search friends to add as participant…"
+            />
 
             <div className="space-y-2">
               {participants.map((p, i) => (

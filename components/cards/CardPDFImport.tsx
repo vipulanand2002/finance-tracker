@@ -102,6 +102,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
       fd.append('pdf', file)
       if (password) fd.append('password', password)
       if (statementDay) fd.append('statementDay', statementDay)
+      if (cardId) fd.append('is_card', 'true')
 
       const res = await fetch('/api/pdf', { method: 'POST', body: fd })
       const data = await res.json()
@@ -211,7 +212,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
               <div className="flex flex-col items-center justify-center py-14 gap-3">
                 <Loader2 className="w-10 h-10 animate-spin text-primary" />
                 <p className="text-sm text-muted-foreground">
-                  {password ? 'Decrypting and reading statement…' : 'Gemini AI is reading your statement…'}
+                  {password ? 'Decrypting and reading statement…' : 'AI is reading your statement…'}
                 </p>
               </div>
             ) : (
@@ -451,7 +452,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                                       </SelectTrigger>
                                       <SelectContent>
                                         <SelectItem value="none">No trip</SelectItem>
-                                        {trips.map(t => (
+                                        {trips.filter(t => !t.is_closed).map(t => (
                                           <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
                                         ))}
                                       </SelectContent>

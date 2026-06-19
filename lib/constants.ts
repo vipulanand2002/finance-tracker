@@ -10,6 +10,8 @@ export const EXPENSE_CATEGORIES = [
   'Travel',
   'Personal Care',
   'Subscriptions',
+  'Refund',
+  'Card Payment',
   'Other',
 ] as const
 
@@ -20,6 +22,8 @@ export const INCOME_CATEGORIES = [
   'Gift',
   'Business',
   'Rental Income',
+  'Refund',
+  'Card Payment',
   'Other',
 ] as const
 
@@ -35,6 +39,8 @@ export const CATEGORY_COLORS: Record<string, string> = {
   'Travel': '#8b5cf6',
   'Personal Care': '#f43f5e',
   'Subscriptions': '#64748b',
+  'Refund': '#10b981',
+  'Card Payment': '#6366f1',
   'Other': '#94a3b8',
   'Salary': '#22c55e',
   'Freelance': '#10b981',

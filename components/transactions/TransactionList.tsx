@@ -15,7 +15,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Plus, Search, MoreHorizontal, Pencil, Trash2, FileUp } from 'lucide-react'
+import { Plus, Search, MoreHorizontal, Pencil, Trash2, FileUp, AlertTriangle } from 'lucide-react'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
 import { formatCurrency } from '@/lib/utils'
 import TransactionModal from './TransactionModal'
@@ -66,6 +66,21 @@ export default function TransactionList() {
       fetchTransactions()
     } catch {
       toast.error('Failed to delete')
+    }
+  }
+
+  async function handleDeleteAll() {
+    if (transactions.length === 0) return
+    const confirmed = confirm(
+      `This will permanently delete ALL ${transactions.length} transaction${transactions.length !== 1 ? 's' : ''}${typeFilter !== 'all' || categoryFilter !== 'all' || search ? ' (note: only visible transactions are shown but ALL transactions will be deleted)' : ''}.\n\nThis cannot be undone. Continue?`
+    )
+    if (!confirmed) return
+    try {
+      await fetch('/api/transactions?all=true', { method: 'DELETE' })
+      toast.success('All transactions deleted')
+      fetchTransactions()
+    } catch {
+      toast.error('Failed to delete all transactions')
     }
   }
 
@@ -161,6 +176,15 @@ export default function TransactionList() {
           <Button onClick={openAdd} className="shrink-0">
             <Plus className="w-4 h-4 mr-1" /> Add
           </Button>
+          {transactions.length > 0 && (
+            <Button
+              variant="outline"
+              onClick={handleDeleteAll}
+              className="shrink-0 border-destructive/40 text-destructive hover:bg-destructive hover:text-destructive-foreground"
+            >
+              <AlertTriangle className="w-4 h-4 mr-1" /> Delete All
+            </Button>
+          )}
         </div>
       </div>
 

@@ -12,6 +12,7 @@ import { Separator } from '@/components/ui/separator'
 import {
   Calendar, MapPin, Receipt, Wallet, TrendingDown, Plus,
   Users, Link2, CheckSquare, Square, ArrowUpCircle, ArrowDownCircle,
+  LockKeyhole, LockKeyholeOpen, Loader2,
 } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import { EXPENSE_CATEGORIES } from '@/lib/constants'
@@ -56,6 +57,7 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated }: Prop
   const [linkCandidates, setLinkCandidates] = useState<Transaction[]>([])
   const [selectedLink, setSelectedLink] = useState<Set<string>>(new Set())
   const [linking, setLinking] = useState(false)
+  const [togglingClose, setTogglingClose] = useState(false)
 
   const fetchTransactions = useCallback(async () => {
     if (!trip) return
@@ -130,6 +132,25 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated }: Prop
     }
   }
 
+  async function toggleClosed() {
+    if (!trip) return
+    setTogglingClose(true)
+    try {
+      const res = await fetch(`/api/trips?id=${trip.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_closed: !trip.is_closed }),
+      })
+      if (!res.ok) throw new Error()
+      toast.success(trip.is_closed ? 'Trip reopened' : 'Trip closed')
+      onUpdated()
+    } catch {
+      toast.error('Failed to update trip')
+    } finally {
+      setTogglingClose(false)
+    }
+  }
+
   if (!trip) return null
 
   const expenses = transactions.filter(t => t.type === 'expense')
@@ -166,13 +187,33 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated }: Prop
               <div className={`w-full h-full bg-gradient-to-br ${tripGradient(trip.name)}`} />
             )}
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
-            <div className="absolute bottom-4 left-4 right-4">
-              <h2 className="text-white text-xl font-bold leading-tight">{trip.name}</h2>
-              {trip.destination && (
-                <div className="flex items-center gap-1 text-white/80 text-sm mt-0.5">
-                  <MapPin className="w-3.5 h-3.5" /> {trip.destination}
+            <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-2 mb-0.5">
+                  <h2 className="text-white text-xl font-bold leading-tight">{trip.name}</h2>
+                  {trip.is_closed && (
+                    <Badge className="bg-white/20 text-white border-white/30 text-xs">Closed</Badge>
+                  )}
                 </div>
-              )}
+                {trip.destination && (
+                  <div className="flex items-center gap-1 text-white/80 text-sm">
+                    <MapPin className="w-3.5 h-3.5" /> {trip.destination}
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={toggleClosed}
+                disabled={togglingClose}
+                title={trip.is_closed ? 'Reopen trip' : 'Close trip'}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-white/15 hover:bg-white/30 text-white border border-white/30 transition-colors disabled:opacity-50 shrink-0"
+              >
+                {togglingClose
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  : trip.is_closed
+                    ? <LockKeyholeOpen className="w-3.5 h-3.5" />
+                    : <LockKeyhole className="w-3.5 h-3.5" />}
+                {trip.is_closed ? 'Reopen' : 'Close'}
+              </button>
             </div>
           </div>
 
@@ -269,19 +310,26 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated }: Prop
             <Separator />
 
             {/* Action buttons */}
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => setAddExpenseOpen(true)}>
-                <Plus className="w-3.5 h-3.5 mr-1" /> Add Expense
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => setSplitOpen(true)}>
-                <Users className="w-3.5 h-3.5 mr-1" /> Split
-              </Button>
-              {!linkMode && (
-                <Button size="sm" variant="outline" onClick={openLinkMode}>
-                  <Link2 className="w-3.5 h-3.5 mr-1" /> Link Existing
+            {trip.is_closed ? (
+              <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950 px-3 py-2.5 text-sm text-amber-800 dark:text-amber-200">
+                <LockKeyhole className="w-4 h-4 shrink-0" />
+                This trip is closed. Reopen it to add or link transactions.
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => setAddExpenseOpen(true)}>
+                  <Plus className="w-3.5 h-3.5 mr-1" /> Add Expense
                 </Button>
-              )}
-            </div>
+                <Button size="sm" variant="outline" onClick={() => setSplitOpen(true)}>
+                  <Users className="w-3.5 h-3.5 mr-1" /> Split
+                </Button>
+                {!linkMode && (
+                  <Button size="sm" variant="outline" onClick={openLinkMode}>
+                    <Link2 className="w-3.5 h-3.5 mr-1" /> Link Existing
+                  </Button>
+                )}
+              </div>
+            )}
 
             {/* Link existing transactions panel */}
             {linkMode && (
@@ -359,13 +407,15 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated }: Prop
                       <span className={`text-sm font-semibold shrink-0 ${t.type === 'income' ? 'text-emerald-600' : 'text-red-600'}`}>
                         {t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
                       </span>
-                      <button
-                        onClick={() => unlinkTransaction(t.id)}
-                        title="Unlink from trip"
-                        className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity shrink-0"
-                      >
-                        <Link2 className="w-3.5 h-3.5" />
-                      </button>
+                      {!trip.is_closed && (
+                        <button
+                          onClick={() => unlinkTransaction(t.id)}
+                          title="Unlink from trip"
+                          className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity shrink-0"
+                        >
+                          <Link2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -389,6 +439,7 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated }: Prop
         defaultTitle={splitDefaultTitle}
         defaultAmount={totalSpent}
         tripId={trip.id}
+        defaultParticipants={(trip.trip_members ?? []).map(m => ({ name: m.name ?? '', email: m.email }))}
       />
     </>
   )

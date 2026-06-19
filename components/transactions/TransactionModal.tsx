@@ -225,7 +225,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No trip</SelectItem>
-                  {trips.map(t => (
+                  {trips.filter(t => !t.is_closed).map(t => (
                     <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
                   ))}
                 </SelectContent>

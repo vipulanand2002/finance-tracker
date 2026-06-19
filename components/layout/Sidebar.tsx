@@ -18,6 +18,7 @@ import {
   TrendingUp,
   Plane,
 } from 'lucide-react'
+import { ThemeToggle } from '@/components/ui/theme-toggle'
 
 const navItems = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -75,14 +76,15 @@ export default function Sidebar({ email, onClose }: SidebarProps) {
         ))}
       </nav>
 
-      <div className="p-3 border-t">
-        <div className="flex items-center gap-3 px-3 py-2 mb-1">
+      <div className="p-3 border-t space-y-1">
+        <div className="flex items-center gap-3 px-3 py-2">
           <Avatar className="w-7 h-7">
             <AvatarFallback className="text-xs">
               {email.charAt(0).toUpperCase()}
             </AvatarFallback>
           </Avatar>
           <span className="text-xs text-muted-foreground truncate flex-1">{email}</span>
+          <ThemeToggle />
         </div>
         <Button
           variant="ghost"

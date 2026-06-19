@@ -140,6 +140,7 @@ export async function POST(request: Request) {
   const file = formData.get('pdf') as File | null
   const password = (formData.get('password') as string | null)?.trim() || undefined
   const statementDay = (formData.get('statementDay') as string | null)?.trim() || null
+  const isCard = formData.get('is_card') === 'true'
 
   if (!file) return NextResponse.json({ error: 'No PDF provided' }, { status: 400 })
 
@@ -198,7 +199,18 @@ export async function POST(request: Request) {
     // Sort merged results by date descending
     allTransactions.sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''))
 
-    return NextResponse.json({ transactions: allTransactions })
+    // For credit card imports, fix wrong income categories (Salary, Gift, etc.)
+    // while keeping type=income so they display as credits, not debits.
+    // Refund stays Refund; everything else is a bill payment → Card Payment.
+    const result = isCard
+      ? allTransactions.map(t => {
+          if (t.type !== 'income') return t
+          if (t.category === 'Refund') return t
+          return { ...t, category: 'Card Payment' }
+        })
+      : allTransactions
+
+    return NextResponse.json({ transactions: result })
   } catch (err: any) {
     console.error('PDF parse error:', err)
 

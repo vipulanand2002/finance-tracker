@@ -38,11 +38,25 @@ export interface MonthlyData {
   expenses: number
 }
 
+export interface Friend {
+  id: string
+  friend_id: string
+  email: string
+  created_at: string
+}
+
 export interface TripBudget {
   id: string
   trip_id: string
   category: string
   amount: number
+}
+
+export interface TripMember {
+  id: string
+  trip_id: string
+  email: string
+  name: string | null
 }
 
 export interface Trip {
@@ -55,8 +69,10 @@ export interface Trip {
   end_date: string | null
   image_url: string | null
   budget_total: number | null
+  is_closed: boolean
   created_at: string
   trip_budgets?: TripBudget[]
+  trip_members?: TripMember[]
   total_spent?: number
   transaction_count?: number
 }
