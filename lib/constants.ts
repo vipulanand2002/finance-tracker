@@ -1,0 +1,45 @@
+export const EXPENSE_CATEGORIES = [
+  'Food & Dining',
+  'Transportation',
+  'Entertainment',
+  'Shopping',
+  'Health & Medical',
+  'Utilities',
+  'Rent & Housing',
+  'Education',
+  'Travel',
+  'Personal Care',
+  'Subscriptions',
+  'Other',
+] as const
+
+export const INCOME_CATEGORIES = [
+  'Salary',
+  'Freelance',
+  'Investment',
+  'Gift',
+  'Business',
+  'Rental Income',
+  'Other',
+] as const
+
+export const CATEGORY_COLORS: Record<string, string> = {
+  'Food & Dining': '#f97316',
+  'Transportation': '#3b82f6',
+  'Entertainment': '#a855f7',
+  'Shopping': '#ec4899',
+  'Health & Medical': '#22c55e',
+  'Utilities': '#eab308',
+  'Rent & Housing': '#ef4444',
+  'Education': '#06b6d4',
+  'Travel': '#8b5cf6',
+  'Personal Care': '#f43f5e',
+  'Subscriptions': '#64748b',
+  'Other': '#94a3b8',
+  'Salary': '#22c55e',
+  'Freelance': '#10b981',
+  'Investment': '#3b82f6',
+  'Gift': '#f472b6',
+  'Business': '#6366f1',
+  'Rental Income': '#14b8a6',
+}

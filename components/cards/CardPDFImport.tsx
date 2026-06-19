@@ -1,0 +1,453 @@
+'use client'
+
+import { useState, useRef, useCallback, useEffect } from 'react'
+import { toast } from 'sonner'
+import { format, isValid, parseISO } from 'date-fns'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Upload, Loader2, CheckSquare, Square, Eye, EyeOff,
+  ChevronDown, ChevronUp, FileText, ArrowUpCircle, ArrowDownCircle, KeyRound,
+} from 'lucide-react'
+import { formatCurrency } from '@/lib/utils'
+import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
+
+const ALL_CATEGORIES = [...new Set([...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES])] as string[]
+
+interface EditableTx {
+  date: string
+  description: string
+  amount: number
+  type: 'income' | 'expense'
+  category: string
+  note: string
+  selected: boolean
+  expanded: boolean
+}
+
+interface Props {
+  open: boolean
+  onClose: () => void
+  onImported: () => void
+  cardId?: string
+  cardName?: string
+  savedPassword?: string | null
+}
+
+function safeDate(s: string) { const d = parseISO(s); return isValid(d) ? d : null }
+function monthKey(s: string) { const d = safeDate(s); return d ? format(d, 'MMMM yyyy') : 'Unknown Date' }
+function monthSortKey(k: string) { const d = new Date(k + ' 01'); return isValid(d) ? d.getTime() : 0 }
+
+export default function CardPDFImport({ open, onClose, onImported, cardId, cardName, savedPassword }: Props) {
+  const [step, setStep] = useState<'upload' | 'review' | 'importing'>('upload')
+  const [transactions, setTransactions] = useState<EditableTx[]>([])
+  const [parsing, setParsing] = useState(false)
+  const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [statementDay, setStatementDay] = useState('')
+  const [filename, setFilename] = useState('')
+  const [parseError, setParseError] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  // Pre-fill password when modal opens with a saved password
+  useEffect(() => {
+    if (open && savedPassword) setPassword(savedPassword)
+  }, [open, savedPassword])
+
+  function reset() {
+    setStep('upload')
+    setTransactions([])
+    setStatementDay('')
+    setFilename('')
+    setParseError(null)
+    if (fileRef.current) fileRef.current.value = ''
+    // Keep password pre-filled for convenience
+  }
+
+  async function savePasswordToCard(pwd: string) {
+    if (!cardId || !pwd) return
+    try {
+      await fetch(`/api/cards?id=${cardId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pdf_password: pwd }),
+      })
+    } catch {
+      // Silent — not critical
+    }
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.type !== 'application/pdf') { toast.error('Please select a PDF file'); return }
+    if (file.size > 20 * 1024 * 1024) { toast.error('File too large. Max 20MB'); return }
+
+    setFilename(file.name)
+    setParseError(null)
+    setParsing(true)
+    try {
+      const fd = new FormData()
+      fd.append('pdf', file)
+      if (password) fd.append('password', password)
+      if (statementDay) fd.append('statementDay', statementDay)
+
+      const res = await fetch('/api/pdf', { method: 'POST', body: fd })
+      const data = await res.json()
+
+      if (data.error) {
+        const pwdHeader = res.headers.get('X-Password-Error')
+        if (pwdHeader === 'wrong') {
+          toast.error('Incorrect password. Please check and try again.')
+        } else if (pwdHeader === 'needed') {
+          toast.error('This PDF is password-protected. Enter the password above.')
+        } else if (res.status === 429) {
+          setParseError(data.error)
+        } else {
+          toast.error(data.error)
+        }
+        return
+      }
+
+      if (!Array.isArray(data.transactions) || data.transactions.length === 0) {
+        toast.error('No transactions found in this PDF')
+        return
+      }
+
+      setTransactions(data.transactions.map((t: Omit<EditableTx, 'note' | 'selected' | 'expanded'>) => ({
+        ...t, note: '', selected: true, expanded: false,
+      })))
+      setStep('review')
+
+      // Password worked — save it to the card for future use
+      if (password) {
+        await savePasswordToCard(password)
+        if (!savedPassword || savedPassword !== password) {
+          toast.success(`Password saved for ${cardName ?? 'this card'}`)
+        }
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to parse PDF')
+    } finally {
+      setParsing(false)
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  function updateTx(idx: number, patch: Partial<EditableTx>) {
+    setTransactions(prev => prev.map((t, i) => i === idx ? { ...t, ...patch } : t))
+  }
+
+  const monthGroups = useCallback(() => {
+    const map = new Map<string, { txs: EditableTx[]; indices: number[] }>()
+    transactions.forEach((t, i) => {
+      const key = monthKey(t.date)
+      if (!map.has(key)) map.set(key, { txs: [], indices: [] })
+      map.get(key)!.txs.push(t)
+      map.get(key)!.indices.push(i)
+    })
+    return [...map.entries()].sort((a, b) => monthSortKey(b[0]) - monthSortKey(a[0]))
+  }, [transactions])
+
+  async function handleImport() {
+    const selected = transactions.filter(t => t.selected)
+    if (selected.length === 0) { toast.error('Select at least one transaction'); return }
+    setStep('importing')
+    let imported = 0, failed = 0
+
+    for (const t of selected) {
+      try {
+        const desc = [t.description, t.note].filter(Boolean).join(' — ')
+        const res = await fetch('/api/transactions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount: t.amount, type: t.type, category: t.category,
+            description: desc, date: t.date, is_recurring: false, receipt_url: null,
+          }),
+        })
+        if (res.ok) imported++; else failed++
+      } catch { failed++ }
+    }
+
+    if (imported > 0) {
+      toast.success(`Imported ${imported} transaction${imported !== 1 ? 's' : ''}${failed > 0 ? ` (${failed} failed)` : ''}`)
+      onImported(); reset(); onClose()
+    } else {
+      toast.error('Import failed. Please try again.')
+      setStep('review')
+    }
+  }
+
+  const selectedCount = transactions.filter(t => t.selected).length
+  const groups = monthGroups()
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) { reset(); onClose() } }}>
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <FileText className="w-5 h-5" />
+            {cardName ? `Import Statement — ${cardName}` : 'Import Bank Statement'}
+          </DialogTitle>
+        </DialogHeader>
+
+        {/* ── Upload step ── */}
+        {step === 'upload' && (
+          <div className="flex-1 overflow-y-auto space-y-4 py-1">
+            {parsing ? (
+              <div className="flex flex-col items-center justify-center py-14 gap-3">
+                <Loader2 className="w-10 h-10 animate-spin text-primary" />
+                <p className="text-sm text-muted-foreground">
+                  {password ? 'Decrypting and reading statement…' : 'Gemini AI is reading your statement…'}
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* PDF password */}
+                <div className="space-y-1.5">
+                  <Label className="flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5" />
+                    PDF Password
+                    <span className="text-muted-foreground font-normal text-xs">
+                      {savedPassword ? '(saved from last time)' : '(leave blank if none)'}
+                    </span>
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder={savedPassword ? '••••••••' : 'Enter PDF password if protected'}
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      className="pr-9"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(p => !p)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Common formats — HDFC: DDMMYYYY · ICICI: first 4 letters of name + birth year · Axis: DDMMYYYY · SBI: account no. + birth date
+                  </p>
+                </div>
+
+                {/* Statement generation day */}
+                <div className="space-y-1.5">
+                  <Label>
+                    Statement Generation Day
+                    <span className="text-muted-foreground font-normal text-xs ml-1">(optional)</span>
+                  </Label>
+                  <Input
+                    type="number" min="1" max="31"
+                    placeholder="e.g. 17"
+                    value={statementDay}
+                    onChange={e => setStatementDay(e.target.value)}
+                    className="w-32"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    The day each month when your statement is generated — helps AI correctly classify transactions that span two calendar months.
+                  </p>
+                </div>
+
+                {/* API error banner (e.g. quota exceeded) */}
+                {parseError && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                    {parseError}
+                  </div>
+                )}
+
+                {/* Drop zone */}
+                <div
+                  onClick={() => fileRef.current?.click()}
+                  className="border-2 border-dashed rounded-xl p-8 flex flex-col items-center gap-3 cursor-pointer hover:border-primary/60 hover:bg-muted/30 transition-colors"
+                >
+                  <Upload className="w-8 h-8 text-muted-foreground" />
+                  <div className="text-center">
+                    <p className="font-medium text-sm">Click to select PDF statement</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Max 20MB · HDFC, ICICI, SBI, Axis, Kotak &amp; more
+                    </p>
+                  </div>
+                  <input ref={fileRef} type="file" accept="application/pdf" className="hidden" onChange={handleFileChange} />
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── Review step ── */}
+        {(step === 'review' || step === 'importing') && (
+          <>
+            {/* Controls bar */}
+            <div className="flex items-center justify-between py-2 border-b shrink-0">
+              <button
+                onClick={() => {
+                  const allSel = transactions.every(t => t.selected)
+                  setTransactions(prev => prev.map(t => ({ ...t, selected: !allSel })))
+                }}
+                className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+              >
+                {transactions.every(t => t.selected) ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+                {selectedCount} / {transactions.length} selected
+              </button>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground truncate max-w-[180px]">{filename}</span>
+                {step === 'review' && (
+                  <Button variant="ghost" size="sm" onClick={reset}>Upload different file</Button>
+                )}
+              </div>
+            </div>
+
+            {step === 'importing' ? (
+              <div className="flex-1 flex flex-col items-center justify-center gap-3">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                <p className="text-sm text-muted-foreground">Importing transactions…</p>
+              </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto divide-y">
+                {groups.map(([month, { txs, indices }]) => {
+                  const monthSelected = txs.filter(t => t.selected).length
+                  const monthNet = txs.reduce((s, t) => t.type === 'expense' ? s - t.amount : s + t.amount, 0)
+
+                  return (
+                    <div key={month}>
+                      {/* Month header */}
+                      <div className="flex items-center justify-between px-3 py-2 bg-muted/40 sticky top-0 z-10">
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => {
+                            const allSel = txs.every(t => t.selected)
+                            setTransactions(prev => prev.map((t, i) =>
+                              indices.includes(i) ? { ...t, selected: !allSel } : t
+                            ))
+                          }}>
+                            {txs.every(t => t.selected)
+                              ? <CheckSquare className="w-3.5 h-3.5 text-primary" />
+                              : <Square className="w-3.5 h-3.5 text-muted-foreground" />}
+                          </button>
+                          <span className="text-xs font-semibold">{month}</span>
+                          <span className="text-xs text-muted-foreground">({monthSelected}/{txs.length})</span>
+                        </div>
+                        <span className={`text-xs font-medium ${monthNet >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                          {monthNet >= 0 ? '+' : ''}{formatCurrency(Math.abs(monthNet))}
+                        </span>
+                      </div>
+
+                      {txs.map((tx, relIdx) => {
+                        const absIdx = indices[relIdx]
+                        const d = safeDate(tx.date)
+                        return (
+                          <div key={absIdx} className={tx.selected ? '' : 'opacity-50'}>
+                            {/* Row */}
+                            <div className="flex items-center gap-2 px-3 py-2.5 hover:bg-muted/20">
+                              <input
+                                type="checkbox"
+                                checked={tx.selected}
+                                onChange={() => updateTx(absIdx, { selected: !tx.selected })}
+                                className="w-3.5 h-3.5 shrink-0 rounded"
+                              />
+                              <span className="text-xs text-muted-foreground w-14 shrink-0">
+                                {d ? format(d, 'd MMM') : '—'}
+                              </span>
+                              <span className="text-sm flex-1 min-w-0 truncate">{tx.description}</span>
+                              <span className={`text-sm font-semibold shrink-0 ${tx.type === 'income' ? 'text-emerald-600' : 'text-red-600'}`}>
+                                {tx.type === 'income' ? '+' : '-'}{formatCurrency(tx.amount)}
+                              </span>
+                              <button
+                                onClick={() => updateTx(absIdx, { expanded: !tx.expanded })}
+                                className="text-muted-foreground hover:text-foreground shrink-0"
+                              >
+                                {tx.expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                              </button>
+                            </div>
+
+                            {/* Expanded edit panel */}
+                            {tx.expanded && (
+                              <div className="px-9 pb-3 pt-1 space-y-2.5 bg-muted/10 border-b">
+                                <div className="space-y-1">
+                                  <Label className="text-xs">Description</Label>
+                                  <Input
+                                    value={tx.description}
+                                    onChange={e => updateTx(absIdx, { description: e.target.value })}
+                                    className="h-8 text-sm"
+                                  />
+                                </div>
+                                <div className="grid grid-cols-2 gap-2.5">
+                                  <div className="space-y-1">
+                                    <Label className="text-xs">Category</Label>
+                                    <Select value={tx.category} onValueChange={v => v && updateTx(absIdx, { category: v })}>
+                                      <SelectTrigger className="h-8 text-xs">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {ALL_CATEGORIES.map(c => (
+                                          <SelectItem key={c} value={c}>{c}</SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div className="space-y-1">
+                                    <Label className="text-xs">Type</Label>
+                                    <div className="flex gap-1.5">
+                                      <button
+                                        onClick={() => updateTx(absIdx, { type: 'expense' })}
+                                        className={`flex-1 flex items-center justify-center gap-1 h-8 rounded-md text-xs font-medium border transition-colors ${
+                                          tx.type === 'expense'
+                                            ? 'bg-red-50 border-red-300 text-red-700'
+                                            : 'border-border text-muted-foreground hover:bg-muted'
+                                        }`}
+                                      >
+                                        <ArrowDownCircle className="w-3 h-3" /> Debit
+                                      </button>
+                                      <button
+                                        onClick={() => updateTx(absIdx, { type: 'income' })}
+                                        className={`flex-1 flex items-center justify-center gap-1 h-8 rounded-md text-xs font-medium border transition-colors ${
+                                          tx.type === 'income'
+                                            ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                                            : 'border-border text-muted-foreground hover:bg-muted'
+                                        }`}
+                                      >
+                                        <ArrowUpCircle className="w-3 h-3" /> Credit
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs">
+                                    Note <span className="text-muted-foreground font-normal">(optional)</span>
+                                  </Label>
+                                  <Input
+                                    value={tx.note}
+                                    onChange={e => updateTx(absIdx, { note: e.target.value })}
+                                    className="h-8 text-sm"
+                                    placeholder="Add a personal note…"
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            <DialogFooter className="border-t pt-3 shrink-0">
+              <Button variant="outline" onClick={() => { reset(); onClose() }}>Cancel</Button>
+              <Button onClick={handleImport} disabled={selectedCount === 0 || step === 'importing'}>
+                Import {selectedCount} transaction{selectedCount !== 1 ? 's' : ''}
+              </Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}

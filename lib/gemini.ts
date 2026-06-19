@@ -1,0 +1,154 @@
+import Groq from 'groq-sdk'
+import type { Transaction } from '@/types'
+
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY! })
+
+const TEXT_MODEL = 'llama-3.3-70b-versatile'
+const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
+
+async function chatText(prompt: string): Promise<string> {
+  const res = await groq.chat.completions.create({
+    model: TEXT_MODEL,
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.2,
+  })
+  return res.choices[0]?.message?.content ?? ''
+}
+
+function buildTransactionSummary(transactions: Transaction[]): string {
+  if (transactions.length === 0) return 'No transactions found.'
+
+  const byMonth: Record<string, { income: number; expenses: number; byCategory: Record<string, number> }> = {}
+
+  for (const t of transactions) {
+    const month = t.date.substring(0, 7)
+    if (!byMonth[month]) byMonth[month] = { income: 0, expenses: 0, byCategory: {} }
+    if (t.type === 'income') {
+      byMonth[month].income += t.amount
+    } else {
+      byMonth[month].expenses += t.amount
+      byMonth[month].byCategory[t.category] = (byMonth[month].byCategory[t.category] || 0) + t.amount
+    }
+  }
+
+  let summary = 'Monthly Transaction Summary (amounts in INR):\n'
+  for (const [month, data] of Object.entries(byMonth).sort()) {
+    summary += `\n${month}:\n`
+    summary += `  Income: ₹${data.income.toFixed(2)}\n`
+    summary += `  Expenses: ₹${data.expenses.toFixed(2)}\n`
+    if (Object.keys(data.byCategory).length > 0) {
+      summary += `  By category: ${Object.entries(data.byCategory)
+        .sort(([, a], [, b]) => b - a)
+        .map(([cat, amt]) => `${cat}: ₹${amt.toFixed(2)}`)
+        .join(', ')}\n`
+    }
+  }
+
+  return summary
+}
+
+function cleanJson(text: string): string {
+  return text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+}
+
+export async function analyzeSpending(transactions: Transaction[]): Promise<string[]> {
+  const summary = buildTransactionSummary(transactions)
+
+  const prompt = `You are a personal finance assistant. Analyze this spending data and provide 4-5 concise, actionable insights.
+
+${summary}
+
+Return a JSON array of insight strings. Each insight should be 1-2 sentences. Example format:
+["You spent 40% more on dining this month compared to last month.", "Your largest expense is Rent & Housing at 35% of total spending."]
+
+Return ONLY the JSON array, no other text.`
+
+  try {
+    const text = await chatText(prompt)
+    return JSON.parse(cleanJson(text))
+  } catch {
+    return ['Unable to generate insights at this time.']
+  }
+}
+
+export async function getBudgetRecommendations(
+  transactions: Transaction[]
+): Promise<{ category: string; amount: number }[]> {
+  const summary = buildTransactionSummary(transactions)
+
+  const prompt = `You are a personal finance assistant. Based on this spending history, recommend realistic monthly budget amounts in INR.
+
+${summary}
+
+Return a JSON array with "category" and "amount" (number, in INR). Only include expense categories visible in the data. Example:
+[{"category": "Food & Dining", "amount": 4000}, {"category": "Transportation", "amount": 1500}]
+
+Return ONLY the JSON array, no other text.`
+
+  try {
+    const text = await chatText(prompt)
+    return JSON.parse(cleanJson(text))
+  } catch {
+    return []
+  }
+}
+
+export async function chatWithFinanceAI(
+  message: string,
+  transactions: Transaction[]
+): Promise<string> {
+  const summary = buildTransactionSummary(transactions)
+
+  const prompt = `You are a helpful personal finance assistant. Answer the user's question using their transaction data. All amounts are in INR (Indian Rupees).
+
+TRANSACTION DATA (last 90 days):
+${summary}
+
+USER QUESTION: ${message}
+
+Provide a clear, concise answer. Use specific numbers from the data when relevant. Keep it friendly and practical.`
+
+  return chatText(prompt)
+}
+
+export async function extractReceiptData(
+  base64Image: string,
+  mimeType: string
+): Promise<{
+  amount: number | null
+  description: string | null
+  category: string | null
+  date: string | null
+}> {
+  const res = await groq.chat.completions.create({
+    model: VISION_MODEL,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image_url',
+            image_url: { url: `data:${mimeType};base64,${base64Image}` },
+          },
+          {
+            type: 'text',
+            text: `Extract transaction details from this receipt. Return a JSON object with:
+- amount: number (total amount, no currency symbol, null if not found)
+- description: string (merchant name or brief description, null if not found)
+- category: string (one of: Food & Dining, Transportation, Entertainment, Shopping, Health & Medical, Utilities, Rent & Housing, Education, Travel, Personal Care, Subscriptions, Other)
+- date: string (YYYY-MM-DD format, null if not visible)
+
+Return ONLY the JSON object, no other text.`,
+          },
+        ],
+      },
+    ],
+  })
+
+  const text = res.choices[0]?.message?.content ?? ''
+  try {
+    return JSON.parse(cleanJson(text))
+  } catch {
+    return { amount: null, description: null, category: null, date: null }
+  }
+}
