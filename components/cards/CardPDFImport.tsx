@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
+import type { Trip } from '@/types'
 
 const ALL_CATEGORIES = [...new Set([...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES])] as string[]
 
@@ -24,6 +25,7 @@ interface EditableTx {
   type: 'income' | 'expense'
   category: string
   note: string
+  trip_id: string | null
   selected: boolean
   expanded: boolean
 }
@@ -50,12 +52,18 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
   const [statementDay, setStatementDay] = useState('')
   const [filename, setFilename] = useState('')
   const [parseError, setParseError] = useState<string | null>(null)
+  const [trips, setTrips] = useState<Trip[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // Pre-fill password when modal opens with a saved password
   useEffect(() => {
     if (open && savedPassword) setPassword(savedPassword)
   }, [open, savedPassword])
+
+  useEffect(() => {
+    if (open) {
+      fetch('/api/trips').then(r => r.json()).then(d => setTrips(Array.isArray(d) ? d : [])).catch(() => {})
+    }
+  }, [open])
 
   function reset() {
     setStep('upload')
@@ -117,8 +125,8 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
         return
       }
 
-      setTransactions(data.transactions.map((t: Omit<EditableTx, 'note' | 'selected' | 'expanded'>) => ({
-        ...t, note: '', selected: true, expanded: false,
+      setTransactions(data.transactions.map((t: Omit<EditableTx, 'note' | 'trip_id' | 'selected' | 'expanded'>) => ({
+        ...t, note: '', trip_id: null, selected: true, expanded: false,
       })))
       setStep('review')
 
@@ -167,6 +175,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
           body: JSON.stringify({
             amount: t.amount, type: t.type, category: t.category,
             description: desc, date: t.date, is_recurring: false, receipt_url: null,
+            trip_id: t.trip_id ?? null,
           }),
         })
         if (res.ok) imported++; else failed++
@@ -428,6 +437,27 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                                     placeholder="Add a personal note…"
                                   />
                                 </div>
+                                {trips.length > 0 && (
+                                  <div className="space-y-1">
+                                    <Label className="text-xs">
+                                      Trip <span className="text-muted-foreground font-normal">(optional)</span>
+                                    </Label>
+                                    <Select
+                                      value={tx.trip_id ?? 'none'}
+                                      onValueChange={v => updateTx(absIdx, { trip_id: v === 'none' ? null : v })}
+                                    >
+                                      <SelectTrigger className="h-8 text-xs">
+                                        <SelectValue placeholder="Link to a trip" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="none">No trip</SelectItem>
+                                        {trips.map(t => (
+                                          <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>

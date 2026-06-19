@@ -12,13 +12,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge'
 import { Loader2, Upload, X } from 'lucide-react'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
-import type { Transaction } from '@/types'
+import type { Transaction, Trip } from '@/types'
 
 interface Props {
   open: boolean
   onClose: () => void
   onSaved: () => void
   transaction?: Transaction | null
+  defaultTripId?: string | null
 }
 
 const emptyForm = {
@@ -29,13 +30,20 @@ const emptyForm = {
   date: format(new Date(), 'yyyy-MM-dd'),
   is_recurring: false,
   receipt_url: '',
+  trip_id: null as string | null,
 }
 
-export default function TransactionModal({ open, onClose, onSaved, transaction }: Props) {
+export default function TransactionModal({ open, onClose, onSaved, transaction, defaultTripId }: Props) {
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
   const [scanningReceipt, setScanningReceipt] = useState(false)
+  const [trips, setTrips] = useState<Trip[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    fetch('/api/trips').then(r => r.json()).then(d => setTrips(Array.isArray(d) ? d : [])).catch(() => {})
+  }, [open])
 
   useEffect(() => {
     if (transaction) {
@@ -47,11 +55,12 @@ export default function TransactionModal({ open, onClose, onSaved, transaction }
         date: transaction.date,
         is_recurring: transaction.is_recurring,
         receipt_url: transaction.receipt_url ?? '',
+        trip_id: transaction.trip_id ?? null,
       })
     } else {
-      setForm(emptyForm)
+      setForm({ ...emptyForm, trip_id: defaultTripId ?? null })
     }
-  }, [transaction, open])
+  }, [transaction, open, defaultTripId])
 
   const categories = form.type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES
 
@@ -101,6 +110,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction }
         date: form.date,
         is_recurring: form.is_recurring,
         receipt_url: form.receipt_url || null,
+        trip_id: form.trip_id || null,
       }
 
       const url = transaction ? `/api/transactions?id=${transaction.id}` : '/api/transactions'
@@ -201,6 +211,27 @@ export default function TransactionModal({ open, onClose, onSaved, transaction }
               required
             />
           </div>
+
+          {/* Trip */}
+          {trips.length > 0 && (
+            <div className="space-y-1">
+              <Label>Trip <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
+              <Select
+                value={form.trip_id ?? 'none'}
+                onValueChange={v => set('trip_id', v === 'none' ? null : v)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Link to a trip" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No trip</SelectItem>
+                  {trips.map(t => (
+                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {/* Recurring */}
           <div className="flex items-center gap-2">

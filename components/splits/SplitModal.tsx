@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -18,11 +18,14 @@ interface Props {
   open: boolean
   onClose: () => void
   onSaved: () => void
+  defaultTitle?: string
+  defaultAmount?: string | number
+  tripId?: string | null
 }
 
 const emptyParticipant = (): Participant => ({ name: '', email: '', amount: '' })
 
-export default function SplitModal({ open, onClose, onSaved }: Props) {
+export default function SplitModal({ open, onClose, onSaved, defaultTitle, defaultAmount, tripId }: Props) {
   const [title, setTitle] = useState('')
   const [totalAmount, setTotalAmount] = useState('')
   const [category, setCategory] = useState('Food & Dining')
@@ -30,6 +33,17 @@ export default function SplitModal({ open, onClose, onSaved }: Props) {
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [participants, setParticipants] = useState<Participant[]>([emptyParticipant(), emptyParticipant()])
   const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (open) {
+      setTitle(defaultTitle ?? '')
+      setTotalAmount(defaultAmount != null ? String(defaultAmount) : '')
+      setDate(format(new Date(), 'yyyy-MM-dd'))
+      setCategory('Food & Dining')
+      setDescription('')
+      setParticipants([emptyParticipant(), emptyParticipant()])
+    }
+  }, [open, defaultTitle, defaultAmount])
 
   function reset() {
     setTitle(''); setTotalAmount(''); setCategory('Food & Dining')
@@ -70,6 +84,7 @@ export default function SplitModal({ open, onClose, onSaved }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title, total_amount: total, category, description: description || null, date,
+          trip_id: tripId ?? null,
           participants: validParticipants.map(p => ({
             name: p.name.trim(),
             email: p.email.trim() || undefined,

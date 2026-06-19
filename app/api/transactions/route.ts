@@ -17,6 +17,7 @@ export async function GET(request: Request) {
   const from = searchParams.get('from')
   const to = searchParams.get('to')
   const search = searchParams.get('search')
+  const tripId = searchParams.get('trip_id')
 
   let query = supabase.from('transactions').select('*').eq('user_id', user.id).order('date', { ascending: false })
 
@@ -25,6 +26,7 @@ export async function GET(request: Request) {
   if (from) query = query.gte('date', from)
   if (to) query = query.lte('date', to)
   if (search) query = query.ilike('description', `%${search}%`)
+  if (tripId) query = query.eq('trip_id', tripId)
 
   const { data, error } = await query
 

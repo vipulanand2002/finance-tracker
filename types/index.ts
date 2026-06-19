@@ -8,6 +8,7 @@ export interface Transaction {
   date: string
   is_recurring: boolean
   receipt_url: string | null
+  trip_id: string | null
   created_at: string
 }
 
@@ -35,4 +36,27 @@ export interface MonthlyData {
   month: string
   income: number
   expenses: number
+}
+
+export interface TripBudget {
+  id: string
+  trip_id: string
+  category: string
+  amount: number
+}
+
+export interface Trip {
+  id: string
+  user_id: string
+  name: string
+  destination: string | null
+  description: string | null
+  start_date: string | null
+  end_date: string | null
+  image_url: string | null
+  budget_total: number | null
+  created_at: string
+  trip_budgets?: TripBudget[]
+  total_spent?: number
+  transaction_count?: number
 }

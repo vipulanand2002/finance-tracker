@@ -16,12 +16,14 @@ import {
   CreditCard,
   LogOut,
   TrendingUp,
+  Plane,
 } from 'lucide-react'
 
 const navItems = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { label: 'Transactions', href: '/transactions', icon: ArrowLeftRight },
   { label: 'Cards', href: '/cards', icon: CreditCard },
+  { label: 'Trips', href: '/trips', icon: Plane },
   { label: 'Budgets', href: '/budgets', icon: Target },
   { label: 'Splits', href: '/splits', icon: Users },
   { label: 'AI Assistant', href: '/ai', icon: BrainCircuit },
