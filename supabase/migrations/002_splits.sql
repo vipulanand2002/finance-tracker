@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS expense_splits (
 CREATE TABLE IF NOT EXISTS split_participants (
   id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   split_id            uuid REFERENCES expense_splits(id) ON DELETE CASCADE NOT NULL,
-  participant_user_id uuid REFERENCES auth.users(id),
+  participant_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   participant_name    text NOT NULL,
   participant_email   text,
   amount_owed         numeric(12,2) NOT NULL CHECK (amount_owed >= 0),
