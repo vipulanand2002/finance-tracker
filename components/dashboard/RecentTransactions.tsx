@@ -33,8 +33,14 @@ export default function RecentTransactions({ transactions }: { transactions: Tra
                   {t.is_recurring && (
                     <Badge variant="secondary" className="text-xs">Recurring</Badge>
                   )}
-                  <span className={`text-sm font-semibold ${t.type === 'income' ? 'text-emerald-600' : 'text-red-600'}`}>
-                    {t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
+                  <span className={`text-sm font-semibold ${
+                    t.category === 'Card Payment'
+                      ? 'text-blue-500'
+                      : t.type === 'income'
+                      ? 'text-emerald-600'
+                      : 'text-red-600'
+                  }`}>
+                    {t.category === 'Card Payment' ? '' : t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
                   </span>
                 </div>
               </div>

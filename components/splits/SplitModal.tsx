@@ -8,7 +8,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Loader2, Plus, Trash2 } from 'lucide-react'
+import { Loader2, Plus, Trash2, UserPlus } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
 import { EXPENSE_CATEGORIES } from '@/lib/constants'
 import { formatCurrency } from '@/lib/utils'
 import { FriendPicker } from '@/components/friends/FriendPicker'
@@ -37,10 +38,18 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
   const [participants, setParticipants] = useState<Participant[]>([emptyParticipant(), emptyParticipant()])
   const [saving, setSaving] = useState(false)
   const [friends, setFriends] = useState<Friend[]>([])
+  const [myEmail, setMyEmail] = useState('')
+  const [myName, setMyName] = useState('')
 
   useEffect(() => {
     if (open) {
       fetch('/api/friends').then(r => r.json()).then(d => setFriends(Array.isArray(d) ? d : [])).catch(() => {})
+      createClient().auth.getUser().then(({ data: { user } }) => {
+        if (user?.email) {
+          setMyEmail(user.email.toLowerCase())
+          setMyName(user.email.split('@')[0])
+        }
+      })
     }
   }, [open])
 
@@ -99,11 +108,10 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    const validParticipants = participants.filter(p => p.name.trim() && p.amount)
-    if (!title || !totalAmount || validParticipants.length === 0) {
-      toast.error('Fill in title, amount, and at least one participant')
-      return
-    }
+    const validParticipants = participants.filter(p => p.name.trim() && parseFloat(p.amount) > 0)
+    if (!title.trim()) { toast.error('Enter a title'); return }
+    if (total <= 0) { toast.error('Amount must be greater than 0'); return }
+    if (validParticipants.length === 0) { toast.error('Add at least one participant with an amount'); return }
 
     setSaving(true)
     try {
@@ -111,7 +119,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title, total_amount: total, category, description: description || null, date,
+          title: title.trim(), total_amount: total, category, description: description || null, date,
           trip_id: tripId ?? null,
           participants: validParticipants.map(p => ({
             name: p.name.trim(),
@@ -120,13 +128,14 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
           })),
         }),
       })
-      if (!res.ok) throw new Error('Failed')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Failed')
       toast.success('Split created!')
       reset()
       onSaved()
       onClose()
-    } catch {
-      toast.error('Failed to create split')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create split')
     } finally {
       setSaving(false)
     }
@@ -211,9 +220,21 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
               ))}
             </div>
 
-            <Button type="button" variant="outline" size="sm" onClick={addParticipant}>
-              <Plus className="w-4 h-4 mr-1" /> Add person
-            </Button>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={addParticipant}>
+                <Plus className="w-4 h-4 mr-1" /> Add person
+              </Button>
+              {myEmail && !participants.some(p => p.email.toLowerCase() === myEmail) && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setParticipants(prev => [{ name: myName, email: myEmail, amount: '' }, ...prev])}
+                >
+                  <UserPlus className="w-3.5 h-3.5 mr-1" /> Add me
+                </Button>
+              )}
+            </div>
 
             {/* Allocation summary */}
             {total > 0 && (

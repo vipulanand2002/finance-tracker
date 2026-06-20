@@ -7,37 +7,29 @@ async function getUser() {
   return { supabase, user }
 }
 
-// GET /api/splits — all splits for the user (created + participating)
-export async function GET() {
+// GET /api/splits          — all splits for the user (created + participating by user_id or email)
+// GET /api/splits?trip_id=X — splits linked to a specific trip
+export async function GET(request: Request) {
   const { supabase, user } = await getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { data: created } = await supabase
+  const tripId = new URL(request.url).searchParams.get('trip_id')
+
+  let query = supabase
     .from('expense_splits')
     .select('*, split_participants(*)')
-    .eq('created_by', user.id)
     .order('date', { ascending: false })
 
-  const { data: participating } = await supabase
-    .from('expense_splits')
-    .select('*, split_participants(*)')
-    .neq('created_by', user.id)
-    .in('id',
-      (await supabase
-        .from('split_participants')
-        .select('split_id')
-        .eq('participant_user_id', user.id)
-      ).data?.map(r => r.split_id) ?? []
-    )
-    .order('date', { ascending: false })
+  if (tripId) query = query.eq('trip_id', tripId)
 
-  const all = [...(created ?? []), ...(participating ?? [])]
-  all.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-
-  return NextResponse.json(all)
+  // RLS (split_creators_all + split_participants_view via is_split_participant)
+  // now handles visibility by both user_id and email — single query suffices
+  const { data, error } = await query
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json(data ?? [])
 }
 
-// POST /api/splits — create split + participants
+// POST /api/splits — create split + participants + notifications
 export async function POST(request: Request) {
   const { supabase, user } = await getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -52,18 +44,66 @@ export async function POST(request: Request) {
 
   if (splitError) return NextResponse.json({ error: splitError.message }, { status: 500 })
 
+  const creatorEmail = (user.email ?? '').toLowerCase()
+
   if (participants?.length) {
     const { error: partError } = await supabase
       .from('split_participants')
-      .insert(participants.map((p: { name: string; email?: string; amount: number; userId?: string }) => ({
-        split_id: split.id,
-        participant_name: p.name,
-        participant_email: p.email ?? null,
-        participant_user_id: p.userId ?? null,
-        amount_owed: p.amount,
-      })))
+      .insert(participants.map((p: { name: string; email?: string; amount: number; userId?: string }) => {
+        const isCreator = !!p.email && p.email.toLowerCase() === creatorEmail
+        return {
+          split_id: split.id,
+          participant_name: p.name,
+          participant_email: p.email?.toLowerCase() ?? null,
+          participant_user_id: p.userId ?? (isCreator ? user.id : null),
+          amount_owed: p.amount,
+          // Creator already paid their share when they paid the whole bill
+          is_paid: isCreator,
+          paid_at: isCreator ? new Date().toISOString() : null,
+        }
+      }))
 
     if (partError) return NextResponse.json({ error: partError.message }, { status: 500 })
+
+    // Notify other participants who have an email
+    const toNotify = participants.filter(
+      (p: { email?: string }) => p.email && p.email.toLowerCase() !== creatorEmail
+    )
+    if (toNotify.length > 0) {
+      await supabase.from('split_notifications').insert(
+        toNotify.map((p: { email: string; amount: number }) => ({
+          split_id: split.id,
+          split_title: split.title,
+          total_amount: splitData.total_amount,
+          creator_email: user.email,
+          invitee_email: p.email.toLowerCase(),
+          amount_owed: p.amount,
+          dismissed: false,
+        }))
+      )
+    }
+  }
+
+  // Always create a transaction — the creator paid the full bill regardless of whether
+  // it's a trip split or a standalone split. split_id links it back for personal budget
+  // calculations (excludes the full tx, uses participant share instead).
+  const txPayload = {
+    user_id: user.id,
+    amount: splitData.total_amount,
+    type: 'expense',
+    category: splitData.category ?? 'Other',
+    description: split.title,
+    date: splitData.date,
+    trip_id: splitData.trip_id ?? null,
+    split_id: split.id,
+  }
+
+  const { error: txError } = await supabase.from('transactions').insert(txPayload)
+  if (txError) {
+    // Fallback: split_id column may not exist yet (migration 020 pending)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { split_id, ...txWithoutSplitId } = txPayload
+    await supabase.from('transactions').insert(txWithoutSplitId)
   }
 
   return NextResponse.json(split, { status: 201 })

@@ -58,23 +58,18 @@ async function extractPdfText(buffer: ArrayBuffer, password?: string): Promise<s
   return lines.join('\n')
 }
 
-async function parseChunk(
-  chunkText: string,
-  schema: string,
-  rules: string,
-  billingContext: string
-): Promise<any[]> {
-  const prompt = `You are an expert Indian bank statement parser.
+async function parseChunk(chunkText: string, categories: string, billingContext: string): Promise<any[]> {
+  const prompt = `Extract transactions from this bank statement. ${billingContext}
 
-${billingContext}
+Return a JSON array with objects: { date:"YYYY-MM-DD", description:"<merchant, max 60 chars>", amount:<positive number>, type:"income"|"expense", category:"<from list>" }
 
-The following is tab-separated text extracted from a bank statement PDF. Parse ALL transactions.
+- type is "income" if amount is marked (CREDIT), or is a refund/cashback/deposit; otherwise "expense"
+- Skip balance summary lines (opening balance, closing balance, total)
+- Skip non-transaction lines (address, account info, page headers)
+- Categories: ${categories}
+- Return ONLY the JSON array, no explanation
 
-${schema}
-
-${rules}
-
-Statement text:
+Statement:
 ${chunkText}`
 
   const completion = await groq.chat.completions.create({
@@ -89,7 +84,17 @@ ${chunkText}`
   return JSON.parse(clean)
 }
 
-// Strip repeated page headers, very short lines, and duplicate whitespace to cut token count
+// Normalize CR/+ credit markers so the AI reliably identifies them as income.
+// e.g. "1,500.00 CR" → "1,500.00(CREDIT)"   "+1,500.00" → "1,500.00(CREDIT)"
+function normalizeCreditMarkers(line: string): string {
+  // Amount followed by optional space + "CR" (case-insensitive)
+  line = line.replace(/([\d,]+(?:\.\d+)?)\s+CR\b/gi, '$1(CREDIT)')
+  // Leading "+" before a number
+  line = line.replace(/\+\s*([\d,]+(?:\.\d+)?)/g, '$1(CREDIT)')
+  return line
+}
+
+// Strip repeated page headers, very short lines, and normalize credit markers
 function compressPdfText(text: string): string {
   const lineCount = new Map<string, number>()
   const result: string[] = []
@@ -97,18 +102,14 @@ function compressPdfText(text: string): string {
   for (const line of text.split('\n')) {
     const trimmed = line.trim()
 
-    // Keep page break markers as-is
     if (trimmed === '<<PAGE_BREAK>>') { result.push(trimmed); continue }
-
-    // Drop blank or very short lines (likely separators, page numbers)
     if (trimmed.length < 5) continue
 
-    // Drop lines that repeat more than twice across the doc (bank name, address, table headers)
     const count = (lineCount.get(trimmed) ?? 0) + 1
     lineCount.set(trimmed, count)
     if (count > 2) continue
 
-    result.push(trimmed)
+    result.push(normalizeCreditMarkers(trimmed))
   }
 
   return result.join('\n')
@@ -148,23 +149,8 @@ export async function POST(request: Request) {
   const allCategories = [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES].join(', ')
 
   const billingContext = statementDay
-    ? `This statement is generated on day ${statementDay} of the month. The billing cycle runs from day ${statementDay} of the previous month to day ${statementDay} of the statement month. Use this to correctly assign the year when dates don't include one.`
-    : 'Use context clues to infer the correct year for each transaction date.'
-
-  const rules = `Rules:
-- Include ALL transactions — do NOT skip any
-- Skip opening/closing balance lines — those are NOT transactions
-- If a row has both debit and credit columns, use the non-zero value and set type accordingly
-- Cashbacks, refunds, and reversals are "income"
-- Return ONLY a valid JSON array sorted by date descending
-- No markdown, no explanation, just the JSON array`
-
-  const schema = `For each transaction return a JSON object:
-- date: "YYYY-MM-DD"
-- description: merchant or transaction name (max 60 chars)
-- amount: positive number, no currency symbol
-- type: "income" for credits/deposits/cashbacks/refunds, "expense" for debits/payments
-- category: best match from: ${allCategories}`
+    ? `Statement day is ${statementDay}; use it to infer the correct year when dates lack one.`
+    : 'Infer the correct year from context.'
 
   // Extract text from PDF (handles both password-protected and normal PDFs)
   let text: string
@@ -192,7 +178,7 @@ export async function POST(request: Request) {
     const allTransactions: any[] = []
 
     for (const chunk of chunks) {
-      const txs = await parseChunk(chunk, schema, rules, billingContext)
+      const txs = await parseChunk(chunk, allCategories, billingContext)
       if (Array.isArray(txs)) allTransactions.push(...txs)
     }
 

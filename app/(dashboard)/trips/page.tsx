@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Plus, MapPin, Calendar, Pencil, Trash2, Plane, Receipt, LockKeyhole } from 'lucide-react'
+import { Plus, MapPin, Calendar, Pencil, Trash2, Plane, Receipt, LockKeyhole, Users } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import TripModal from '@/components/trips/TripModal'
 import TripDetailSheet from '@/components/trips/TripDetailSheet'
@@ -40,7 +40,9 @@ export default function TripsPage() {
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [editTrip, setEditTrip] = useState<Trip | null>(null)
-  const [detailTrip, setDetailTrip] = useState<Trip | null>(null)
+  const [detailTripId, setDetailTripId] = useState<string | null>(null)
+  // Derive detailTrip from trips state so it always reflects the latest fetched data
+  const detailTrip = trips.find(t => t.id === detailTripId) ?? null
 
   const fetchTrips = useCallback(async () => {
     setLoading(true)
@@ -63,7 +65,7 @@ export default function TripsPage() {
     try {
       await fetch(`/api/trips?id=${id}`, { method: 'DELETE' })
       toast.success('Trip deleted')
-      if (detailTrip?.id === id) setDetailTrip(null)
+      if (detailTripId === id) setDetailTripId(null)
       fetchTrips()
     } catch {
       toast.error('Failed to delete trip')
@@ -91,23 +93,23 @@ export default function TripsPage() {
 
       {/* Summary bar */}
       {trips.length > 0 && (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-3 gap-2 sm:gap-4">
           <Card>
-            <CardContent className="pt-4">
-              <p className="text-xs text-muted-foreground">Total Trips</p>
-              <p className="text-2xl font-bold mt-0.5">{trips.length}</p>
+            <CardContent className="pt-3 pb-3 sm:pt-4 sm:pb-4">
+              <p className="text-[11px] sm:text-xs text-muted-foreground">Total Trips</p>
+              <p className="text-xl sm:text-2xl font-bold mt-0.5">{trips.length}</p>
             </CardContent>
           </Card>
           <Card>
-            <CardContent className="pt-4">
-              <p className="text-xs text-muted-foreground">Active / Upcoming</p>
-              <p className="text-2xl font-bold mt-0.5">{activeTrips.length}</p>
+            <CardContent className="pt-3 pb-3 sm:pt-4 sm:pb-4">
+              <p className="text-[11px] sm:text-xs text-muted-foreground leading-tight">Active</p>
+              <p className="text-xl sm:text-2xl font-bold mt-0.5">{activeTrips.length}</p>
             </CardContent>
           </Card>
           <Card>
-            <CardContent className="pt-4">
-              <p className="text-xs text-muted-foreground">Total Spent</p>
-              <p className="text-2xl font-bold mt-0.5 text-red-600">{formatCurrency(totalAllTrips)}</p>
+            <CardContent className="pt-3 pb-3 sm:pt-4 sm:pb-4">
+              <p className="text-[11px] sm:text-xs text-muted-foreground">Spent</p>
+              <p className="text-base sm:text-2xl font-bold mt-0.5 text-red-600 truncate">{formatCurrency(totalAllTrips)}</p>
             </CardContent>
           </Card>
         </div>
@@ -142,7 +144,7 @@ export default function TripsPage() {
             return (
               <div
                 key={trip.id}
-                onClick={() => setDetailTrip(trip)}
+                onClick={() => setDetailTripId(trip.id)}
                 className="rounded-2xl overflow-hidden border bg-card cursor-pointer hover:shadow-md transition-shadow group"
               >
                 {/* Cover image / gradient */}
@@ -154,26 +156,32 @@ export default function TripsPage() {
                   )}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
 
-                  {/* Action buttons — show on hover */}
-                  <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={e => { e.stopPropagation(); setEditTrip(trip); setModalOpen(true) }}
-                      className="w-7 h-7 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-black/70"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={e => deleteTrip(trip.id, e)}
-                      className="w-7 h-7 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-red-600"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                  {/* Action buttons — always visible on mobile, hover-reveal on desktop */}
+                  {trip.is_owner !== false && (
+                    <div className="absolute top-2 right-2 flex gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={e => { e.stopPropagation(); setEditTrip(trip); setModalOpen(true) }}
+                        className="w-8 h-8 sm:w-7 sm:h-7 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-black/70 active:bg-black/70"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={e => deleteTrip(trip.id, e)}
+                        className="w-8 h-8 sm:w-7 sm:h-7 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-red-600 active:bg-red-600"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
 
                   {/* Trip name overlay */}
                   <div className="absolute bottom-2 left-3 right-3 flex items-end justify-between gap-1">
                     <p className="text-white font-semibold text-sm leading-tight truncate">{trip.name}</p>
-                    {trip.is_closed && (
+                    {trip.is_owner === false ? (
+                      <span className="flex items-center gap-1 shrink-0 text-white/80 text-xs bg-black/30 rounded px-1.5 py-0.5">
+                        <Users className="w-3 h-3" /> Member
+                      </span>
+                    ) : trip.is_closed && (
                       <span className="flex items-center gap-1 shrink-0 text-white/80 text-xs bg-black/30 rounded px-1.5 py-0.5">
                         <LockKeyhole className="w-3 h-3" /> Closed
                       </span>
@@ -257,8 +265,8 @@ export default function TripsPage() {
 
       <TripDetailSheet
         trip={detailTrip}
-        open={Boolean(detailTrip)}
-        onClose={() => setDetailTrip(null)}
+        open={Boolean(detailTripId)}
+        onClose={() => setDetailTripId(null)}
         onUpdated={fetchTrips}
       />
     </div>

@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Loader2, Plus, Trash2, Upload, Image as ImageIcon, Users } from 'lucide-react'
+import { Eye, EyeOff, Loader2, Plus, Trash2, Upload, Image as ImageIcon, Users } from 'lucide-react'
 import { EXPENSE_CATEGORIES } from '@/lib/constants'
 import { FriendPicker } from '@/components/friends/FriendPicker'
 import type { Trip, Friend } from '@/types'
@@ -26,6 +26,8 @@ const empty = {
   start_date: '',
   end_date: '',
   budget_total: '',
+  personal_budget: '',
+  budget_visible_to_members: true,
 }
 
 export default function TripModal({ open, onClose, onSaved, trip }: Props) {
@@ -51,12 +53,21 @@ export default function TripModal({ open, onClose, onSaved, trip }: Props) {
         start_date: trip.start_date ?? '',
         end_date: trip.end_date ?? '',
         budget_total: trip.budget_total ? String(trip.budget_total) : '',
+        personal_budget: '',
+        budget_visible_to_members: trip.budget_visible_to_members !== false,
       })
       setBudgets(
         (trip.trip_budgets ?? []).map(b => ({ category: b.category, amount: String(b.amount) }))
       )
       setMembers((trip.trip_members ?? []).map(m => ({ email: m.email, name: m.name ?? '' })))
       setImagePreview(trip.image_url ?? '')
+      // Pre-fill existing personal budget
+      fetch(`/api/trip-personal-budget?trip_id=${trip.id}&mine=true`)
+        .then(r => r.json())
+        .then((data: { amount: number } | null) => {
+          if (data && 'amount' in data) setForm(f => ({ ...f, personal_budget: String(data.amount) }))
+        })
+        .catch(() => {})
     } else {
       setForm(empty)
       setBudgets([])
@@ -119,6 +130,7 @@ export default function TripModal({ open, onClose, onSaved, trip }: Props) {
         end_date: form.end_date || null,
         image_url: imageUrl,
         budget_total: form.budget_total ? parseFloat(form.budget_total) : null,
+        budget_visible_to_members: form.budget_total ? form.budget_visible_to_members : null,
         trip_budgets: validBudgets,
         trip_members: validMembers.map(m => ({ email: m.email.trim().toLowerCase(), name: m.name.trim() || null })),
       }
@@ -132,6 +144,17 @@ export default function TripModal({ open, onClose, onSaved, trip }: Props) {
         body: JSON.stringify(payload),
       })
       if (!res.ok) throw new Error('Failed to save')
+
+      // Save personal budget if provided
+      const personalAmount = parseFloat(form.personal_budget)
+      if (!isNaN(personalAmount) && personalAmount > 0) {
+        const tripId = trip ? trip.id : (await res.json()).id
+        await fetch('/api/trip-personal-budget', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ trip_id: tripId, amount: personalAmount }),
+        }).catch(() => {})
+      }
 
       toast.success(trip ? 'Trip updated!' : 'Trip created!')
       onSaved()
@@ -225,19 +248,60 @@ export default function TripModal({ open, onClose, onSaved, trip }: Props) {
             />
           </div>
 
-          {/* Total Budget */}
-          <div className="space-y-1">
-            <Label>
-              Total Budget <span className="text-muted-foreground font-normal text-xs">(optional)</span>
-            </Label>
-            <Input
-              type="number"
-              min="0"
-              placeholder="e.g. 50000"
-              value={form.budget_total}
-              onChange={e => setForm(f => ({ ...f, budget_total: e.target.value }))}
-            />
+          {/* Budget fields */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label>
+                Trip Budget <span className="text-muted-foreground font-normal text-xs">(optional)</span>
+              </Label>
+              <Input
+                type="number"
+                min="0"
+                placeholder="e.g. 50000"
+                value={form.budget_total}
+                onChange={e => setForm(f => ({ ...f, budget_total: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>
+                My Personal Budget <span className="text-muted-foreground font-normal text-xs">(optional)</span>
+              </Label>
+              <Input
+                type="number"
+                min="0"
+                placeholder="e.g. 15000"
+                value={form.personal_budget}
+                onChange={e => setForm(f => ({ ...f, personal_budget: e.target.value }))}
+              />
+            </div>
           </div>
+
+          {/* Trip budget visibility — only shown when a trip budget is set */}
+          {form.budget_total && (
+            <button
+              type="button"
+              onClick={() => setForm(f => ({ ...f, budget_visible_to_members: !f.budget_visible_to_members }))}
+              className={`w-full flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-sm transition-colors text-left ${
+                form.budget_visible_to_members
+                  ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950'
+                  : 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950'
+              }`}
+            >
+              {form.budget_visible_to_members
+                ? <Eye className="w-4 h-4 text-emerald-600 shrink-0" />
+                : <EyeOff className="w-4 h-4 text-amber-600 shrink-0" />}
+              <div className="flex-1 min-w-0">
+                <p className={`font-medium text-xs ${form.budget_visible_to_members ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>
+                  {form.budget_visible_to_members ? 'Budget visible to members' : 'Budget hidden from members'}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {form.budget_visible_to_members
+                    ? 'Members can see the trip total budget and progress'
+                    : 'Only you (the owner) can see the trip budget'}
+                </p>
+              </div>
+            </button>
+          )}
 
           {/* Category budgets */}
           <div className="space-y-2">

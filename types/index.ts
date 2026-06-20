@@ -9,6 +9,9 @@ export interface Transaction {
   is_recurring: boolean
   receipt_url: string | null
   trip_id: string | null
+  card_id: string | null
+  split_id: string | null
+  is_discrete: boolean
   created_at: string
 }
 
@@ -69,10 +72,12 @@ export interface Trip {
   end_date: string | null
   image_url: string | null
   budget_total: number | null
+  budget_visible_to_members: boolean | null
   is_closed: boolean
   created_at: string
   trip_budgets?: TripBudget[]
   trip_members?: TripMember[]
   total_spent?: number
   transaction_count?: number
+  is_owner?: boolean
 }

@@ -38,7 +38,7 @@ export default function BudgetsPage() {
     try {
       const [budgetRes, txRes] = await Promise.all([
         fetch(`/api/budgets?month=${month}&year=${year}`),
-        fetch(`/api/transactions?type=expense`),
+        fetch(`/api/transactions?exclude_card=true`),
       ])
       const [rawBudgets, rawTx]: [Budget[], Transaction[]] = await Promise.all([
         budgetRes.json(),
@@ -52,7 +52,7 @@ export default function BudgetsPage() {
 
       const withSpent: BudgetWithSpent[] = (rawBudgets ?? []).map(b => ({
         ...b,
-        spent: monthTx.filter(t => t.category === b.category).reduce((s, t) => s + t.amount, 0),
+        spent: monthTx.filter(t => (t.type === 'expense' || t.category === 'Card Payment') && t.category === b.category).reduce((s, t) => s + t.amount, 0),
       }))
 
       setBudgets(withSpent)

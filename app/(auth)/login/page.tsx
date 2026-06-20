@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -17,7 +17,15 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [authError, setAuthError] = useState<string | null>(null)
   const router = useRouter()
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('error')) {
+      setAuthError(params.get('desc') ?? 'Authentication failed. Please try again.')
+    }
+  }, [])
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
@@ -54,6 +62,12 @@ export default function LoginPage() {
       </CardHeader>
 
       <CardContent className="space-y-4">
+        {authError && (
+          <div className="rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2.5 text-sm text-destructive">
+            <p className="font-medium">Sign-in failed</p>
+            <p className="text-xs mt-0.5 opacity-80 break-all">{authError}</p>
+          </div>
+        )}
         <Button variant="outline" className="w-full" onClick={handleGoogleLogin} type="button">
           <svg className="w-4 h-4 mr-2" viewBox="0 0 24 24">
             <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />

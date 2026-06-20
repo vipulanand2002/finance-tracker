@@ -15,18 +15,28 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Plus, Search, MoreHorizontal, Pencil, Trash2, FileUp, AlertTriangle } from 'lucide-react'
+import {
+  Plus, Search, MoreHorizontal, Pencil, Trash2, FileUp, AlertTriangle,
+  ChevronDown, ChevronRight, CreditCard,
+} from 'lucide-react'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
 import { formatCurrency } from '@/lib/utils'
 import TransactionModal from './TransactionModal'
 import PDFImport from './PDFImport'
 import type { Transaction } from '@/types'
 
-// Deduplicated category list for the filter dropdown
 const ALL_CATEGORIES = [...new Set([...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES])]
+
+interface CardInfo { id: string; name: string }
+
+// A list item is either a plain transaction or a credit-card group header
+type ListItem =
+  | { kind: 'tx'; tx: Transaction }
+  | { kind: 'card-group'; groupKey: string; cardId: string; cardName: string; month: string; txs: Transaction[]; latestDate: string }
 
 export default function TransactionList() {
   const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [cards, setCards] = useState<CardInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
@@ -34,6 +44,7 @@ export default function TransactionList() {
   const [modalOpen, setModalOpen] = useState(false)
   const [pdfOpen, setPdfOpen] = useState(false)
   const [editing, setEditing] = useState<Transaction | null>(null)
+  const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set())
 
   const fetchTransactions = useCallback(async () => {
     setLoading(true)
@@ -54,9 +65,68 @@ export default function TransactionList() {
   }, [typeFilter, categoryFilter, search])
 
   useEffect(() => {
+    fetch('/api/cards').then(r => r.json()).then(d => setCards(Array.isArray(d) ? d : [])).catch(() => {})
+  }, [])
+
+  useEffect(() => {
     const timer = setTimeout(fetchTransactions, search ? 400 : 0)
     return () => clearTimeout(timer)
   }, [fetchTransactions, search])
+
+  const cardNameMap = new Map(cards.map(c => [c.id, c.name]))
+
+  // Build list items: group CC transactions by card_id + calendar month, leave rest individual
+  const listItems = useCallback((): ListItem[] => {
+    const groupMap = new Map<string, { cardId: string; month: string; txs: Transaction[] }>()
+    const regular: Transaction[] = []
+
+    for (const tx of transactions) {
+      if (tx.card_id) {
+        const month = tx.date.slice(0, 7) // YYYY-MM
+        const key = `${tx.card_id}-${month}`
+        if (!groupMap.has(key)) groupMap.set(key, { cardId: tx.card_id, month, txs: [] })
+        groupMap.get(key)!.txs.push(tx)
+      } else {
+        regular.push(tx)
+      }
+    }
+
+    const items: ListItem[] = []
+
+    for (const [groupKey, { cardId, month, txs }] of groupMap) {
+      items.push({
+        kind: 'card-group',
+        groupKey,
+        cardId,
+        cardName: cardNameMap.get(cardId) ?? 'Credit Card',
+        month,
+        txs,
+        latestDate: txs.reduce((max, t) => (t.date > max ? t.date : max), txs[0].date),
+      })
+    }
+
+    for (const tx of regular) {
+      items.push({ kind: 'tx', tx })
+    }
+
+    // Sort by date descending (groups use their latest transaction date)
+    items.sort((a, b) => {
+      const dateA = a.kind === 'tx' ? a.tx.date : a.latestDate
+      const dateB = b.kind === 'tx' ? b.tx.date : b.latestDate
+      return dateB.localeCompare(dateA)
+    })
+
+    return items
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transactions, cards])
+
+  function toggleCard(groupKey: string) {
+    setExpandedCards(prev => {
+      const next = new Set(prev)
+      next.has(groupKey) ? next.delete(groupKey) : next.add(groupKey)
+      return next
+    })
+  }
 
   async function handleDelete(id: string) {
     if (!confirm('Delete this transaction?')) return
@@ -72,7 +142,7 @@ export default function TransactionList() {
   async function handleDeleteAll() {
     if (transactions.length === 0) return
     const confirmed = confirm(
-      `This will permanently delete ALL ${transactions.length} transaction${transactions.length !== 1 ? 's' : ''}${typeFilter !== 'all' || categoryFilter !== 'all' || search ? ' (note: only visible transactions are shown but ALL transactions will be deleted)' : ''}.\n\nThis cannot be undone. Continue?`
+      `This will permanently delete ALL ${transactions.length} transaction${transactions.length !== 1 ? 's' : ''}.\n\nThis cannot be undone. Continue?`
     )
     if (!confirmed) return
     try {
@@ -86,6 +156,164 @@ export default function TransactionList() {
 
   function openAdd() { setEditing(null); setModalOpen(true) }
   function openEdit(t: Transaction) { setEditing(t); setModalOpen(true) }
+
+  function txAmountColor(t: Transaction) {
+    if (t.category === 'Card Payment') return 'text-blue-500'
+    return t.type === 'income' ? 'text-emerald-600' : 'text-red-600'
+  }
+
+  function groupStats(txs: Transaction[]) {
+    const expense = txs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
+    const refund = txs.filter(t => t.type === 'income' && t.category !== 'Card Payment').reduce((s, t) => s + t.amount, 0)
+    const payment = txs.filter(t => t.category === 'Card Payment').reduce((s, t) => s + t.amount, 0)
+    return { net: refund - expense, payment }
+  }
+
+  // ── Card group row ──
+  const CardGroupRow = ({ item }: { item: Extract<ListItem, { kind: 'card-group' }> }) => {
+    const expanded = expandedCards.has(item.groupKey)
+    const { net, payment } = groupStats(item.txs)
+    const dates = item.txs.map(t => t.date).sort()
+    const firstDate = format(new Date(dates[0] + 'T00:00:00'), 'dd MMM')
+    const lastDate = format(new Date(dates[dates.length - 1] + 'T00:00:00'), 'dd MMM yyyy')
+    const dateRange = firstDate === lastDate ? lastDate : `${firstDate} – ${lastDate}`
+    const monthLabel = format(new Date(item.month + '-01'), 'MMM yyyy')
+
+    return (
+      <>
+        <TableRow
+          className="cursor-pointer hover:bg-muted/60 bg-muted/20 border-b-0"
+          onClick={() => toggleCard(item.groupKey)}
+        >
+          <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+            {dateRange}
+          </TableCell>
+          <TableCell>
+            <div className="flex items-center gap-2 flex-wrap">
+              <CreditCard className="w-4 h-4 text-primary shrink-0" />
+              <span className="text-sm font-medium">{item.cardName}</span>
+              <span className="text-sm text-muted-foreground">·</span>
+              <span className="text-sm text-muted-foreground">{monthLabel}</span>
+              <Badge variant="secondary" className="text-xs">{item.txs.length} txns</Badge>
+              {payment > 0 && (
+                <Badge className="text-xs bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800">
+                  Paid {formatCurrency(payment)}
+                </Badge>
+              )}
+            </div>
+          </TableCell>
+          <TableCell>
+            <Badge variant="outline" className="text-xs">Credit Card</Badge>
+          </TableCell>
+          <TableCell className="text-right">
+            <span className={`font-semibold text-sm ${net >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+              {net >= 0 ? '+' : ''}{formatCurrency(net)}
+            </span>
+          </TableCell>
+          <TableCell>
+            {expanded
+              ? <ChevronDown className="w-4 h-4 text-muted-foreground" />
+              : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
+          </TableCell>
+        </TableRow>
+
+        {expanded && item.txs.map(t => (
+          <TableRow key={t.id} className="bg-muted/5">
+            <TableCell className="text-sm text-muted-foreground whitespace-nowrap pl-6">
+              {format(new Date(t.date + 'T00:00:00'), 'dd MMM yyyy')}
+            </TableCell>
+            <TableCell className="pl-10">
+              <span className="text-sm">{t.description ?? '—'}</span>
+            </TableCell>
+            <TableCell>
+              <Badge
+                variant="outline"
+                className={`text-xs ${t.category === 'Card Payment' ? 'border-blue-300 text-blue-600 dark:border-blue-700 dark:text-blue-400' : ''}`}
+              >
+                {t.category}
+              </Badge>
+            </TableCell>
+            <TableCell className="text-right">
+              <span className={`font-semibold text-sm ${txAmountColor(t)}`}>
+                {t.category === 'Card Payment' ? '' : t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
+              </span>
+            </TableCell>
+            <TableCell>
+              <DropdownMenu>
+                <DropdownMenuTrigger className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-muted transition-colors text-muted-foreground" aria-label="Options">
+                  <MoreHorizontal className="w-4 h-4" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => openEdit(t)}><Pencil className="w-4 h-4 mr-2" />Edit</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleDelete(t.id)} className="text-destructive"><Trash2 className="w-4 h-4 mr-2" />Delete</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </TableCell>
+          </TableRow>
+        ))}
+      </>
+    )
+  }
+
+  // ── Mobile card group row ──
+  const MobileCardGroupRow = ({ item }: { item: Extract<ListItem, { kind: 'card-group' }> }) => {
+    const expanded = expandedCards.has(item.groupKey)
+    const { net, payment } = groupStats(item.txs)
+    const monthLabel = format(new Date(item.month + '-01'), 'MMM yyyy')
+
+    return (
+      <>
+        <div
+          className="flex items-center justify-between p-4 border-b bg-muted/20 cursor-pointer"
+          onClick={() => toggleCard(item.groupKey)}
+        >
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <CreditCard className="w-4 h-4 text-primary shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">{item.cardName}</p>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <p className="text-xs text-muted-foreground">{monthLabel} · {item.txs.length} txns</p>
+                {payment > 0 && (
+                  <span className="text-xs text-blue-500">Paid {formatCurrency(payment)}</span>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 ml-3">
+            <span className={`text-sm font-semibold ${net >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+              {net >= 0 ? '+' : ''}{formatCurrency(net)}
+            </span>
+            {expanded ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
+          </div>
+        </div>
+
+        {expanded && item.txs.map(t => (
+          <div key={t.id} className="flex items-center justify-between px-4 py-3 border-b bg-muted/5 pl-8">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm truncate">{t.description ?? t.category}</p>
+              <p className={`text-xs ${t.category === 'Card Payment' ? 'text-blue-500' : 'text-muted-foreground'}`}>
+                {t.category} · {format(new Date(t.date + 'T00:00:00'), 'dd MMM')}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0 ml-3">
+              <span className={`text-sm font-semibold ${txAmountColor(t)}`}>
+                {t.category === 'Card Payment' ? '' : t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
+              </span>
+              <DropdownMenu>
+                <DropdownMenuTrigger className="inline-flex items-center justify-center h-7 w-7 rounded-md hover:bg-muted transition-colors text-muted-foreground" aria-label="Options">
+                  <MoreHorizontal className="w-4 h-4" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => openEdit(t)}><Pencil className="w-4 h-4 mr-2" />Edit</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleDelete(t.id)} className="text-destructive"><Trash2 className="w-4 h-4 mr-2" />Delete</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+        ))}
+      </>
+    )
+  }
 
   const MobileRow = ({ t }: { t: Transaction }) => (
     <div className="flex items-center justify-between p-4 border-b last:border-0">
@@ -144,6 +372,8 @@ export default function TransactionList() {
     </TableRow>
   )
 
+  const items = listItems()
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row gap-3">
@@ -194,7 +424,7 @@ export default function TransactionList() {
             <div className="p-4 space-y-3">
               {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
             </div>
-          ) : transactions.length === 0 ? (
+          ) : items.length === 0 ? (
             <div className="py-16 text-center text-muted-foreground">
               <p className="mb-3">No transactions found</p>
               <Button size="sm" onClick={openAdd}><Plus className="w-4 h-4 mr-1" />Add your first transaction</Button>
@@ -203,7 +433,11 @@ export default function TransactionList() {
             <>
               {/* Mobile view */}
               <div className="md:hidden">
-                {transactions.map(t => <MobileRow key={t.id} t={t} />)}
+                {items.map((item) =>
+                  item.kind === 'card-group'
+                    ? <MobileCardGroupRow key={item.groupKey} item={item} />
+                    : <MobileRow key={item.tx.id} t={item.tx} />
+                )}
               </div>
 
               {/* Desktop table */}
@@ -218,7 +452,11 @@ export default function TransactionList() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {transactions.map(t => <DesktopRow key={t.id} t={t} />)}
+                  {items.map((item) =>
+                    item.kind === 'card-group'
+                      ? <CardGroupRow key={item.groupKey} item={item} />
+                      : <DesktopRow key={item.tx.id} t={item.tx} />
+                  )}
                 </TableBody>
               </Table>
             </>

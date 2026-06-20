@@ -18,15 +18,28 @@ export async function GET(request: Request) {
   const to = searchParams.get('to')
   const search = searchParams.get('search')
   const tripId = searchParams.get('trip_id')
+  const excludeCard = searchParams.get('exclude_card') === 'true'
+  const cardId = searchParams.get('card_id')
+  const hasCard = searchParams.get('has_card') === 'true'
 
-  let query = supabase.from('transactions').select('*').eq('user_id', user.id).order('date', { ascending: false })
+  // For trip-scoped queries: RLS handles visibility (own txs + trip participant txs)
+  // For all other queries: restrict to own transactions only
+  let query = tripId
+    ? supabase.from('transactions').select('*').eq('trip_id', tripId).order('date', { ascending: false })
+    : supabase.from('transactions').select('*').eq('user_id', user.id).order('date', { ascending: false })
 
-  if (type && type !== 'all') query = query.eq('type', type)
-  if (category) query = query.eq('category', category)
-  if (from) query = query.gte('date', from)
-  if (to) query = query.lte('date', to)
-  if (search) query = query.ilike('description', `%${search}%`)
-  if (tripId) query = query.eq('trip_id', tripId)
+  if (!tripId) {
+    if (type && type !== 'all') query = query.eq('type', type)
+    if (category) query = query.eq('category', category)
+    if (from) query = query.gte('date', from)
+    if (to) query = query.lte('date', to)
+    if (search) query = query.ilike('description', `%${search}%`)
+    // Exclude card transactions but keep Card Payments (real cash outflow)
+    if (excludeCard) query = query.or('card_id.is.null,category.eq.Card Payment')
+    // Filter to specific card or any card transaction
+    if (cardId) query = query.eq('card_id', cardId)
+    else if (hasCard) query = query.not('card_id', 'is', null)
+  }
 
   const { data, error } = await query
 

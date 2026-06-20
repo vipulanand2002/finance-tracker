@@ -10,8 +10,8 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, Upload, X } from 'lucide-react'
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
+import { EyeOff, Loader2, Upload, X } from 'lucide-react'
+import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, TRIP_EXPENSE_CATEGORIES } from '@/lib/constants'
 import type { Transaction, Trip } from '@/types'
 
 interface Props {
@@ -29,6 +29,7 @@ const emptyForm = {
   description: '',
   date: format(new Date(), 'yyyy-MM-dd'),
   is_recurring: false,
+  is_discrete: false,
   receipt_url: '',
   trip_id: null as string | null,
 }
@@ -54,6 +55,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         description: transaction.description ?? '',
         date: transaction.date,
         is_recurring: transaction.is_recurring,
+        is_discrete: transaction.is_discrete ?? false,
         receipt_url: transaction.receipt_url ?? '',
         trip_id: transaction.trip_id ?? null,
       })
@@ -62,7 +64,11 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
     }
   }, [transaction, open, defaultTripId])
 
-  const categories = form.type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES
+  const categories = form.type === 'income'
+    ? INCOME_CATEGORIES
+    : form.trip_id
+      ? TRIP_EXPENSE_CATEGORIES
+      : EXPENSE_CATEGORIES
 
   function set<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm(prev => ({ ...prev, [key]: value }))
@@ -109,6 +115,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         description: form.description || null,
         date: form.date,
         is_recurring: form.is_recurring,
+        is_discrete: form.trip_id ? form.is_discrete : false,
         receipt_url: form.receipt_url || null,
         trip_id: form.trip_id || null,
       }
@@ -142,21 +149,23 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
-          {/* Type toggle */}
-          <div className="flex gap-2">
-            {(['expense', 'income'] as const).map(t => (
-              <Button
-                key={t}
-                type="button"
-                variant={form.type === t ? 'default' : 'outline'}
-                size="sm"
-                className="flex-1 capitalize"
-                onClick={() => { set('type', t); set('category', '') }}
-              >
-                {t}
-              </Button>
-            ))}
-          </div>
+          {/* Type toggle — income is not applicable in trip context */}
+          {!form.trip_id && (
+            <div className="flex gap-2">
+              {(['expense', 'income'] as const).map(t => (
+                <Button
+                  key={t}
+                  type="button"
+                  variant={form.type === t ? 'default' : 'outline'}
+                  size="sm"
+                  className="flex-1 capitalize"
+                  onClick={() => { set('type', t); set('category', '') }}
+                >
+                  {t}
+                </Button>
+              ))}
+            </div>
+          )}
 
           {/* Amount */}
           <div className="space-y-1">
@@ -218,7 +227,17 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
               <Label>Trip <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
               <Select
                 value={form.trip_id ?? 'none'}
-                onValueChange={v => set('trip_id', v === 'none' ? null : v)}
+                onValueChange={v => {
+                  const tripSelected = v !== 'none'
+                  set('trip_id', tripSelected ? v : null)
+                  if (tripSelected) {
+                    set('type', 'expense')
+                    // Reset category if it's not in the trip-specific list
+                    if (!TRIP_EXPENSE_CATEGORIES.includes(form.category as typeof TRIP_EXPENSE_CATEGORIES[number])) {
+                      set('category', '')
+                    }
+                  }
+                }}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Link to a trip" />
@@ -247,6 +266,28 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
             </Label>
             {form.is_recurring && <Badge variant="secondary" className="text-xs">Monthly</Badge>}
           </div>
+
+          {/* Discrete expense toggle — only relevant when linked to a trip */}
+          {form.trip_id && form.type === 'expense' && (
+            <div className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 transition-colors ${form.is_discrete ? 'border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950' : 'border-muted'}`}>
+              <input
+                id="discrete"
+                type="checkbox"
+                className="w-4 h-4 rounded mt-0.5 accent-amber-500"
+                checked={form.is_discrete}
+                onChange={e => set('is_discrete', e.target.checked)}
+              />
+              <div>
+                <Label htmlFor="discrete" className="cursor-pointer font-medium flex items-center gap-1.5">
+                  <EyeOff className="w-3.5 h-3.5 text-amber-600" />
+                  Private expense
+                </Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Counts toward your personal budget only — hidden from other trip members and excluded from the trip total.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Receipt upload (expense only) */}
           {form.type === 'expense' && (

@@ -1,85 +1,207 @@
-import { createClient } from '@/lib/supabase/server'
-import { format, subMonths, startOfMonth } from 'date-fns'
+'use client'
+
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { toast } from 'sonner'
+import { format, subMonths, startOfMonth, endOfMonth } from 'date-fns'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { CreditCard } from 'lucide-react'
 import StatsCards from '@/components/dashboard/StatsCards'
 import SpendingChart from '@/components/dashboard/SpendingChart'
 import RecentTransactions from '@/components/dashboard/RecentTransactions'
 import BudgetProgress from '@/components/dashboard/BudgetProgress'
 import type { Transaction, Budget, BudgetWithSpent, CategoryTotal, MonthlyData } from '@/types'
 
-export default async function DashboardPage() {
-  const supabase = await createClient()
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+]
+
+export default function DashboardPage() {
   const now = new Date()
-  const currentMonth = now.getMonth() + 1
-  const currentYear = now.getFullYear()
-  const startMonth = format(startOfMonth(now), 'yyyy-MM-dd')
-  const sixMonthsAgo = format(subMonths(startOfMonth(now), 5), 'yyyy-MM-dd')
+  const [month, setMonth] = useState(now.getMonth() + 1)
+  const [year, setYear] = useState(now.getFullYear())
+  const [includeCards, setIncludeCards] = useState(false)
 
-  const [{ data: allTx }, { data: monthTx }, { data: budgets }] = await Promise.all([
-    supabase.from('transactions').select('*').gte('date', sixMonthsAgo).order('date', { ascending: false }),
-    supabase.from('transactions').select('*').gte('date', startMonth).order('date', { ascending: false }),
-    supabase.from('budgets').select('*').eq('month', currentMonth).eq('year', currentYear),
-  ])
+  const [allTx, setAllTx] = useState<Transaction[]>([])
+  const [budgets, setBudgets] = useState<Budget[]>([])
+  const [loading, setLoading] = useState(true)
 
-  const allTransactions: Transaction[] = allTx ?? []
-  const monthTransactions: Transaction[] = monthTx ?? []
-  const monthBudgets: Budget[] = budgets ?? []
+  const fetchData = useCallback(async () => {
+    if (isNaN(year) || year < 2000 || year > 2099) return
+    setLoading(true)
+    try {
+      const selectedDate = new Date(year, month - 1)
+      const to = format(endOfMonth(selectedDate), 'yyyy-MM-dd')
+      const from = format(subMonths(startOfMonth(selectedDate), 5), 'yyyy-MM-dd')
+
+      const [txRes, budgetRes] = await Promise.all([
+        fetch(`/api/transactions?from=${from}&to=${to}`),
+        fetch(`/api/budgets?month=${month}&year=${year}`),
+      ])
+      const [txData, budgetData] = await Promise.all([txRes.json(), budgetRes.json()])
+      setAllTx(Array.isArray(txData) ? txData : [])
+      setBudgets(Array.isArray(budgetData) ? budgetData : [])
+    } catch {
+      toast.error('Failed to load dashboard data')
+    } finally {
+      setLoading(false)
+    }
+  }, [month, year])
+
+  useEffect(() => { fetchData() }, [fetchData])
+
+  // Cards OFF: card purchases excluded, Card Payment counts as expense (bill proxy)
+  // Cards ON:  card purchases included by real category, Card Payment excluded (avoid double-count)
+  const isCountable = useCallback(
+    (t: Transaction) => includeCards ? true : (!t.card_id || t.category === 'Card Payment'),
+    [includeCards],
+  )
+
+  const isExpense = useCallback(
+    (t: Transaction) => includeCards
+      ? t.type === 'expense'                                     // Card Payment is type='income' → drops out
+      : t.type === 'expense' || t.category === 'Card Payment',  // Card Payment treated as expense proxy
+    [includeCards],
+  )
+
+  const isIncome = useCallback(
+    (t: Transaction) => t.type === 'income' && t.category !== 'Card Payment',
+    [],
+  )
+
+  const countableTx = useMemo(() => allTx.filter(isCountable), [allTx, isCountable])
+
+  const monthPrefix = `${year}-${String(month).padStart(2, '0')}`
+  const monthTx = useMemo(
+    () => countableTx.filter(t => t.date.startsWith(monthPrefix)),
+    [countableTx, monthPrefix],
+  )
 
   // Stats
-  const totalIncome = monthTransactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
-  const totalExpenses = monthTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
+  const totalIncome = useMemo(() => monthTx.filter(isIncome).reduce((s, t) => s + t.amount, 0), [monthTx, isIncome])
+  const totalExpenses = useMemo(() => monthTx.filter(isExpense).reduce((s, t) => s + t.amount, 0), [monthTx, isExpense])
   const netBalance = totalIncome - totalExpenses
   const savingsRate = totalIncome > 0 ? (netBalance / totalIncome) * 100 : 0
 
-  // Category breakdown (current month expenses)
-  const catMap: Record<string, number> = {}
-  monthTransactions.filter(t => t.type === 'expense').forEach(t => {
-    catMap[t.category] = (catMap[t.category] ?? 0) + t.amount
-  })
-  const categoryData: CategoryTotal[] = Object.entries(catMap)
-    .map(([category, amount]) => ({
-      category,
-      amount,
-      percentage: totalExpenses > 0 ? (amount / totalExpenses) * 100 : 0,
-    }))
-    .sort((a, b) => b.amount - a.amount)
+  // Category breakdown for selected month
+  const categoryData = useMemo((): CategoryTotal[] => {
+    const catMap: Record<string, number> = {}
+    monthTx.filter(isExpense).forEach(t => {
+      catMap[t.category] = (catMap[t.category] ?? 0) + t.amount
+    })
+    return Object.entries(catMap)
+      .map(([category, amount]) => ({
+        category,
+        amount,
+        percentage: totalExpenses > 0 ? (amount / totalExpenses) * 100 : 0,
+      }))
+      .sort((a, b) => b.amount - a.amount)
+  }, [monthTx, totalExpenses, isExpense])
 
-  // Monthly trend (last 6 months)
-  const monthlyData: MonthlyData[] = Array.from({ length: 6 }, (_, i) => {
-    const d = subMonths(now, 5 - i)
-    const prefix = format(d, 'yyyy-MM')
-    return {
-      month: format(d, 'MMM'),
-      income: allTransactions.filter(t => t.type === 'income' && t.date.startsWith(prefix)).reduce((s, t) => s + t.amount, 0),
-      expenses: allTransactions.filter(t => t.type === 'expense' && t.date.startsWith(prefix)).reduce((s, t) => s + t.amount, 0),
-    }
-  })
+  // 6-month trend ending at selected month
+  const monthlyData = useMemo((): MonthlyData[] => {
+    const base = new Date(year, month - 1)
+    return Array.from({ length: 6 }, (_, i) => {
+      const d = subMonths(base, 5 - i)
+      const prefix = format(d, 'yyyy-MM')
+      const txs = countableTx.filter(t => t.date.startsWith(prefix))
+      return {
+        month: format(d, 'MMM'),
+        income: txs.filter(isIncome).reduce((s, t) => s + t.amount, 0),
+        expenses: txs.filter(isExpense).reduce((s, t) => s + t.amount, 0),
+      }
+    })
+  }, [countableTx, month, year, isIncome, isExpense])
 
-  // Budget + spent
-  const budgetProgress: BudgetWithSpent[] = monthBudgets.map(b => ({
-    ...b,
-    spent: monthTransactions.filter(t => t.type === 'expense' && t.category === b.category).reduce((s, t) => s + t.amount, 0),
-  }))
+  // Budget progress
+  const budgetProgress = useMemo((): BudgetWithSpent[] =>
+    budgets.map(b => ({
+      ...b,
+      spent: monthTx
+        .filter(t => isExpense(t) && t.category === b.category)
+        .reduce((s, t) => s + t.amount, 0),
+    })),
+  [budgets, monthTx, isExpense])
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Dashboard</h1>
-        <p className="text-muted-foreground text-sm">{format(now, 'MMMM yyyy')} overview</p>
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Dashboard</h1>
+          <p className="text-muted-foreground text-sm">
+            {MONTH_NAMES[month - 1]} {year} overview
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Month selector */}
+          <Select value={String(month)} onValueChange={v => v && setMonth(parseInt(v))}>
+            <SelectTrigger className="w-36">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {MONTH_NAMES.map((name, i) => (
+                <SelectItem key={i + 1} value={String(i + 1)}>{name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Year input */}
+          <Input
+            type="number"
+            value={year}
+            onChange={e => { const v = parseInt(e.target.value); if (!isNaN(v)) setYear(v) }}
+            className="w-24"
+            min={2000}
+            max={2099}
+          />
+
+          {/* Cards toggle */}
+          <Button
+            variant={includeCards ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setIncludeCards(c => !c)}
+            className="gap-1.5 shrink-0"
+            title={includeCards ? 'Showing card category spending' : 'Card categories hidden (only bill payment visible)'}
+          >
+            <CreditCard className="w-4 h-4" />
+            Cards {includeCards ? 'On' : 'Off'}
+          </Button>
+        </div>
       </div>
 
-      <StatsCards
-        totalIncome={totalIncome}
-        totalExpenses={totalExpenses}
-        netBalance={netBalance}
-        savingsRate={savingsRate}
-      />
+      {loading ? (
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+            {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
+          </div>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <Skeleton className="h-72" />
+            <Skeleton className="h-72" />
+          </div>
+          <Skeleton className="h-48" />
+        </div>
+      ) : (
+        <>
+          <StatsCards
+            totalIncome={totalIncome}
+            totalExpenses={totalExpenses}
+            netBalance={netBalance}
+            savingsRate={savingsRate}
+          />
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <SpendingChart monthlyData={monthlyData} categoryData={categoryData} />
-        <BudgetProgress budgets={budgetProgress} />
-      </div>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <SpendingChart monthlyData={monthlyData} categoryData={categoryData} />
+            <BudgetProgress budgets={budgetProgress} />
+          </div>
 
-      <RecentTransactions transactions={monthTransactions.slice(0, 8)} />
+          <RecentTransactions transactions={monthTx.slice(0, 8)} />
+        </>
+      )}
     </div>
   )
 }

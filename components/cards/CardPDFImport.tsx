@@ -177,6 +177,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
             amount: t.amount, type: t.type, category: t.category,
             description: desc, date: t.date, is_recurring: false, receipt_url: null,
             trip_id: t.trip_id ?? null,
+            card_id: cardId ?? null,
           }),
         })
         if (res.ok) imported++; else failed++

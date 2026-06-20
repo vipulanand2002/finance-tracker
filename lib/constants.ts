@@ -1,3 +1,18 @@
+export const TRIP_EXPENSE_CATEGORIES = [
+  'Food & Dining',
+  'Transportation',
+  'Hotels/Rooms',
+  'Bike/Car Rent',
+  'Fuel',
+  'Entertainment',
+  'Shopping',
+  'Travel',
+  'Health & Medical',
+  'Utilities',
+  'Personal Care',
+  'Other',
+] as const
+
 export const EXPENSE_CATEGORIES = [
   'Food & Dining',
   'Transportation',
@@ -37,6 +52,9 @@ export const CATEGORY_COLORS: Record<string, string> = {
   'Rent & Housing': '#ef4444',
   'Education': '#06b6d4',
   'Travel': '#8b5cf6',
+  'Hotels/Rooms': '#0ea5e9',
+  'Bike/Car Rent': '#f59e0b',
+  'Fuel': '#dc2626',
   'Personal Care': '#f43f5e',
   'Subscriptions': '#64748b',
   'Refund': '#10b981',
