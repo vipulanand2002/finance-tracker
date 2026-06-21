@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { sendPushToUser } from '@/lib/push'
 
 async function getUser() {
   const supabase = await createClient()
@@ -95,19 +96,12 @@ export async function POST(request: Request) {
           .eq('email', p.email.toLowerCase())
           .single()
         if (profile?.id) {
-          fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/push/send`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              authorization: `Bearer ${process.env.CRON_SECRET}`,
-            },
-            body: JSON.stringify({
-              user_id: profile.id,
-              title: `New split: ${split.title}`,
-              body: `${user.email} added you to a split. You owe ₹${p.amount}.`,
-              url: '/splits',
-            }),
-          }).catch(() => {})
+          sendPushToUser(
+            profile.id,
+            `New split: ${split.title}`,
+            `${user.email} added you. You owe ₹${p.amount}.`,
+            '/splits'
+          ).catch(() => {})
         }
       }
     }
