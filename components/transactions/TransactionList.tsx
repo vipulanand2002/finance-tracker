@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { Button } from '@/components/ui/button'
@@ -17,7 +18,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import {
   Plus, Search, MoreHorizontal, Pencil, Trash2, FileUp, AlertTriangle,
-  ChevronDown, ChevronRight, CreditCard,
+  ChevronDown, ChevronRight, CreditCard, Smartphone,
 } from 'lucide-react'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
 import { formatCurrency } from '@/lib/utils'
@@ -35,6 +36,7 @@ type ListItem =
   | { kind: 'card-group'; groupKey: string; cardId: string; cardName: string; month: string; txs: Transaction[]; latestDate: string }
 
 export default function TransactionList() {
+  const router = useRouter()
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [cards, setCards] = useState<CardInfo[]>([])
   const [loading, setLoading] = useState(true)
@@ -156,6 +158,16 @@ export default function TransactionList() {
 
   function openAdd() { setEditing(null); setModalOpen(true) }
   function openEdit(t: Transaction) { setEditing(t); setModalOpen(true) }
+
+  async function pasteSms() {
+    try {
+      const text = await navigator.clipboard.readText()
+      if (!text.trim()) { toast.error('Clipboard is empty'); return }
+      router.push(`/share?text=${encodeURIComponent(text)}`)
+    } catch {
+      toast.error('Could not read clipboard. Allow clipboard access and try again.')
+    }
+  }
 
   function txAmountColor(t: Transaction) {
     if (t.category === 'Card Payment') return 'text-blue-500'
@@ -402,6 +414,9 @@ export default function TransactionList() {
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => setPdfOpen(true)} className="shrink-0">
             <FileUp className="w-4 h-4 mr-1" /> Import PDF
+          </Button>
+          <Button variant="outline" onClick={pasteSms} className="shrink-0" title="Paste UPI SMS from clipboard">
+            <Smartphone className="w-4 h-4 mr-1" /> Paste SMS
           </Button>
           <Button onClick={openAdd} className="shrink-0">
             <Plus className="w-4 h-4 mr-1" /> Add
