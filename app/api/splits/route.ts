@@ -84,11 +84,19 @@ export async function POST(request: Request) {
         }))
       )
 
-      // Fire push notifications for participants who have an account
+      // Fire push notifications + friend chat messages for participants with accounts
       const serviceClient = createServiceClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
         process.env.SUPABASE_SERVICE_ROLE_KEY!
       )
+
+      // Fetch creator's friendships once so we know who to message in chat
+      const { data: friendships } = await serviceClient
+        .from('friendships')
+        .select('friend_id')
+        .eq('user_id', user.id)
+      const friendIds = new Set((friendships ?? []).map((f: { friend_id: string }) => f.friend_id))
+
       for (const p of toNotify as { email: string; amount: number }[]) {
         const { data: profile } = await serviceClient
           .from('profiles')
@@ -102,6 +110,18 @@ export async function POST(request: Request) {
             `${user.email} added you. You owe ₹${p.amount}.`,
             '/splits'
           ).catch(() => {})
+
+          // Auto-post a split card into the friend chat if this participant is a friend
+          if (friendIds.has(profile.id)) {
+            // Fire-and-forget: post a split card into the friend chat
+            void serviceClient.from('messages').insert({
+              sender_id: user.id,
+              receiver_id: profile.id,
+              content: `Split: ${split.title} — your share ₹${p.amount}`,
+              type: 'split',
+              split_id: split.id,
+            })
+          }
         }
       }
     }

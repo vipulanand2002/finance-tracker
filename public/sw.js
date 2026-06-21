@@ -1,4 +1,4 @@
-const CACHE = 'finance-v1';
+const CACHE = 'finance-v2';
 const PRECACHE = ['/', '/dashboard', '/transactions', '/trips', '/splits'];
 
 self.addEventListener('install', (e) => {
@@ -16,8 +16,21 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
+
+  // Handle Web Share Target POST — extract shared text and redirect to /share?text=...
+  if (e.request.method === 'POST' && url.pathname === '/share') {
+    e.respondWith((async () => {
+      const formData = await e.request.formData();
+      const text = formData.get('text') || formData.get('title') || '';
+      const target = new URL('/share', self.location.origin);
+      target.searchParams.set('text', text.toString());
+      return Response.redirect(target.toString(), 303);
+    })());
+    return;
+  }
+
+  if (e.request.method !== 'GET') return;
   // Only cache same-origin page navigations; skip API routes
   if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
   e.respondWith(

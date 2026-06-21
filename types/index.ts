@@ -48,6 +48,32 @@ export interface Friend {
   created_at: string
 }
 
+export interface SplitParticipantSummary {
+  id: string
+  participant_name: string
+  participant_email: string | null
+  amount_owed: number
+  is_paid: boolean
+}
+
+export interface Message {
+  id: string
+  sender_id: string
+  receiver_id: string
+  content: string
+  type: 'text' | 'split'
+  split_id: string | null
+  created_at: string
+  split?: {
+    id: string
+    title: string
+    total_amount: number
+    category: string
+    date: string
+    split_participants?: SplitParticipantSummary[]
+  } | null
+}
+
 export interface TripBudget {
   id: string
   trip_id: string
