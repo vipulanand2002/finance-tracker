@@ -7,6 +7,16 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get('code')
   const next = searchParams.get('next') ?? '/dashboard'
 
+  // Supabase/Google sends ?error=... when OAuth fails — surface the real reason
+  const oauthError = searchParams.get('error')
+  const oauthErrorDesc = searchParams.get('error_description')
+  if (oauthError) {
+    console.error('[auth/callback] OAuth error:', oauthError, oauthErrorDesc)
+    return NextResponse.redirect(
+      `${origin}/login?error=auth-error&desc=${encodeURIComponent(oauthErrorDesc || oauthError)}`
+    )
+  }
+
   if (code) {
     const cookieStore = await cookies()
     const supabase = createServerClient(

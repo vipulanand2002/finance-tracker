@@ -32,12 +32,14 @@ export default function SignupPage() {
     if (password.length < 8) { toast.error('Password must be at least 8 characters'); return }
     setLoading(true)
     const supabase = createClient()
-    const { error } = await supabase.auth.signUp({ email, password })
+    const { data, error } = await supabase.auth.signUp({ email, password })
     if (error) {
-      toast.error(error.message)
+      toast.error(error.message || error.name || 'Signup failed. Please try again.')
       setLoading(false)
+    } else if (data.session) {
+      router.push('/dashboard')
     } else {
-      toast.success('Account created! Check your email to confirm, or sign in now.')
+      toast.success('Account created! Check your email to confirm, then sign in.')
       router.push('/login')
     }
   }

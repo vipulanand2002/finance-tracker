@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Sidebar from './Sidebar'
 import NotificationBell from './NotificationBell'
+import { PushNotificationToggle } from '@/components/PushNotificationToggle'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { Menu } from 'lucide-react'
@@ -50,7 +51,10 @@ export default function DashboardShell({
           {/* Spacer on desktop so bell stays right */}
           <div className="hidden md:block" />
 
-          <NotificationBell />
+          <div className="flex items-center gap-1">
+            <PushNotificationToggle />
+            <NotificationBell />
+          </div>
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 md:p-6">

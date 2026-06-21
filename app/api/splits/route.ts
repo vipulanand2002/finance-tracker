@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 
 async function getUser() {
@@ -81,6 +82,34 @@ export async function POST(request: Request) {
           dismissed: false,
         }))
       )
+
+      // Fire push notifications for participants who have an account
+      const serviceClient = createServiceClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+      )
+      for (const p of toNotify as { email: string; amount: number }[]) {
+        const { data: profile } = await serviceClient
+          .from('profiles')
+          .select('id')
+          .eq('email', p.email.toLowerCase())
+          .single()
+        if (profile?.id) {
+          fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/push/send`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              authorization: `Bearer ${process.env.CRON_SECRET}`,
+            },
+            body: JSON.stringify({
+              user_id: profile.id,
+              title: `New split: ${split.title}`,
+              body: `${user.email} added you to a split. You owe ₹${p.amount}.`,
+              url: '/splits',
+            }),
+          }).catch(() => {})
+        }
+      }
     }
   }
 
