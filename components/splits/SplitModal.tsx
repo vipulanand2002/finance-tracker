@@ -200,22 +200,50 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
 
             <div className="space-y-2">
               {participants.map((p, i) => (
-                <div key={i} className="grid grid-cols-[1fr_1fr_80px_28px] gap-2 items-end">
-                  <div>
-                    {i === 0 && <Label className="text-xs mb-1 block">Name</Label>}
-                    <Input placeholder="Name" value={p.name} onChange={e => updateParticipant(i, 'name', e.target.value)} />
-                  </div>
-                  <div>
-                    {i === 0 && <Label className="text-xs mb-1 block">Email (optional)</Label>}
-                    <Input placeholder="email@example.com" type="email" value={p.email} onChange={e => updateParticipant(i, 'email', e.target.value)} />
-                  </div>
-                  <div>
-                    {i === 0 && <Label className="text-xs mb-1 block">Amount (₹)</Label>}
-                    <Input type="number" min="0" step="0.01" placeholder="0" value={p.amount} onChange={e => updateParticipant(i, 'amount', e.target.value)} />
-                  </div>
-                  <button type="button" onClick={() => removeParticipant(i)} className="text-muted-foreground hover:text-destructive mt-5">
-                    <Trash2 className="w-4 h-4" />
+                <div key={i} className="rounded-lg border p-3 space-y-2 relative">
+                  <button
+                    type="button"
+                    onClick={() => removeParticipant(i)}
+                    className="absolute top-2.5 right-2.5 text-muted-foreground hover:text-destructive"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
                   </button>
+
+                  {/* Name + Amount side by side */}
+                  <div className="grid grid-cols-[1fr_100px] gap-2 pr-7">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Name *</Label>
+                      <Input
+                        placeholder="Person's name"
+                        value={p.name}
+                        onChange={e => updateParticipant(i, 'name', e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Amount (₹)</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0"
+                        value={p.amount}
+                        onChange={e => updateParticipant(i, 'amount', e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Email full width below */}
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">
+                      Email <span className="text-muted-foreground/60">(optional — for notifications)</span>
+                    </Label>
+                    <Input
+                      placeholder="email@example.com"
+                      type="email"
+                      value={p.email}
+                      onChange={e => updateParticipant(i, 'email', e.target.value)}
+                    />
+                  </div>
                 </div>
               ))}
             </div>

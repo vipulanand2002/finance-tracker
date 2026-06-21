@@ -411,23 +411,29 @@ export default function TransactionList() {
           </SelectContent>
         </Select>
 
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setPdfOpen(true)} className="shrink-0">
-            <FileUp className="w-4 h-4 mr-1" /> Import PDF
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" onClick={() => setPdfOpen(true)} className="shrink-0" title="Import PDF">
+            <FileUp className="w-4 h-4 sm:mr-1" />
+            <span className="hidden sm:inline">Import PDF</span>
           </Button>
           <Button variant="outline" onClick={pasteSms} className="shrink-0" title="Paste UPI SMS from clipboard">
-            <Smartphone className="w-4 h-4 mr-1" /> Paste SMS
+            <Smartphone className="w-4 h-4 sm:mr-1" />
+            <span className="hidden sm:inline">Paste SMS</span>
           </Button>
           <Button onClick={openAdd} className="shrink-0">
-            <Plus className="w-4 h-4 mr-1" /> Add
+            <Plus className="w-4 h-4 sm:mr-1" />
+            <span className="hidden sm:inline">Add</span>
+            <span className="sm:hidden">Add</span>
           </Button>
           {transactions.length > 0 && (
             <Button
               variant="outline"
               onClick={handleDeleteAll}
               className="shrink-0 border-destructive/40 text-destructive hover:bg-destructive hover:text-destructive-foreground"
+              title="Delete all transactions"
             >
-              <AlertTriangle className="w-4 h-4 mr-1" /> Delete All
+              <AlertTriangle className="w-4 h-4 sm:mr-1" />
+              <span className="hidden sm:inline">Delete All</span>
             </Button>
           )}
         </div>
