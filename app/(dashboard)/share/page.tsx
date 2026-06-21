@@ -165,7 +165,7 @@ function ShareContent() {
             {/* Category */}
             <div className="space-y-1">
               <Label className="text-xs">Category</Label>
-              <Select value={category} onValueChange={setCategory}>
+              <Select value={category} onValueChange={(v) => setCategory(v ?? '')}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select category" />
                 </SelectTrigger>
