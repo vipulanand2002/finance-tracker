@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { toast } from 'sonner'
-import { format, subMonths, startOfMonth, endOfMonth } from 'date-fns'
+import { format, subMonths, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subWeeks } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -28,6 +28,15 @@ export default function DashboardPage() {
   const [allTx, setAllTx] = useState<Transaction[]>([])
   const [budgets, setBudgets] = useState<Budget[]>([])
   const [loading, setLoading] = useState(true)
+  const [netAccountBalance, setNetAccountBalance] = useState<number | null>(null)
+
+  // Fetch all-time net balance once on mount
+  useEffect(() => {
+    fetch('/api/transactions/totals')
+      .then(r => r.json())
+      .then(d => { if (typeof d.net_balance === 'number') setNetAccountBalance(d.net_balance) })
+      .catch(() => {})
+  }, [])
 
   const fetchData = useCallback(async () => {
     if (isNaN(year) || year < 2000 || year > 2099) return
@@ -35,6 +44,7 @@ export default function DashboardPage() {
     try {
       const selectedDate = new Date(year, month - 1)
       const to = format(endOfMonth(selectedDate), 'yyyy-MM-dd')
+      // Fetch 6 months of data (covers both monthly trend and weekly breakdowns)
       const from = format(subMonths(startOfMonth(selectedDate), 5), 'yyyy-MM-dd')
 
       const [txRes, budgetRes] = await Promise.all([
@@ -53,8 +63,6 @@ export default function DashboardPage() {
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  // Cards OFF: card purchases excluded, Card Payment counts as expense (bill proxy)
-  // Cards ON:  card purchases included by real category, Card Payment excluded (avoid double-count)
   const isCountable = useCallback(
     (t: Transaction) => includeCards ? true : (!t.card_id || t.category === 'Card Payment'),
     [includeCards],
@@ -62,8 +70,8 @@ export default function DashboardPage() {
 
   const isExpense = useCallback(
     (t: Transaction) => includeCards
-      ? t.type === 'expense'                                     // Card Payment is type='income' → drops out
-      : t.type === 'expense' || t.category === 'Card Payment',  // Card Payment treated as expense proxy
+      ? t.type === 'expense'
+      : t.type === 'expense' || t.category === 'Card Payment',
     [includeCards],
   )
 
@@ -80,7 +88,7 @@ export default function DashboardPage() {
     [countableTx, monthPrefix],
   )
 
-  // Stats
+  // Monthly stats
   const totalIncome = useMemo(() => monthTx.filter(isIncome).reduce((s, t) => s + t.amount, 0), [monthTx, isIncome])
   const totalExpenses = useMemo(() => monthTx.filter(isExpense).reduce((s, t) => s + t.amount, 0), [monthTx, isExpense])
   const netBalance = totalIncome - totalExpenses
@@ -101,7 +109,7 @@ export default function DashboardPage() {
       .sort((a, b) => b.amount - a.amount)
   }, [monthTx, totalExpenses, isExpense])
 
-  // 6-month trend ending at selected month
+  // Monthly trend (6 months ending at selected month)
   const monthlyData = useMemo((): MonthlyData[] => {
     const base = new Date(year, month - 1)
     return Array.from({ length: 6 }, (_, i) => {
@@ -115,6 +123,38 @@ export default function DashboardPage() {
       }
     })
   }, [countableTx, month, year, isIncome, isExpense])
+
+  // Weekly trend (last 8 weeks ending at end of selected month)
+  const weeklyData = useMemo((): MonthlyData[] => {
+    const base = endOfMonth(new Date(year, month - 1))
+    return Array.from({ length: 8 }, (_, i) => {
+      const wEnd = endOfWeek(subWeeks(base, 7 - i), { weekStartsOn: 1 })
+      const wStart = startOfWeek(wEnd, { weekStartsOn: 1 })
+      const startStr = format(wStart, 'yyyy-MM-dd')
+      const endStr = format(wEnd, 'yyyy-MM-dd')
+      const txs = countableTx.filter(t => t.date >= startStr && t.date <= endStr)
+      return {
+        month: format(wStart, 'MMM d'),
+        income: txs.filter(isIncome).reduce((s, t) => s + t.amount, 0),
+        expenses: txs.filter(isExpense).reduce((s, t) => s + t.amount, 0),
+      }
+    })
+  }, [countableTx, month, year, isIncome, isExpense])
+
+  // Daily trend (all days in selected month)
+  const dailyData = useMemo((): MonthlyData[] => {
+    const daysInMonth = new Date(year, month, 0).getDate()
+    return Array.from({ length: daysInMonth }, (_, i) => {
+      const day = String(i + 1).padStart(2, '0')
+      const dateStr = `${monthPrefix}-${day}`
+      const txs = countableTx.filter(t => t.date === dateStr)
+      return {
+        month: String(i + 1),
+        income: txs.filter(isIncome).reduce((s, t) => s + t.amount, 0),
+        expenses: txs.filter(isExpense).reduce((s, t) => s + t.amount, 0),
+      }
+    })
+  }, [countableTx, monthPrefix, month, year, isIncome, isExpense])
 
   // Budget progress
   const budgetProgress = useMemo((): BudgetWithSpent[] =>
@@ -138,7 +178,6 @@ export default function DashboardPage() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Month selector */}
           <Select value={String(month)} onValueChange={v => v && setMonth(parseInt(v))}>
             <SelectTrigger className="w-36">
               <SelectValue />
@@ -150,7 +189,6 @@ export default function DashboardPage() {
             </SelectContent>
           </Select>
 
-          {/* Year input */}
           <Input
             type="number"
             value={year}
@@ -160,13 +198,12 @@ export default function DashboardPage() {
             max={2099}
           />
 
-          {/* Cards toggle */}
           <Button
             variant={includeCards ? 'default' : 'outline'}
             size="sm"
             onClick={() => setIncludeCards(c => !c)}
             className="gap-1.5 shrink-0"
-            title={includeCards ? 'Showing card category spending' : 'Card categories hidden (only bill payment visible)'}
+            title={includeCards ? 'Showing card category spending' : 'Card categories hidden'}
           >
             <CreditCard className="w-4 h-4" />
             Cards {includeCards ? 'On' : 'Off'}
@@ -176,6 +213,7 @@ export default function DashboardPage() {
 
       {loading ? (
         <div className="space-y-6">
+          <Skeleton className="h-24 rounded-xl" />
           <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
             {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
           </div>
@@ -192,10 +230,17 @@ export default function DashboardPage() {
             totalExpenses={totalExpenses}
             netBalance={netBalance}
             savingsRate={savingsRate}
+            netAccountBalance={netAccountBalance}
           />
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-            <SpendingChart monthlyData={monthlyData} categoryData={categoryData} />
+            <SpendingChart
+              dailyData={dailyData}
+              weeklyData={weeklyData}
+              monthlyData={monthlyData}
+              categoryData={categoryData}
+              selectedMonth={MONTH_NAMES[month - 1]}
+            />
             <BudgetProgress budgets={budgetProgress} />
           </div>
 
