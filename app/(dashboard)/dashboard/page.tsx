@@ -29,12 +29,25 @@ export default function DashboardPage() {
   const [budgets, setBudgets] = useState<Budget[]>([])
   const [loading, setLoading] = useState(true)
   const [netAccountBalance, setNetAccountBalance] = useState<number | null>(null)
+  // Active expense category names — deleted categories map to "Unknown" in charts
+  const [activeExpenseCats, setActiveExpenseCats] = useState<Set<string>>(new Set())
 
-  // Fetch all-time net balance once on mount
+  // Fetch all-time balance + active categories once on mount
   useEffect(() => {
     fetch('/api/transactions/totals')
       .then(r => r.json())
       .then(d => { if (typeof d.net_balance === 'number') setNetAccountBalance(d.net_balance) })
+      .catch(() => {})
+
+    fetch('/api/categories')
+      .then(r => r.json())
+      .then(d => {
+        if (Array.isArray(d) && d.length > 0) {
+          setActiveExpenseCats(new Set(
+            d.filter((c: { list_type: string }) => c.list_type === 'expense').map((c: { name: string }) => c.name)
+          ))
+        }
+      })
       .catch(() => {})
   }, [])
 
@@ -94,11 +107,15 @@ export default function DashboardPage() {
   const netBalance = totalIncome - totalExpenses
   const savingsRate = totalIncome > 0 ? (netBalance / totalIncome) * 100 : 0
 
-  // Category breakdown for selected month
+  // Category breakdown for selected month — deleted categories show as "Unknown"
   const categoryData = useMemo((): CategoryTotal[] => {
     const catMap: Record<string, number> = {}
     monthTx.filter(isExpense).forEach(t => {
-      catMap[t.category] = (catMap[t.category] ?? 0) + t.amount
+      // Map to "Unknown" if the category was deleted (not in active set)
+      const cat = activeExpenseCats.size > 0 && !activeExpenseCats.has(t.category)
+        ? 'Unknown'
+        : t.category
+      catMap[cat] = (catMap[cat] ?? 0) + t.amount
     })
     return Object.entries(catMap)
       .map(([category, amount]) => ({
@@ -107,7 +124,7 @@ export default function DashboardPage() {
         percentage: totalExpenses > 0 ? (amount / totalExpenses) * 100 : 0,
       }))
       .sort((a, b) => b.amount - a.amount)
-  }, [monthTx, totalExpenses, isExpense])
+  }, [monthTx, totalExpenses, isExpense, activeExpenseCats])
 
   // Monthly trend (6 months ending at selected month)
   const monthlyData = useMemo((): MonthlyData[] => {

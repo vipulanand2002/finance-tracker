@@ -1,16 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { toast } from 'sonner'
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
-} from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Lock, Plus, Trash2, Loader2 } from 'lucide-react'
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
+import { Plus, Trash2, Loader2, AlertTriangle } from 'lucide-react'
 
 interface UserCategory {
   id: string
@@ -18,25 +14,129 @@ interface UserCategory {
   list_type: 'expense' | 'income'
 }
 
+// ── Module-level component so React never remounts it on parent re-renders ──
+// (Defining components inside another component causes React to see a new type
+//  every render, unmounting the DOM node and losing input focus.)
+interface TabContentProps {
+  type: 'expense' | 'income'
+  categories: UserCategory[]
+  adding: boolean
+  confirmId: string | null
+  deleting: string | null
+  onAdd: (name: string) => Promise<void>
+  onRequestDelete: (id: string) => void
+  onConfirmDelete: (id: string) => void
+  onCancelDelete: () => void
+}
+
+function CategoryTabContent({
+  type,
+  categories,
+  adding,
+  confirmId,
+  deleting,
+  onAdd,
+  onRequestDelete,
+  onConfirmDelete,
+  onCancelDelete,
+}: TabContentProps) {
+  const [value, setValue] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  async function handleAdd() {
+    const name = value.trim()
+    if (!name) return
+    setValue('')
+    await onAdd(name)
+    // Restore focus after state update
+    requestAnimationFrame(() => inputRef.current?.focus())
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Add new */}
+      <div className="flex gap-2">
+        <Input
+          ref={inputRef}
+          placeholder={`New ${type} category…`}
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAdd() } }}
+        />
+        <Button size="sm" onClick={handleAdd} disabled={!value.trim() || adding} className="shrink-0">
+          {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+        </Button>
+      </div>
+
+      {/* Category list */}
+      {categories.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-4">
+          No {type} categories. Add one above.
+        </p>
+      ) : (
+        <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+          {categories.map(c => (
+            <div
+              key={c.id}
+              className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-muted/50 hover:bg-muted transition-colors"
+            >
+              <span className="text-sm flex-1 truncate">{c.name}</span>
+
+              {confirmId === c.id ? (
+                // Inline confirmation row
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <AlertTriangle className="w-3.5 h-3.5 text-destructive" />
+                  <span className="text-xs text-destructive font-medium">Delete?</span>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="h-6 px-2 text-xs"
+                    disabled={deleting === c.id}
+                    onClick={() => onConfirmDelete(c.id)}
+                  >
+                    {deleting === c.id ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Yes'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-xs"
+                    onClick={onCancelDelete}
+                  >
+                    No
+                  </Button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => onRequestDelete(c.id)}
+                  className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded shrink-0"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Main dialog ──
 interface Props {
   open: boolean
   onClose: () => void
   onChanged?: () => void
 }
 
-const STATIC_EXPENSE = new Set(EXPENSE_CATEGORIES as unknown as string[])
-const STATIC_INCOME = new Set(INCOME_CATEGORIES as unknown as string[])
-
 export function ManageCategories({ open, onClose, onChanged }: Props) {
   const [categories, setCategories] = useState<UserCategory[]>([])
   const [loading, setLoading] = useState(false)
-  const [newExpense, setNewExpense] = useState('')
-  const [newIncome, setNewIncome] = useState('')
-  const [adding, setAdding] = useState<'expense' | 'income' | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [confirmId, setConfirmId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!open) return
+    if (!open) { setConfirmId(null); return }
     setLoading(true)
     fetch('/api/categories')
       .then(r => r.json())
@@ -45,10 +145,8 @@ export function ManageCategories({ open, onClose, onChanged }: Props) {
       .finally(() => setLoading(false))
   }, [open])
 
-  async function addCategory(listType: 'expense' | 'income') {
-    const name = listType === 'expense' ? newExpense.trim() : newIncome.trim()
-    if (!name) return
-    setAdding(listType)
+  const addCategory = useCallback(async (name: string, listType: 'expense' | 'income') => {
+    setAdding(true)
     const res = await fetch('/api/categories', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -57,16 +155,17 @@ export function ManageCategories({ open, onClose, onChanged }: Props) {
     const d = await res.json()
     if (res.ok) {
       setCategories(prev => [...prev, d])
-      if (listType === 'expense') setNewExpense('')
-      else setNewIncome('')
       onChanged?.()
     } else {
       toast.error(d.error ?? 'Failed to add category')
     }
-    setAdding(null)
-  }
+    setAdding(false)
+  }, [onChanged])
 
-  async function deleteCategory(id: string) {
+  const addExpense = useCallback((name: string) => addCategory(name, 'expense'), [addCategory])
+  const addIncome = useCallback((name: string) => addCategory(name, 'income'), [addCategory])
+
+  async function confirmDelete(id: string) {
     setDeleting(id)
     const res = await fetch(`/api/categories?id=${id}`, { method: 'DELETE' })
     if (res.ok) {
@@ -76,84 +175,11 @@ export function ManageCategories({ open, onClose, onChanged }: Props) {
       toast.error('Failed to delete category')
     }
     setDeleting(null)
+    setConfirmId(null)
   }
 
-  function CategoryTab({
-    type,
-    staticSet,
-    newValue,
-    setNewValue,
-  }: {
-    type: 'expense' | 'income'
-    staticSet: Set<string>
-    newValue: string
-    setNewValue: (v: string) => void
-  }) {
-    const custom = categories.filter(c => c.list_type === type)
-    const allStatic = [...staticSet]
-
-    return (
-      <div className="space-y-4">
-        {/* Add new */}
-        <div className="flex gap-2">
-          <Input
-            placeholder={`New ${type} category…`}
-            value={newValue}
-            onChange={e => setNewValue(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && addCategory(type)}
-            className="flex-1"
-          />
-          <Button
-            size="sm"
-            onClick={() => addCategory(type)}
-            disabled={!newValue.trim() || adding === type}
-          >
-            {adding === type ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-          </Button>
-        </div>
-
-        {/* Custom categories (deletable) */}
-        {custom.length > 0 && (
-          <div>
-            <p className="text-xs text-muted-foreground mb-2 font-medium">Custom</p>
-            <div className="flex flex-wrap gap-2">
-              {custom.map(c => (
-                <div
-                  key={c.id}
-                  className="flex items-center gap-1.5 bg-primary/10 text-primary rounded-full pl-3 pr-1.5 py-1"
-                >
-                  <span className="text-sm">{c.name}</span>
-                  <button
-                    onClick={() => deleteCategory(c.id)}
-                    disabled={deleting === c.id}
-                    className="rounded-full hover:bg-primary/20 p-0.5 transition-colors"
-                  >
-                    {deleting === c.id
-                      ? <Loader2 className="w-3 h-3 animate-spin" />
-                      : <Trash2 className="w-3 h-3" />}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Static categories (read-only) */}
-        <div>
-          <p className="text-xs text-muted-foreground mb-2 font-medium flex items-center gap-1">
-            <Lock className="w-3 h-3" /> Built-in (cannot be deleted)
-          </p>
-          <div className="flex flex-wrap gap-1.5">
-            {allStatic.map(name => (
-              <Badge key={name} variant="secondary" className="text-xs font-normal">
-                {name}
-              </Badge>
-            ))}
-          </div>
-        </div>
-      </div>
-    )
-  }
+  const expenseCategories = categories.filter(c => c.list_type === 'expense')
+  const incomeCategories = categories.filter(c => c.list_type === 'income')
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
@@ -163,29 +189,45 @@ export function ManageCategories({ open, onClose, onChanged }: Props) {
         </DialogHeader>
 
         {loading ? (
-          <div className="flex items-center justify-center py-8">
+          <div className="flex items-center justify-center py-10">
             <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
           </div>
         ) : (
           <Tabs defaultValue="expense" className="mt-2">
             <TabsList className="w-full">
-              <TabsTrigger value="expense" className="flex-1">Expense</TabsTrigger>
-              <TabsTrigger value="income" className="flex-1">Income</TabsTrigger>
+              <TabsTrigger value="expense" className="flex-1">
+                Expense ({expenseCategories.length})
+              </TabsTrigger>
+              <TabsTrigger value="income" className="flex-1">
+                Income ({incomeCategories.length})
+              </TabsTrigger>
             </TabsList>
+
             <TabsContent value="expense" className="mt-4">
-              <CategoryTab
+              <CategoryTabContent
                 type="expense"
-                staticSet={STATIC_EXPENSE}
-                newValue={newExpense}
-                setNewValue={setNewExpense}
+                categories={expenseCategories}
+                adding={adding}
+                confirmId={confirmId}
+                deleting={deleting}
+                onAdd={addExpense}
+                onRequestDelete={id => { setConfirmId(id) }}
+                onConfirmDelete={confirmDelete}
+                onCancelDelete={() => setConfirmId(null)}
               />
             </TabsContent>
+
             <TabsContent value="income" className="mt-4">
-              <CategoryTab
+              <CategoryTabContent
                 type="income"
-                staticSet={STATIC_INCOME}
-                newValue={newIncome}
-                setNewValue={setNewIncome}
+                categories={incomeCategories}
+                adding={adding}
+                confirmId={confirmId}
+                deleting={deleting}
+                onAdd={addIncome}
+                onRequestDelete={id => { setConfirmId(id) }}
+                onConfirmDelete={confirmDelete}
+                onCancelDelete={() => setConfirmId(null)}
               />
             </TabsContent>
           </Tabs>

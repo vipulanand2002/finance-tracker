@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
 
 async function getUser() {
   const supabase = await createClient()
@@ -7,7 +8,8 @@ async function getUser() {
   return { supabase, user }
 }
 
-// GET /api/categories — list all custom categories for this user
+// GET /api/categories — list active categories for this user.
+// On first call (empty table), seeds all default expense + income categories.
 export async function GET() {
   const { supabase, user } = await getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -19,10 +21,29 @@ export async function GET() {
     .order('created_at', { ascending: true })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data ?? [])
+
+  // First use: seed all defaults so every category is editable/deletable
+  if (!data || data.length === 0) {
+    const defaults = [
+      ...(EXPENSE_CATEGORIES as unknown as string[]).map(name => ({
+        user_id: user.id, name, list_type: 'expense',
+      })),
+      ...(INCOME_CATEGORIES as unknown as string[]).map(name => ({
+        user_id: user.id, name, list_type: 'income',
+      })),
+    ]
+    const { data: seeded, error: seedError } = await supabase
+      .from('user_categories')
+      .insert(defaults)
+      .select('id, name, list_type, created_at')
+    if (seedError) return NextResponse.json({ error: seedError.message }, { status: 500 })
+    return NextResponse.json(seeded ?? [])
+  }
+
+  return NextResponse.json(data)
 }
 
-// POST /api/categories — add a custom category
+// POST /api/categories — add a new category
 export async function POST(request: Request) {
   const { supabase, user } = await getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -40,15 +61,13 @@ export async function POST(request: Request) {
     .single()
 
   if (error) {
-    if (error.code === '23505') {
-      return NextResponse.json({ error: 'Category already exists' }, { status: 409 })
-    }
+    if (error.code === '23505') return NextResponse.json({ error: 'Category already exists' }, { status: 409 })
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
   return NextResponse.json(data, { status: 201 })
 }
 
-// DELETE /api/categories?id=xxx — remove a custom category
+// DELETE /api/categories?id=xxx — permanently remove a category
 export async function DELETE(request: Request) {
   const { supabase, user } = await getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

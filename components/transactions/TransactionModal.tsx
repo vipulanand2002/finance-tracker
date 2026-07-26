@@ -40,20 +40,21 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
   const [saving, setSaving] = useState(false)
   const [scanningReceipt, setScanningReceipt] = useState(false)
   const [trips, setTrips] = useState<Trip[]>([])
-  const [customExpenseCategories, setCustomExpenseCategories] = useState<string[]>([])
-  const [customIncomeCategories, setCustomIncomeCategories] = useState<string[]>([])
+  // API returns full list (seeded with defaults on first call); static arrays are loading fallbacks
+  const [expenseCategories, setExpenseCategories] = useState<string[]>([...EXPENSE_CATEGORIES])
+  const [incomeCategories, setIncomeCategories] = useState<string[]>([...INCOME_CATEGORIES])
   const [manageCatOpen, setManageCatOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const loadCustomCategories = () => {
+  const loadCategories = () => {
     fetch('/api/categories')
       .then(r => r.json())
       .then(data => {
-        if (!Array.isArray(data)) return
-        setCustomExpenseCategories(
+        if (!Array.isArray(data) || data.length === 0) return
+        setExpenseCategories(
           data.filter((c: { list_type: string }) => c.list_type === 'expense').map((c: { name: string }) => c.name)
         )
-        setCustomIncomeCategories(
+        setIncomeCategories(
           data.filter((c: { list_type: string }) => c.list_type === 'income').map((c: { name: string }) => c.name)
         )
       })
@@ -63,7 +64,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
   useEffect(() => {
     if (!open) return
     fetch('/api/trips').then(r => r.json()).then(d => setTrips(Array.isArray(d) ? d : [])).catch(() => {})
-    loadCustomCategories()
+    loadCategories()
   }, [open])
 
   useEffect(() => {
@@ -83,13 +84,6 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       setForm({ ...emptyForm, trip_id: defaultTripId ?? null })
     }
   }, [transaction, open, defaultTripId])
-
-  // Merge static + custom, deduplicated
-  const staticExpense = EXPENSE_CATEGORIES as unknown as string[]
-  const staticIncome = INCOME_CATEGORIES as unknown as string[]
-
-  const expenseCategories = [...staticExpense, ...customExpenseCategories.filter(c => !staticExpense.includes(c))]
-  const incomeCategories = [...staticIncome, ...customIncomeCategories.filter(c => !staticIncome.includes(c))]
 
   const categories = form.type === 'income'
     ? incomeCategories
@@ -352,7 +346,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       <ManageCategories
         open={manageCatOpen}
         onClose={() => setManageCatOpen(false)}
-        onChanged={loadCustomCategories}
+        onChanged={loadCategories}
       />
     </>
   )
