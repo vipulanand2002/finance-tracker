@@ -16,7 +16,6 @@ import { ThemeToggle } from '@/components/ui/theme-toggle'
 
 // ── Mock data ──────────────────────────────────────────────────────────────────
 
-const MONTHS = ['Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul']
 const trendData = [
   { month: 'Feb', income: 75000, expenses: 48200 },
   { month: 'Mar', income: 75000, expenses: 53800 },
@@ -35,24 +34,27 @@ const categoryData = [
   { category: 'Utilities', amount: 1000 },
 ]
 
-const COLORS: Record<string, string> = {
+const CAT_COLORS: Record<string, string> = {
   'Food & Dining': '#f97316',
   'Rent & Housing': '#ef4444',
   'Transportation': '#3b82f6',
   'Entertainment': '#a855f7',
   'Shopping': '#ec4899',
   'Utilities': '#eab308',
+  'Salary': '#22c55e',
+  'Freelance': '#10b981',
+  'Subscriptions': '#64748b',
 }
 
 const transactions = [
-  { id: 1, description: 'Swiggy — Dinner', category: 'Food & Dining', amount: -480, date: 'Jul 25', type: 'expense', icon: '🍔' },
-  { id: 2, description: 'Salary — Infosys', category: 'Salary', amount: 85000, date: 'Jul 24', type: 'income', icon: '💼' },
-  { id: 3, description: 'Uber — Office', category: 'Transportation', amount: -220, date: 'Jul 24', type: 'expense', icon: '🚗' },
-  { id: 4, description: 'Netflix', category: 'Subscriptions', amount: -649, date: 'Jul 23', type: 'expense', icon: '🎬' },
-  { id: 5, description: 'Zepto — Groceries', category: 'Shopping', amount: -1850, date: 'Jul 22', type: 'expense', icon: '🛒' },
-  { id: 6, description: 'Freelance — UI Project', category: 'Freelance', amount: 15000, date: 'Jul 20', type: 'income', icon: '💻' },
-  { id: 7, description: 'Electricity Bill', category: 'Utilities', amount: -1200, date: 'Jul 19', type: 'expense', icon: '⚡' },
-  { id: 8, description: 'PVR Cinemas', category: 'Entertainment', amount: -700, date: 'Jul 18', type: 'expense', icon: '🎥' },
+  { id: 1, description: 'Swiggy — Dinner', category: 'Food & Dining', amount: -480, date: 'Jul 25' },
+  { id: 2, description: 'Salary — Infosys', category: 'Salary', amount: 85000, date: 'Jul 24' },
+  { id: 3, description: 'Uber — Office', category: 'Transportation', amount: -220, date: 'Jul 24' },
+  { id: 4, description: 'Netflix', category: 'Subscriptions', amount: -649, date: 'Jul 23' },
+  { id: 5, description: 'Zepto — Groceries', category: 'Shopping', amount: -1850, date: 'Jul 22' },
+  { id: 6, description: 'Freelance — UI Project', category: 'Freelance', amount: 15000, date: 'Jul 20' },
+  { id: 7, description: 'Electricity Bill', category: 'Utilities', amount: -1200, date: 'Jul 19' },
+  { id: 8, description: 'PVR Cinemas', category: 'Entertainment', amount: -700, date: 'Jul 18' },
 ]
 
 const splits = [
@@ -92,14 +94,14 @@ const chatMessages = [
     time: '10:30 AM',
   },
   { id: 3, from: 'me', text: 'Paid! Looking forward to it 🎉', time: '10:32 AM' },
-  { id: 4, from: 'them', name: 'Rahul', text: 'Awesome! Let\'s meet at airport at 6am 🛫', time: '10:33 AM' },
+  { id: 4, from: 'them', name: 'Rahul', text: "Awesome! Let's meet at airport at 6am 🛫", time: '10:33 AM' },
 ]
 
 const aiChat = [
   { role: 'user', text: 'What did I spend the most on this month?' },
-  { role: 'ai', text: "Your biggest expense this month is **Rent & Housing** at ₹18,000 (42.5% of total spend), followed by **Food & Dining** at ₹12,400 (29.3%). You're on track — both are within last month's ranges." },
+  { role: 'ai', text: "Your biggest expense is **Rent & Housing** at ₹18,000 (42.5%), followed by **Food & Dining** at ₹12,400 (29.3%). Both are within last month's ranges." },
   { role: 'user', text: 'How can I save more?' },
-  { role: 'ai', text: 'Based on your patterns, you could save ~₹3,500/month by: cutting **Entertainment** to ₹2,000 (you\'ve averaged ₹4,100), consolidating streaming subscriptions (you have 3 active), and reducing weekend Swiggy orders from 8 to 4.' },
+  { role: 'ai', text: 'You could save ~₹3,500/month by cutting **Entertainment** to ₹2,000 and consolidating 3 streaming subscriptions into 1.' },
 ]
 
 const budgets = [
@@ -112,8 +114,8 @@ const budgets = [
 const features = [
   { icon: BarChart3, title: 'Smart Dashboard', desc: 'All-time balance, monthly KPIs, and spending trends in one view.', color: 'text-blue-500' },
   { icon: TrendingUp, title: 'Daily / Weekly / Monthly Charts', desc: 'Switch between granular daily views and 6-month trend lines.', color: 'text-emerald-500' },
-  { icon: Users, title: 'Expense Splits', desc: 'Split bills with friends, track who\'s paid, send reminders.', color: 'text-violet-500' },
-  { icon: MessageCircle, title: 'Friends Chat', desc: 'Real-time chat with friends — split cards appear automatically in chat.', color: 'text-pink-500' },
+  { icon: Users, title: 'Expense Splits', desc: "Split bills with friends, track who's paid, send reminders.", color: 'text-violet-500' },
+  { icon: MessageCircle, title: 'Friends Chat', desc: 'Real-time chat with emoji — split cards auto-appear in conversation.', color: 'text-pink-500' },
   { icon: Bot, title: 'AI Assistant', desc: 'Ask anything about your finances. Groq-powered spending insights.', color: 'text-amber-500' },
   { icon: Camera, title: 'Receipt Scanner', desc: 'Photograph a receipt and AI auto-fills amount, category, and date.', color: 'text-cyan-500' },
   { icon: Plane, title: 'Trip Budgets', desc: 'Group travel with shared expense tracking and private spends.', color: 'text-orange-500' },
@@ -130,18 +132,22 @@ function fmt(n: number) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
 }
 
+function fmtK(n: number) {
+  return n >= 1000 ? `₹${(n / 1000).toFixed(0)}k` : `₹${n}`
+}
+
 function StatCard({ title, value, sub, icon: Icon, iconClass, positive }: {
   title: string; value: string; sub: string
   icon: React.ElementType; iconClass: string; positive?: boolean
 }) {
   return (
-    <div className="rounded-xl border bg-card p-4">
+    <div className="rounded-xl border bg-card p-3 sm:p-4">
       <div className="flex items-center justify-between mb-2">
-        <p className="text-xs font-medium text-muted-foreground">{title}</p>
-        <Icon className={`w-4 h-4 ${iconClass}`} />
+        <p className="text-xs font-medium text-muted-foreground leading-tight">{title}</p>
+        <Icon className={`w-4 h-4 shrink-0 ml-1 ${iconClass}`} />
       </div>
-      <p className={`text-xl font-bold ${positive === false ? 'text-red-600' : positive === true ? 'text-emerald-600' : ''}`}>{value}</p>
-      <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>
+      <p className={`text-base sm:text-xl font-bold truncate ${positive === false ? 'text-red-600' : positive === true ? 'text-emerald-600' : ''}`}>{value}</p>
+      <p className="text-xs text-muted-foreground mt-0.5 truncate">{sub}</p>
     </div>
   )
 }
@@ -152,13 +158,13 @@ function DemoSection() {
   return (
     <div className="space-y-4">
       {/* Net balance */}
-      <div className="rounded-xl border-2 border-emerald-500/40 bg-card p-5 flex items-center justify-between">
-        <div>
+      <div className="rounded-xl border-2 border-emerald-500/40 bg-card p-4 sm:p-5 flex items-center justify-between gap-4">
+        <div className="min-w-0">
           <p className="text-sm font-medium text-muted-foreground">Net Account Balance</p>
-          <p className="text-3xl font-bold text-emerald-600 mt-1">{fmt(124500)}</p>
+          <p className="text-2xl sm:text-3xl font-bold text-emerald-600 mt-1">{fmt(124500)}</p>
           <p className="text-xs text-muted-foreground mt-1">All-time surplus — you&apos;re ahead!</p>
         </div>
-        <Scale className="w-10 h-10 opacity-20 text-emerald-500" />
+        <Scale className="w-8 h-8 sm:w-10 sm:h-10 opacity-20 text-emerald-500 shrink-0" />
       </div>
 
       {/* 4 KPI cards */}
@@ -171,7 +177,6 @@ function DemoSection() {
 
       {/* Charts */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Area chart */}
         <div className="rounded-xl border bg-card p-4">
           <p className="text-sm font-semibold mb-3">6-Month Trend</p>
           <ResponsiveContainer width="100%" height={180}>
@@ -188,7 +193,7 @@ function DemoSection() {
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="currentColor" strokeOpacity={0.1} />
               <XAxis dataKey="month" tick={{ fontSize: 11 }} interval={0} />
-              <YAxis tickFormatter={v => `₹${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 10 }} width={44} />
+              <YAxis tickFormatter={v => `₹${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 10 }} width={40} />
               <Tooltip formatter={(v) => fmt(Number(v))} />
               <Area type="monotone" dataKey="income" name="Income" stroke="#22c55e" fill="url(#demoIncome)" strokeWidth={2} />
               <Area type="monotone" dataKey="expenses" name="Expenses" stroke="#ef4444" fill="url(#demoExpense)" strokeWidth={2} />
@@ -196,19 +201,18 @@ function DemoSection() {
           </ResponsiveContainer>
         </div>
 
-        {/* Pie chart */}
         <div className="rounded-xl border bg-card p-4">
           <p className="text-sm font-semibold mb-3">By Category — July</p>
           <ResponsiveContainer width="100%" height={180}>
             <PieChart>
               <Pie data={categoryData} dataKey="amount" nameKey="category"
-                cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={2}>
+                cx="50%" cy="50%" innerRadius={40} outerRadius={65} paddingAngle={2}>
                 {categoryData.map(({ category }) => (
-                  <Cell key={category} fill={COLORS[category] ?? '#94a3b8'} />
+                  <Cell key={category} fill={CAT_COLORS[category] ?? '#94a3b8'} />
                 ))}
               </Pie>
               <Tooltip formatter={(v) => fmt(Number(v))} />
-              <Legend formatter={v => <span className="text-xs">{v}</span>} />
+              <Legend formatter={v => <span className="text-[11px]">{v}</span>} />
             </PieChart>
           </ResponsiveContainer>
         </div>
@@ -223,10 +227,10 @@ function DemoSection() {
             const over = b.spent > b.limit
             return (
               <div key={b.category}>
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="font-medium">{b.category}</span>
-                  <span className={over ? 'text-red-500 font-medium' : 'text-muted-foreground'}>
-                    {fmt(b.spent)} / {fmt(b.limit)} {over && '⚠️'}
+                <div className="flex justify-between text-xs mb-1 gap-2">
+                  <span className="font-medium truncate">{b.category}</span>
+                  <span className={`shrink-0 ${over ? 'text-red-500 font-medium' : 'text-muted-foreground'}`}>
+                    {fmtK(b.spent)} / {fmtK(b.limit)} {over && '⚠️'}
                   </span>
                 </div>
                 <div className="h-1.5 rounded-full bg-muted overflow-hidden">
@@ -252,18 +256,27 @@ function TransactionsSection() {
         <span className="text-xs text-muted-foreground">July 2026</span>
       </div>
       <div className="divide-y">
-        {transactions.map(t => (
-          <div key={t.id} className="flex items-center gap-3 px-4 py-3">
-            <span className="text-xl w-8 text-center shrink-0">{t.icon}</span>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">{t.description}</p>
-              <p className="text-xs text-muted-foreground">{t.category} · {t.date}</p>
+        {transactions.map(t => {
+          const color = CAT_COLORS[t.category] ?? '#94a3b8'
+          return (
+            <div key={t.id} className="flex items-center gap-3 px-4 py-3">
+              {/* Category colour dot */}
+              <div
+                className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
+                style={{ background: color + '22' }}
+              >
+                <div className="w-2.5 h-2.5 rounded-full" style={{ background: color }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{t.description}</p>
+                <p className="text-xs text-muted-foreground truncate">{t.category} · {t.date}</p>
+              </div>
+              <p className={`text-sm font-semibold shrink-0 ${t.amount > 0 ? 'text-emerald-600' : ''}`}>
+                {t.amount > 0 ? '+' : ''}{fmt(t.amount)}
+              </p>
             </div>
-            <p className={`text-sm font-semibold shrink-0 ${t.amount > 0 ? 'text-emerald-600' : 'text-foreground'}`}>
-              {t.amount > 0 ? '+' : ''}{fmt(t.amount)}
-            </p>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
@@ -276,12 +289,12 @@ function SplitsSection() {
         const paidCount = s.participants.filter(p => p.paid).length
         return (
           <div key={s.id} className="rounded-xl border bg-card p-4">
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <p className="font-semibold text-sm">{s.title}</p>
+            <div className="flex items-start justify-between mb-3 gap-3">
+              <div className="min-w-0">
+                <p className="font-semibold text-sm truncate">{s.title}</p>
                 <p className="text-xs text-muted-foreground">{s.category} · {s.date}</p>
               </div>
-              <div className="text-right">
+              <div className="text-right shrink-0">
                 <p className="font-bold text-base">{fmt(s.totalAmount)}</p>
                 <p className="text-xs text-muted-foreground">{paidCount}/{s.participants.length} paid</p>
               </div>
@@ -289,11 +302,11 @@ function SplitsSection() {
             <div className="flex gap-2 flex-wrap">
               {s.participants.map(p => (
                 <div key={p.name} className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs border ${p.paid ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950 dark:border-emerald-800' : 'bg-muted border-transparent'}`}>
-                  <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-bold text-primary">
+                  <div className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-[9px] font-bold text-primary">
                     {p.initials}
                   </div>
                   <span className="font-medium">{p.name}</span>
-                  <span className="text-muted-foreground">{fmt(p.amount)}</span>
+                  <span className="text-muted-foreground hidden xs:inline">{fmt(p.amount)}</span>
                   {p.paid
                     ? <Check className="w-3 h-3 text-emerald-500" />
                     : <span className="text-amber-500 font-bold">·</span>}
@@ -309,25 +322,19 @@ function SplitsSection() {
 
 function ChatSection() {
   return (
-    <div className="rounded-xl border bg-card overflow-hidden flex flex-col" style={{ height: '480px' }}>
-      {/* Header */}
-      <div className="px-4 py-3 border-b flex items-center gap-3">
-        <div className="w-8 h-8 rounded-full bg-violet-500/20 flex items-center justify-center text-xs font-bold text-violet-600">RK</div>
-        <div>
-          <p className="text-sm font-semibold">Rahul Kumar</p>
-          <p className="text-xs text-muted-foreground">friend</p>
-        </div>
+    <div className="rounded-xl border bg-card overflow-hidden flex flex-col" style={{ height: '460px' }}>
+      <div className="px-4 py-3 border-b flex items-center gap-3 shrink-0">
+        <div className="w-8 h-8 rounded-full bg-violet-500/20 flex items-center justify-center text-xs font-bold text-violet-600 shrink-0">RK</div>
+        <p className="text-sm font-semibold">Rahul Kumar</p>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+      <div className="flex-1 overflow-y-auto px-3 sm:px-4 py-3 space-y-3">
         {chatMessages.map(m => (
           <div key={m.id} className={`flex ${m.from === 'me' ? 'justify-end' : 'justify-start'}`}>
             {m.type === 'split' && m.split ? (
-              // Split card
-              <div className="rounded-xl border bg-muted/50 p-3 max-w-xs w-full">
+              <div className="rounded-xl border bg-muted/50 p-3 max-w-[85%] w-full sm:max-w-xs">
                 <div className="flex items-center gap-2 mb-2">
-                  <Receipt className="w-4 h-4 text-violet-500" />
+                  <Receipt className="w-4 h-4 text-violet-500 shrink-0" />
                   <p className="text-xs font-semibold text-violet-600">Split Created</p>
                 </div>
                 <p className="text-sm font-semibold">{m.split.title}</p>
@@ -339,7 +346,7 @@ function ChatSection() {
                 <p className="text-[10px] text-muted-foreground mt-1">{m.time}</p>
               </div>
             ) : (
-              <div className={`rounded-2xl px-3 py-2 max-w-[70%] ${m.from === 'me' ? 'bg-primary text-primary-foreground rounded-br-sm' : 'bg-muted rounded-bl-sm'}`}>
+              <div className={`rounded-2xl px-3 py-2 max-w-[80%] ${m.from === 'me' ? 'bg-primary text-primary-foreground rounded-br-sm' : 'bg-muted rounded-bl-sm'}`}>
                 <p className="text-sm">{(m as { text?: string }).text}</p>
                 <p className={`text-[10px] mt-1 ${m.from === 'me' ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>{m.time}</p>
               </div>
@@ -348,10 +355,9 @@ function ChatSection() {
         ))}
       </div>
 
-      {/* Input (static) */}
-      <div className="px-4 py-3 border-t flex gap-2">
-        <div className="flex-1 rounded-full bg-muted px-3 py-1.5 text-sm text-muted-foreground">Type a message…</div>
-        <button className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
+      <div className="px-3 sm:px-4 py-3 border-t flex gap-2 shrink-0">
+        <div className="flex-1 rounded-full bg-muted px-3 py-2 text-sm text-muted-foreground">Type a message…</div>
+        <button className="w-8 h-8 rounded-full bg-primary flex items-center justify-center shrink-0">
           <ArrowRight className="w-4 h-4 text-primary-foreground" />
         </button>
       </div>
@@ -362,14 +368,14 @@ function ChatSection() {
 function AISection() {
   return (
     <div className="rounded-xl border bg-card overflow-hidden">
-      <div className="px-4 py-3 border-b flex items-center gap-2">
-        <Sparkles className="w-4 h-4 text-amber-500" />
+      <div className="px-4 py-3 border-b flex items-center gap-2 flex-wrap">
+        <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
         <p className="font-semibold text-sm">AI Financial Assistant</p>
-        <span className="ml-auto text-xs rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400 px-2 py-0.5">Powered by Groq</span>
+        <span className="ml-auto text-xs rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400 px-2 py-0.5 shrink-0">Powered by Groq</span>
       </div>
-      <div className="px-4 py-4 space-y-4">
+      <div className="px-3 sm:px-4 py-4 space-y-4">
         {aiChat.map((m, i) => (
-          <div key={i} className={`flex gap-3 ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
+          <div key={i} className={`flex gap-2 sm:gap-3 ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
             <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${m.role === 'ai' ? 'bg-amber-100 dark:bg-amber-950' : 'bg-primary/20'}`}>
               {m.role === 'ai' ? <Bot className="w-4 h-4 text-amber-600" /> : <span className="text-xs font-bold text-primary">Y</span>}
             </div>
@@ -380,14 +386,13 @@ function AISection() {
             </div>
           </div>
         ))}
-        {/* Prompt input (static) */}
         <div className="flex gap-2 mt-2">
           <input
             readOnly
             placeholder="Ask anything about your finances…"
-            className="flex-1 rounded-lg border bg-background px-3 py-2 text-sm text-muted-foreground cursor-default"
+            className="flex-1 rounded-lg border bg-background px-3 py-2 text-sm text-muted-foreground cursor-default min-w-0"
           />
-          <button className="rounded-lg bg-primary px-3 py-2">
+          <button className="rounded-lg bg-primary px-3 py-2 shrink-0">
             <ArrowRight className="w-4 h-4 text-primary-foreground" />
           </button>
         </div>
@@ -415,18 +420,18 @@ export default function DemoPage() {
     <div className="min-h-screen bg-background text-foreground">
       {/* ── Sticky header ── */}
       <header className="sticky top-0 z-50 border-b bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="max-w-6xl mx-auto px-4 h-14 flex items-center gap-4">
-          <div className="flex items-center gap-2 font-bold text-lg">
-            <span className="text-2xl">💰</span>
-            <span>Finance Tracker</span>
+        <div className="max-w-6xl mx-auto px-4 h-14 flex items-center gap-3">
+          <div className="flex items-center gap-1.5 font-bold text-base sm:text-lg shrink-0">
+            <span className="text-xl sm:text-2xl">💰</span>
+            <span className="hidden xs:inline">Finance Tracker</span>
           </div>
 
-          <nav className="hidden md:flex items-center gap-5 ml-6 text-sm text-muted-foreground">
+          <nav className="hidden md:flex items-center gap-5 ml-4 text-sm text-muted-foreground">
             <a href="#features" className="hover:text-foreground transition-colors">Features</a>
             <a href="#preview" className="hover:text-foreground transition-colors">Preview</a>
           </nav>
 
-          <div className="ml-auto flex items-center gap-3">
+          <div className="ml-auto flex items-center gap-2 sm:gap-3">
             <ThemeToggle />
             <Link
               href="/login"
@@ -436,7 +441,7 @@ export default function DemoPage() {
             </Link>
             <Link
               href="/signup"
-              className="rounded-lg bg-primary text-primary-foreground text-sm px-3.5 py-1.5 font-medium hover:bg-primary/90 transition-colors"
+              className="rounded-lg bg-primary text-primary-foreground text-xs sm:text-sm px-3 sm:px-3.5 py-1.5 font-medium hover:bg-primary/90 transition-colors whitespace-nowrap"
             >
               Get Started
             </Link>
@@ -444,40 +449,39 @@ export default function DemoPage() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-12 space-y-20">
+      <main className="max-w-6xl mx-auto px-4 py-8 sm:py-12 space-y-12 sm:space-y-20">
 
         {/* ── Hero ── */}
-        <section className="text-center space-y-6 py-8">
-          <div className="inline-flex items-center gap-2 rounded-full border px-3.5 py-1 text-xs text-muted-foreground mb-2">
+        <section className="text-center space-y-5 sm:space-y-6 py-4 sm:py-8">
+          <div className="inline-flex items-center gap-2 rounded-full border px-3.5 py-1 text-xs text-muted-foreground">
             <Sparkles className="w-3.5 h-3.5 text-amber-500" />
             Free · No credit card required
           </div>
-          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.1]">
+          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.15]">
             Your money,{' '}
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-blue-500">
               fully in control
             </span>
           </h1>
-          <p className="max-w-xl mx-auto text-muted-foreground text-lg leading-relaxed">
+          <p className="max-w-xl mx-auto text-muted-foreground text-base sm:text-lg leading-relaxed">
             Track expenses, split bills with friends, scan receipts, and get AI-powered insights — all in one app built for India.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <Link
               href="/signup"
-              className="inline-flex items-center gap-2 rounded-xl bg-primary text-primary-foreground px-6 py-3 font-semibold hover:bg-primary/90 transition-colors"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-primary-foreground px-6 py-3 font-semibold hover:bg-primary/90 transition-colors"
             >
               Start for free <ArrowRight className="w-4 h-4" />
             </Link>
             <a
               href="#preview"
-              className="inline-flex items-center gap-2 rounded-xl border px-6 py-3 font-semibold hover:bg-muted transition-colors"
+              className="inline-flex items-center justify-center gap-2 rounded-xl border px-6 py-3 font-semibold hover:bg-muted transition-colors"
             >
               Explore demo below
             </a>
           </div>
 
-          {/* Mini stat strip */}
-          <div className="flex flex-wrap justify-center gap-6 pt-4 text-sm text-muted-foreground">
+          <div className="flex flex-wrap justify-center gap-5 sm:gap-8 pt-2 text-sm text-muted-foreground">
             {[
               { val: '12 features', label: 'built in' },
               { val: 'Groq AI', label: 'powered insights' },
@@ -493,48 +497,47 @@ export default function DemoPage() {
         </section>
 
         {/* ── Features grid ── */}
-        <section id="features" className="space-y-8">
+        <section id="features" className="space-y-6 sm:space-y-8">
           <div className="text-center">
-            <h2 className="text-2xl sm:text-3xl font-bold">Everything you need to manage money</h2>
-            <p className="text-muted-foreground mt-2">12 powerful features, zero fluff.</p>
+            <h2 className="text-xl sm:text-3xl font-bold">Everything you need to manage money</h2>
+            <p className="text-muted-foreground mt-2 text-sm sm:text-base">12 powerful features, zero fluff.</p>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
             {features.map(({ icon: Icon, title, desc, color }) => (
-              <div key={title} className="rounded-xl border bg-card p-4 hover:border-primary/30 transition-colors">
-                <Icon className={`w-6 h-6 mb-3 ${color}`} />
-                <p className="text-sm font-semibold mb-1">{title}</p>
-                <p className="text-xs text-muted-foreground leading-relaxed">{desc}</p>
+              <div key={title} className="rounded-xl border bg-card p-3 sm:p-4 hover:border-primary/30 transition-colors">
+                <Icon className={`w-5 h-5 sm:w-6 sm:h-6 mb-2 sm:mb-3 ${color}`} />
+                <p className="text-xs sm:text-sm font-semibold mb-1">{title}</p>
+                <p className="text-[11px] sm:text-xs text-muted-foreground leading-relaxed">{desc}</p>
               </div>
             ))}
           </div>
         </section>
 
         {/* ── Live preview ── */}
-        <section id="preview" className="space-y-6">
+        <section id="preview" className="space-y-5 sm:space-y-6">
           <div className="text-center">
-            <h2 className="text-2xl sm:text-3xl font-bold">See it in action</h2>
-            <p className="text-muted-foreground mt-2">Interactive preview with realistic data.</p>
+            <h2 className="text-xl sm:text-3xl font-bold">See it in action</h2>
+            <p className="text-muted-foreground mt-2 text-sm sm:text-base">Interactive preview with realistic data.</p>
           </div>
 
-          {/* Tab bar */}
-          <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+          {/* Tab bar — scrollable on mobile, show icon+label */}
+          <div className="flex gap-1.5 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
             {TABS.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 onClick={() => setActiveTab(id)}
-                className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3.5 py-2 text-sm font-medium transition-colors shrink-0 ${
+                className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 sm:px-3.5 py-2 text-xs sm:text-sm font-medium transition-colors shrink-0 ${
                   activeTab === id
                     ? 'bg-primary text-primary-foreground'
                     : 'border hover:bg-muted text-muted-foreground'
                 }`}
               >
-                <Icon className="w-4 h-4" />
+                <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 {label}
               </button>
             ))}
           </div>
 
-          {/* Tab content */}
           <div>
             {activeTab === 'dashboard' && <DemoSection />}
             {activeTab === 'transactions' && <TransactionsSection />}
@@ -545,21 +548,21 @@ export default function DemoPage() {
         </section>
 
         {/* ── CTA ── */}
-        <section className="rounded-2xl bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border px-8 py-12 text-center space-y-5">
-          <h2 className="text-2xl sm:text-3xl font-bold">Ready to take control?</h2>
-          <p className="text-muted-foreground max-w-sm mx-auto">
+        <section className="rounded-2xl bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border px-5 py-10 sm:px-8 sm:py-12 text-center space-y-4 sm:space-y-5">
+          <h2 className="text-xl sm:text-3xl font-bold">Ready to take control?</h2>
+          <p className="text-muted-foreground max-w-sm mx-auto text-sm sm:text-base">
             Join and start tracking your finances smarter. Free, private, and built for India.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <Link
               href="/signup"
-              className="inline-flex items-center gap-2 rounded-xl bg-primary text-primary-foreground px-8 py-3 font-semibold hover:bg-primary/90 transition-colors"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-primary-foreground px-6 sm:px-8 py-3 font-semibold hover:bg-primary/90 transition-colors"
             >
               Create free account <ArrowRight className="w-4 h-4" />
             </Link>
             <Link
               href="/login"
-              className="inline-flex items-center gap-2 rounded-xl border px-8 py-3 font-semibold hover:bg-muted transition-colors"
+              className="inline-flex items-center justify-center gap-2 rounded-xl border px-6 sm:px-8 py-3 font-semibold hover:bg-muted transition-colors"
             >
               Sign in
             </Link>
@@ -570,11 +573,11 @@ export default function DemoPage() {
       </main>
 
       <footer className="border-t mt-8">
-        <div className="max-w-6xl mx-auto px-4 py-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground">
+        <div className="max-w-6xl mx-auto px-4 py-5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground">
           <div className="flex items-center gap-1.5">
             <span>💰</span>
             <span className="font-semibold text-foreground">Finance Tracker</span>
-            <span>— built with Next.js, Supabase & Groq</span>
+            <span>— built with Next.js, Supabase &amp; Groq</span>
           </div>
           <div className="flex items-center gap-4">
             <Link href="/login" className="hover:text-foreground transition-colors">Sign In</Link>
