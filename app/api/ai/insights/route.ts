@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { analyzeSpending, getBudgetRecommendations } from '@/lib/gemini'
+import { analyzeSpending, getBudgetRecommendations } from '@/lib/groq'
 import { NextResponse } from 'next/server'
 
 export async function GET(request: Request) {

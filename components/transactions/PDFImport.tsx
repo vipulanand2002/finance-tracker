@@ -141,7 +141,7 @@ export default function PDFImport({ open, onClose, onImported, preloadedTransact
             {parsing ? (
               <>
                 <Loader2 className="w-10 h-10 animate-spin text-primary" />
-                <p className="text-sm text-muted-foreground">Gemini AI is reading your statement…</p>
+                <p className="text-sm text-muted-foreground">AI is reading your statement…</p>
               </>
             ) : (
               <>

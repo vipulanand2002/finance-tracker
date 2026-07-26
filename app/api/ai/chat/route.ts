@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { chatWithFinanceAI } from '@/lib/gemini'
+import { chatWithFinanceAI } from '@/lib/groq'
 import { NextResponse } from 'next/server'
 
 export async function POST(request: Request) {

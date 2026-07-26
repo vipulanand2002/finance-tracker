@@ -114,7 +114,7 @@ const features = [
   { icon: TrendingUp, title: 'Daily / Weekly / Monthly Charts', desc: 'Switch between granular daily views and 6-month trend lines.', color: 'text-emerald-500' },
   { icon: Users, title: 'Expense Splits', desc: 'Split bills with friends, track who\'s paid, send reminders.', color: 'text-violet-500' },
   { icon: MessageCircle, title: 'Friends Chat', desc: 'Real-time chat with friends — split cards appear automatically in chat.', color: 'text-pink-500' },
-  { icon: Bot, title: 'AI Assistant', desc: 'Ask anything about your finances. Gemini-powered spending insights.', color: 'text-amber-500' },
+  { icon: Bot, title: 'AI Assistant', desc: 'Ask anything about your finances. Groq-powered spending insights.', color: 'text-amber-500' },
   { icon: Camera, title: 'Receipt Scanner', desc: 'Photograph a receipt and AI auto-fills amount, category, and date.', color: 'text-cyan-500' },
   { icon: Plane, title: 'Trip Budgets', desc: 'Group travel with shared expense tracking and private spends.', color: 'text-orange-500' },
   { icon: Bell, title: 'Push Notifications', desc: 'Instant alerts when friends add you to a split or mark you paid.', color: 'text-red-500' },
@@ -315,7 +315,7 @@ function ChatSection() {
         <div className="w-8 h-8 rounded-full bg-violet-500/20 flex items-center justify-center text-xs font-bold text-violet-600">RK</div>
         <div>
           <p className="text-sm font-semibold">Rahul Kumar</p>
-          <p className="text-xs text-emerald-500">online</p>
+          <p className="text-xs text-muted-foreground">friend</p>
         </div>
       </div>
 
@@ -365,7 +365,7 @@ function AISection() {
       <div className="px-4 py-3 border-b flex items-center gap-2">
         <Sparkles className="w-4 h-4 text-amber-500" />
         <p className="font-semibold text-sm">AI Financial Assistant</p>
-        <span className="ml-auto text-xs rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400 px-2 py-0.5">Powered by Gemini</span>
+        <span className="ml-auto text-xs rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400 px-2 py-0.5">Powered by Groq</span>
       </div>
       <div className="px-4 py-4 space-y-4">
         {aiChat.map((m, i) => (
@@ -480,7 +480,7 @@ export default function DemoPage() {
           <div className="flex flex-wrap justify-center gap-6 pt-4 text-sm text-muted-foreground">
             {[
               { val: '12 features', label: 'built in' },
-              { val: 'Gemini AI', label: 'powered insights' },
+              { val: 'Groq AI', label: 'powered insights' },
               { val: 'Real-time', label: 'split notifications' },
               { val: 'PWA', label: 'works offline' },
             ].map(({ val, label }) => (
@@ -574,7 +574,7 @@ export default function DemoPage() {
           <div className="flex items-center gap-1.5">
             <span>💰</span>
             <span className="font-semibold text-foreground">Finance Tracker</span>
-            <span>— built with Next.js, Supabase & Gemini</span>
+            <span>— built with Next.js, Supabase & Groq</span>
           </div>
           <div className="flex items-center gap-4">
             <Link href="/login" className="hover:text-foreground transition-colors">Sign In</Link>
