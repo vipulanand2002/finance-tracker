@@ -81,7 +81,12 @@ ${chunkText}`
 
   const raw = completion.choices[0]?.message?.content ?? ''
   const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim()
-  return JSON.parse(clean)
+  try {
+    const parsed = JSON.parse(clean)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
 }
 
 // Normalize CR/+ credit markers so the AI reliably identifies them as income.
@@ -169,7 +174,11 @@ export async function POST(request: Request) {
         { status: 400, headers: { 'X-Password-Error': 'needed' } }
       )
     }
-    throw err
+    console.error('PDF extraction error:', err)
+    return NextResponse.json(
+      { error: 'Could not read the PDF. It may be corrupted, scanned-only, or in an unsupported format.' },
+      { status: 500 }
+    )
   }
 
   try {

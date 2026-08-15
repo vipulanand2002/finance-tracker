@@ -59,7 +59,13 @@ export default function PDFImport({ open, onClose, onImported, preloadedTransact
       const fd = new FormData()
       fd.append('pdf', file)
       const res = await fetch('/api/pdf', { method: 'POST', body: fd })
-      const data = await res.json()
+
+      let data: any
+      try {
+        data = await res.json()
+      } catch {
+        throw new Error('Server error — the PDF may be too large or took too long to process. Try a smaller statement.')
+      }
 
       if (data.error) throw new Error(data.error)
       if (!Array.isArray(data.transactions) || data.transactions.length === 0) {

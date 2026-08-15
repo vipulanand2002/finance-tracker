@@ -105,7 +105,14 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
       if (cardId) fd.append('is_card', 'true')
 
       const res = await fetch('/api/pdf', { method: 'POST', body: fd })
-      const data = await res.json()
+
+      let data: any
+      try {
+        data = await res.json()
+      } catch {
+        toast.error('Server error — the PDF may be too large or took too long to process. Try a smaller statement.')
+        return
+      }
 
       if (data.error) {
         const pwdHeader = res.headers.get('X-Password-Error')
