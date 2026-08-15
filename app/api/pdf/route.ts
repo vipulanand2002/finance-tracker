@@ -3,6 +3,63 @@ import Groq from 'groq-sdk'
 import { NextResponse } from 'next/server'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
 
+// pdfjs-dist v6 references browser DOM geometry APIs at module-load time.
+// Vercel/Node.js doesn't have them — provide minimal stubs so the module loads.
+if (typeof globalThis.DOMMatrix === 'undefined') {
+  (globalThis as any).DOMMatrix = class DOMMatrix {
+    a = 1; b = 0; c = 0; d = 1; e = 0; f = 0
+    m11 = 1; m12 = 0; m13 = 0; m14 = 0
+    m21 = 0; m22 = 1; m23 = 0; m24 = 0
+    m31 = 0; m32 = 0; m33 = 1; m34 = 0
+    m41 = 0; m42 = 0; m43 = 0; m44 = 1
+    is2D = true; isIdentity = true
+    constructor(init?: string | number[]) {
+      if (Array.isArray(init) && init.length >= 6) {
+        this.a = this.m11 = init[0]; this.b = this.m12 = init[1]
+        this.c = this.m21 = init[2]; this.d = this.m22 = init[3]
+        this.e = this.m41 = init[4]; this.f = this.m42 = init[5]
+      }
+    }
+    static fromMatrix() { return new (globalThis as any).DOMMatrix() }
+    static fromFloat32Array(a: Float32Array) { return new (globalThis as any).DOMMatrix(Array.from(a)) }
+    static fromFloat64Array(a: Float64Array) { return new (globalThis as any).DOMMatrix(Array.from(a)) }
+    multiply(o: any) {
+      const m = new (globalThis as any).DOMMatrix()
+      m.a = this.a * o.a + this.c * o.b; m.b = this.b * o.a + this.d * o.b
+      m.c = this.a * o.c + this.c * o.d; m.d = this.b * o.c + this.d * o.d
+      m.e = this.a * o.e + this.c * o.f + this.e; m.f = this.b * o.e + this.d * o.f + this.f
+      return m
+    }
+    translate(tx = 0, ty = 0) {
+      return new (globalThis as any).DOMMatrix([this.a, this.b, this.c, this.d, this.e + this.a * tx + this.c * ty, this.f + this.b * tx + this.d * ty])
+    }
+    scale(sx = 1, sy = sx) {
+      return new (globalThis as any).DOMMatrix([this.a * sx, this.b * sx, this.c * sy, this.d * sy, this.e, this.f])
+    }
+    inverse() { return new (globalThis as any).DOMMatrix() }
+    transformPoint(p: any) { return { x: this.a * p.x + this.c * p.y + this.e, y: this.b * p.x + this.d * p.y + this.f, z: 0, w: 1 } }
+    toFloat32Array() { return new Float32Array([this.a, this.b, this.c, this.d, this.e, this.f]) }
+    toFloat64Array() { return new Float64Array([this.a, this.b, this.c, this.d, this.e, this.f]) }
+  }
+}
+if (typeof globalThis.DOMPoint === 'undefined') {
+  (globalThis as any).DOMPoint = class DOMPoint {
+    x: number; y: number; z: number; w: number
+    constructor(x = 0, y = 0, z = 0, w = 1) { this.x = x; this.y = y; this.z = z; this.w = w }
+    static fromPoint(p: any) { return new (globalThis as any).DOMPoint(p.x, p.y, p.z ?? 0, p.w ?? 1) }
+    matrixTransform(m: any) { return m.transformPoint(this) }
+  }
+}
+if (typeof globalThis.DOMRect === 'undefined') {
+  (globalThis as any).DOMRect = class DOMRect {
+    x: number; y: number; width: number; height: number
+    constructor(x = 0, y = 0, w = 0, h = 0) { this.x = x; this.y = y; this.width = w; this.height = h }
+    get top() { return this.y } get left() { return this.x }
+    get bottom() { return this.y + this.height } get right() { return this.x + this.width }
+    static fromRect(r: any) { return new (globalThis as any).DOMRect(r.x, r.y, r.width, r.height) }
+  }
+}
+
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY! })
 
 // llama-3.3-70b-versatile has 12K TPM free tier (8b-instant is only 6K)
@@ -41,8 +98,8 @@ async function extractPdfText(buffer: ArrayBuffer, password?: string): Promise<s
       throw new Error('PDF_NEED_PASSWORD')
     }
 
-    console.error('PDF load error:', errName, err?.message, err?.stack)
-    throw Object.assign(new Error(`PDF_RAW:${errName}:${errMsg}`), { originalErr: err })
+    console.error('PDF load error:', errName, err?.message)
+    throw err
   }
 
   const lines: string[] = []
@@ -186,10 +243,9 @@ export async function POST(request: Request) {
         { status: 400, headers: { 'X-Password-Error': 'needed' } }
       )
     }
-    const detail = (err?.message ?? '').startsWith('PDF_RAW:') ? err.message.slice(8) : (err?.message ?? 'unknown')
     console.error('PDF extraction error:', err?.name, err?.message)
     return NextResponse.json(
-      { error: `Could not read the PDF. Debug: ${detail}` },
+      { error: 'Could not read the PDF. It may be corrupted, scanned-only, or in an unsupported format.' },
       { status: 500 }
     )
   }
