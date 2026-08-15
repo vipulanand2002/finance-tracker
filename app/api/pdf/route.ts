@@ -14,9 +14,8 @@ const MAX_CHUNK_CHARS = 32000
 
 async function extractPdfText(buffer: ArrayBuffer, password?: string): Promise<string> {
   // pdf-parse bundles its own pdfjs v2 which is Node.js-native (no browser APIs).
-  // Import the internal module directly to skip pdf-parse's test-file loading at init.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const pdfParse = require('pdf-parse/lib/pdf-parse') as (src: any, options?: any) => Promise<any>
+  const pdfParse = require('pdf-parse') as (src: any, options?: any) => Promise<any>
 
   const lines: string[] = []
 
