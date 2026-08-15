@@ -23,20 +23,32 @@ interface Props {
   defaultTripId?: string | null
 }
 
-const emptyForm = {
-  amount: '',
-  type: 'expense' as 'income' | 'expense',
-  category: '',
-  description: '',
-  date: format(new Date(), 'yyyy-MM-dd'),
-  is_recurring: false,
-  is_discrete: false,
-  receipt_url: '',
-  trip_id: null as string | null,
+const DATE_KEY = 'lastTransactionDate'
+
+function getDefaultDate() {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem(DATE_KEY)
+    if (saved) return saved
+  }
+  return format(new Date(), 'yyyy-MM-dd')
+}
+
+function buildEmptyForm(tripId?: string | null) {
+  return {
+    amount: '',
+    type: 'expense' as 'income' | 'expense',
+    category: '',
+    description: '',
+    date: getDefaultDate(),
+    is_recurring: false,
+    is_discrete: false,
+    receipt_url: '',
+    trip_id: tripId ?? null,
+  }
 }
 
 export default function TransactionModal({ open, onClose, onSaved, transaction, defaultTripId }: Props) {
-  const [form, setForm] = useState(emptyForm)
+  const [form, setForm] = useState(() => buildEmptyForm(defaultTripId))
   const [saving, setSaving] = useState(false)
   const [scanningReceipt, setScanningReceipt] = useState(false)
   const [trips, setTrips] = useState<Trip[]>([])
@@ -81,7 +93,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         trip_id: transaction.trip_id ?? null,
       })
     } else {
-      setForm({ ...emptyForm, trip_id: defaultTripId ?? null })
+      setForm(buildEmptyForm(defaultTripId))
     }
   }, [transaction, open, defaultTripId])
 
@@ -140,6 +152,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       const method = transaction ? 'PUT' : 'POST'
       const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       if (!res.ok) throw new Error('Failed to save')
+      localStorage.setItem(DATE_KEY, form.date)
       toast.success(transaction ? 'Transaction updated' : 'Transaction added')
       onSaved()
       onClose()

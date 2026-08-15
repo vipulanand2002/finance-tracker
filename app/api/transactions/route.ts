@@ -25,8 +25,8 @@ export async function GET(request: Request) {
   // For trip-scoped queries: RLS handles visibility (own txs + trip participant txs)
   // For all other queries: restrict to own transactions only
   let query = tripId
-    ? supabase.from('transactions').select('*').eq('trip_id', tripId).order('date', { ascending: false })
-    : supabase.from('transactions').select('*').eq('user_id', user.id).order('date', { ascending: false })
+    ? supabase.from('transactions').select('*').eq('trip_id', tripId).order('created_at', { ascending: false })
+    : supabase.from('transactions').select('*').eq('user_id', user.id).order('created_at', { ascending: false })
 
   if (!tripId) {
     if (type && type !== 'all') query = query.eq('type', type)
