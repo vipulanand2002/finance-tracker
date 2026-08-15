@@ -25,11 +25,23 @@ async function extractPdfText(buffer: ArrayBuffer, password?: string): Promise<s
   try {
     doc = await loadingTask.promise
   } catch (err: any) {
-    if (err?.name === 'PasswordException') {
-      const code = err?.code
-      if (code === 1) throw new Error('PDF_NEED_PASSWORD')
+    const errName = err?.name ?? ''
+    const errMsg = (err?.message ?? '').toLowerCase()
+    const code = err?.code
+
+    // Primary: pdfjs PasswordException (code 1 = need, code 2 = wrong)
+    if (errName === 'PasswordException') {
       if (code === 2) throw new Error('PDF_WRONG_PASSWORD')
+      throw new Error('PDF_NEED_PASSWORD')
     }
+    // Fallback: some pdfjs builds / edge runtimes surface password errors with a
+    // different class name — catch them by message string as a safety net
+    if (errMsg.includes('password')) {
+      if (password) throw new Error('PDF_WRONG_PASSWORD')
+      throw new Error('PDF_NEED_PASSWORD')
+    }
+
+    console.error('PDF load error:', errName, err?.message)
     throw err
   }
 
