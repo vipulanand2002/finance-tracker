@@ -16,8 +16,6 @@ import { formatCurrency } from '@/lib/utils'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
 import type { Trip } from '@/types'
 
-const ALL_CATEGORIES = [...new Set([...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES])] as string[]
-
 interface EditableTx {
   date: string
   description: string
@@ -53,6 +51,8 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
   const [filename, setFilename] = useState('')
   const [parseError, setParseError] = useState<string | null>(null)
   const [trips, setTrips] = useState<Trip[]>([])
+  const [expenseCategories, setExpenseCategories] = useState<string[]>([...EXPENSE_CATEGORIES])
+  const [incomeCategories, setIncomeCategories] = useState<string[]>([...INCOME_CATEGORIES])
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -60,9 +60,16 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
   }, [open, savedPassword])
 
   useEffect(() => {
-    if (open) {
-      fetch('/api/trips').then(r => r.json()).then(d => setTrips(Array.isArray(d) ? d : [])).catch(() => {})
-    }
+    if (!open) return
+    fetch('/api/trips').then(r => r.json()).then(d => setTrips(Array.isArray(d) ? d : [])).catch(() => {})
+    fetch('/api/categories')
+      .then(r => r.json())
+      .then((data: { list_type: string; name: string }[]) => {
+        if (!Array.isArray(data) || data.length === 0) return
+        setExpenseCategories(data.filter(c => c.list_type === 'expense').map(c => c.name))
+        setIncomeCategories(data.filter(c => c.list_type === 'income').map(c => c.name))
+      })
+      .catch(() => {})
   }, [open])
 
   function reset() {
@@ -403,7 +410,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                                         <SelectValue />
                                       </SelectTrigger>
                                       <SelectContent>
-                                        {ALL_CATEGORIES.map(c => (
+                                        {(tx.type === 'income' ? incomeCategories : expenseCategories).map(c => (
                                           <SelectItem key={c} value={c}>{c}</SelectItem>
                                         ))}
                                       </SelectContent>
