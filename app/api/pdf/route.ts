@@ -41,8 +41,8 @@ async function extractPdfText(buffer: ArrayBuffer, password?: string): Promise<s
       throw new Error('PDF_NEED_PASSWORD')
     }
 
-    console.error('PDF load error:', errName, err?.message)
-    throw err
+    console.error('PDF load error:', errName, err?.message, err?.stack)
+    throw Object.assign(new Error(`PDF_RAW:${errName}:${errMsg}`), { originalErr: err })
   }
 
   const lines: string[] = []
@@ -186,9 +186,10 @@ export async function POST(request: Request) {
         { status: 400, headers: { 'X-Password-Error': 'needed' } }
       )
     }
-    console.error('PDF extraction error:', err)
+    const detail = (err?.message ?? '').startsWith('PDF_RAW:') ? err.message.slice(8) : (err?.message ?? 'unknown')
+    console.error('PDF extraction error:', err?.name, err?.message)
     return NextResponse.json(
-      { error: 'Could not read the PDF. It may be corrupted, scanned-only, or in an unsupported format.' },
+      { error: `Could not read the PDF. Debug: ${detail}` },
       { status: 500 }
     )
   }
