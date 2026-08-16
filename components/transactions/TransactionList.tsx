@@ -29,7 +29,7 @@ import type { Transaction } from '@/types'
 
 const ALL_CATEGORIES = [...new Set([...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES])]
 
-interface CardInfo { id: string; name: string }
+interface CardInfo { id: string; card_name: string }
 
 type ListItem =
   | { kind: 'tx'; tx: Transaction }
@@ -85,7 +85,7 @@ export default function TransactionList() {
   // Clear selection when filters change
   useEffect(() => { setSelectedIds(new Set()) }, [typeFilter, categoryFilter, search])
 
-  const cardNameMap = new Map(cards.map(c => [c.id, c.name]))
+  const cardNameMap = new Map(cards.map(c => [c.id, c.card_name]))
 
   const listItems = useCallback((): ListItem[] => {
     const groupMap = new Map<string, { cardId: string; month: string; txs: Transaction[] }>()
@@ -237,10 +237,9 @@ export default function TransactionList() {
           <TableCell>
             <div className="flex items-center gap-2 flex-wrap">
               <CreditCard className="w-4 h-4 text-primary shrink-0" />
-              <span className="text-sm font-medium">{item.cardName}</span>
-              <span className="text-sm text-muted-foreground">·</span>
               <span className="text-sm text-muted-foreground">{monthLabel}</span>
               <Badge variant="secondary" className="text-xs">{item.txs.length} txns</Badge>
+              <span className="text-sm font-medium">{item.cardName}</span>
               {payment > 0 && (
                 <Badge className="text-xs bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800">
                   Paid {formatCurrency(payment)}
