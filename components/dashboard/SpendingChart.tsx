@@ -128,7 +128,11 @@ export default function SpendingChart({ dailyData, weeklyData, monthlyData, cate
                       outerRadius={85}
                       paddingAngle={2}
                       style={{ cursor: onCategorySelect ? 'pointer' : 'default' }}
-                      onClick={(data: any) => onCategorySelect?.(selectedCategory === data.category ? null : data.category)}
+                      onClick={(data) => {
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        const cat = (data as any).category as string | undefined
+                        if (cat) onCategorySelect?.(selectedCategory === cat ? null : cat)
+                      }}
                     >
                       {categoryData.map(({ category }) => (
                         <Cell
