@@ -30,6 +30,7 @@ export default function DashboardPage() {
   const [budgets, setBudgets] = useState<Budget[]>([])
   const [loading, setLoading] = useState(true)
   const [netAccountBalance, setNetAccountBalance] = useState<number | null>(null)
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   // Active expense category names — deleted categories map to "Unknown" in charts
   const [activeExpenseCats, setActiveExpenseCats] = useState<Set<string>>(new Set())
 
@@ -75,7 +76,7 @@ export default function DashboardPage() {
     }
   }, [month, year])
 
-  useEffect(() => { fetchData() }, [fetchData])
+  useEffect(() => { fetchData(); setSelectedCategory(null) }, [fetchData])
 
   // Cards ON: include everything — card expenses count as expenses, Card Payment counts as income
   // Cards OFF: exclude card imports and Card Payment entries entirely
@@ -260,11 +261,18 @@ export default function DashboardPage() {
               monthlyData={monthlyData}
               categoryData={categoryData}
               selectedMonth={MONTH_NAMES[month - 1]}
+              selectedCategory={selectedCategory}
+              onCategorySelect={setSelectedCategory}
             />
             <BudgetProgress budgets={budgetProgress} />
           </div>
 
-          <RecentTransactions transactions={monthTx.slice(0, 8)} />
+          <RecentTransactions
+            transactions={selectedCategory
+              ? monthTx.filter(t => t.category === selectedCategory)
+              : monthTx.slice(0, 8)}
+            categoryFilter={selectedCategory}
+          />
         </>
       )}
     </div>

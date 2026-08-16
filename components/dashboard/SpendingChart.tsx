@@ -27,13 +27,15 @@ interface Props {
   monthlyData: MonthlyData[]
   categoryData: CategoryTotal[]
   selectedMonth: string
+  selectedCategory?: string | null
+  onCategorySelect?: (category: string | null) => void
 }
 
 type Period = 'day' | 'week' | 'month'
 
 function currency(v: number) { return formatCurrency(v, true) }
 
-export default function SpendingChart({ dailyData, weeklyData, monthlyData, categoryData, selectedMonth }: Props) {
+export default function SpendingChart({ dailyData, weeklyData, monthlyData, categoryData, selectedMonth, selectedCategory, onCategorySelect }: Props) {
   const [period, setPeriod] = useState<Period>('month')
 
   const trendData = period === 'day' ? dailyData : period === 'week' ? weeklyData : monthlyData
@@ -108,29 +110,39 @@ export default function SpendingChart({ dailyData, weeklyData, monthlyData, cate
                 No expense data for {selectedMonth}
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height={240}>
-                <PieChart>
-                  <Pie
-                    data={categoryData}
-                    dataKey="amount"
-                    nameKey="category"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={55}
-                    outerRadius={85}
-                    paddingAngle={2}
-                  >
-                    {categoryData.map(({ category }) => (
-                      <Cell
-                        key={category}
-                        fill={CATEGORY_COLORS[category] ?? '#94a3b8'}
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(v) => currency(Number(v) || 0)} />
-                  <Legend formatter={v => <span className="text-xs">{v}</span>} />
-                </PieChart>
-              </ResponsiveContainer>
+              <>
+                {selectedCategory && (
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Showing <span className="font-medium text-foreground">{selectedCategory}</span> · click slice again to clear
+                  </p>
+                )}
+                <ResponsiveContainer width="100%" height={240}>
+                  <PieChart>
+                    <Pie
+                      data={categoryData}
+                      dataKey="amount"
+                      nameKey="category"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={55}
+                      outerRadius={85}
+                      paddingAngle={2}
+                      style={{ cursor: onCategorySelect ? 'pointer' : 'default' }}
+                      onClick={(data) => onCategorySelect?.(selectedCategory === data.category ? null : data.category)}
+                    >
+                      {categoryData.map(({ category }) => (
+                        <Cell
+                          key={category}
+                          fill={CATEGORY_COLORS[category] ?? '#94a3b8'}
+                          opacity={!selectedCategory || selectedCategory === category ? 1 : 0.35}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(v) => currency(Number(v) || 0)} />
+                    <Legend formatter={v => <span className="text-xs">{v}</span>} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </>
             )}
           </TabsContent>
         </Tabs>

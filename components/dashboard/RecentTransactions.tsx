@@ -4,11 +4,18 @@ import { format } from 'date-fns'
 import { formatCurrency } from '@/lib/utils'
 import type { Transaction } from '@/types'
 
-export default function RecentTransactions({ transactions }: { transactions: Transaction[] }) {
+interface Props {
+  transactions: Transaction[]
+  categoryFilter?: string | null
+}
+
+export default function RecentTransactions({ transactions, categoryFilter }: Props) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Recent Transactions</CardTitle>
+        <CardTitle>
+          {categoryFilter ? `${categoryFilter} Transactions` : 'Recent Transactions'}
+        </CardTitle>
       </CardHeader>
       <CardContent>
         {transactions.length === 0 ? (
