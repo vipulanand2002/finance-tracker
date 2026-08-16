@@ -128,7 +128,7 @@ export default function SpendingChart({ dailyData, weeklyData, monthlyData, cate
                       outerRadius={85}
                       paddingAngle={2}
                       style={{ cursor: onCategorySelect ? 'pointer' : 'default' }}
-                      onClick={(data) => onCategorySelect?.(selectedCategory === data.category ? null : data.category)}
+                      onClick={(data: any) => onCategorySelect?.(selectedCategory === data.category ? null : data.category)}
                     >
                       {categoryData.map(({ category }) => (
                         <Cell

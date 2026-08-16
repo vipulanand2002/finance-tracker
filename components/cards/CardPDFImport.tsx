@@ -367,9 +367,9 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                         const absIdx = indices[relIdx]
                         const d = safeDate(tx.date)
                         return (
-                          <div key={absIdx} className={tx.selected ? '' : 'opacity-50'}>
+                          <div key={absIdx} className={tx.selected ? '' : 'bg-muted/30'}>
                             {/* Row */}
-                            <div className="flex items-center gap-2 px-3 py-2.5 hover:bg-muted/20">
+                            <div className={`flex items-center gap-2 px-3 py-2.5 hover:bg-muted/20 ${!tx.selected ? 'text-muted-foreground' : ''}`}>
                               <input
                                 type="checkbox"
                                 checked={tx.selected}
@@ -380,7 +380,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                                 {d ? format(d, 'd MMM') : '—'}
                               </span>
                               <span className="text-sm flex-1 min-w-0 truncate">{tx.description}</span>
-                              <span className={`text-sm font-semibold shrink-0 ${tx.type === 'income' ? 'text-emerald-600' : 'text-red-600'}`}>
+                              <span className={`text-sm font-semibold shrink-0 ${tx.selected ? (tx.type === 'income' ? 'text-emerald-600' : 'text-red-600') : 'text-muted-foreground'}`}>
                                 {tx.type === 'income' ? '+' : '-'}{formatCurrency(tx.amount)}
                               </span>
                               <button

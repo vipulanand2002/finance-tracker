@@ -147,64 +147,66 @@ export default function CardModal({ open, onClose, onSaved, card }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) { reset(); onClose() } }}>
-      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-lg max-h-[92vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{card ? 'Edit Card' : 'Add Card'}</DialogTitle>
         </DialogHeader>
 
         {/* Live card preview */}
-        <div className="px-2">
-          <CardDisplay card={previewCard} />
+        <div className="rounded-xl bg-muted/40 p-4 flex items-center justify-center">
+          <div className="w-full max-w-sm">
+            <CardDisplay card={previewCard} />
+          </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 py-2">
+        <form onSubmit={handleSubmit} className="space-y-3 py-1">
+          {/* Bank Name */}
+          <div className="space-y-1">
+            <Label>Bank Name *</Label>
+            <Input
+              placeholder="e.g. HDFC Bank"
+              value={form.bank_name}
+              onChange={e => handleBankNameChange(e.target.value)}
+              required
+            />
+            {logoUrl && (
+              <p className="text-xs text-muted-foreground">Logo fetched via Google services</p>
+            )}
+          </div>
+
+          {/* Card Name */}
+          <div className="space-y-1">
+            <Label>Card Name *</Label>
+            <Input
+              placeholder="e.g. Amazon Pay ICICI Credit Card"
+              value={form.card_name}
+              onChange={e => setForm(f => ({ ...f, card_name: e.target.value }))}
+              required
+            />
+            {getCardTheme(form.card_name) && (
+              <p className="text-xs text-emerald-600">Known card detected — design applied automatically</p>
+            )}
+          </div>
+
+          {/* Card Number */}
+          <div className="space-y-1">
+            <Label>Card Number *</Label>
+            <Input
+              placeholder="1234 5678 9012 3456"
+              value={form.card_number}
+              onChange={e => handleCardNumberChange(e.target.value)}
+              maxLength={19}
+              inputMode="numeric"
+            />
+            {detectedNetwork !== 'other' && (
+              <p className="text-xs text-muted-foreground capitalize">
+                Detected: {detectedNetwork === 'mastercard' ? 'Mastercard' : detectedNetwork.toUpperCase()}
+              </p>
+            )}
+          </div>
+
+          {/* Card Type + Color */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2 space-y-1">
-              <Label>Bank Name *</Label>
-              <Input
-                placeholder="e.g. HDFC Bank"
-                value={form.bank_name}
-                onChange={e => handleBankNameChange(e.target.value)}
-                required
-              />
-              {logoUrl && (
-                <p className="text-xs text-muted-foreground">
-                  Logo fetched via Google services
-                </p>
-              )}
-            </div>
-
-            <div className="col-span-2 space-y-1">
-              <Label>Card Name *</Label>
-              <Input
-                placeholder="e.g. Amazon Pay ICICI Credit Card"
-                value={form.card_name}
-                onChange={e => setForm(f => ({ ...f, card_name: e.target.value }))}
-                required
-              />
-              {getCardTheme(form.card_name) && (
-                <p className="text-xs text-emerald-600">
-                  Known card detected — design applied automatically
-                </p>
-              )}
-            </div>
-
-            <div className="col-span-2 space-y-1">
-              <Label>Card Number *</Label>
-              <Input
-                placeholder="1234 5678 9012 3456"
-                value={form.card_number}
-                onChange={e => handleCardNumberChange(e.target.value)}
-                maxLength={19}
-                inputMode="numeric"
-              />
-              {detectedNetwork !== 'other' && (
-                <p className="text-xs text-muted-foreground capitalize">
-                  Detected: {detectedNetwork === 'mastercard' ? 'Mastercard' : detectedNetwork.toUpperCase()}
-                </p>
-              )}
-            </div>
-
             <div className="space-y-1">
               <Label>Card Type</Label>
               <Select value={form.card_type} onValueChange={v => v && setForm(f => ({ ...f, card_type: v as typeof form.card_type }))}>
@@ -218,8 +220,11 @@ export default function CardModal({ open, onClose, onSaved, card }: Props) {
             </div>
 
             <div className="space-y-1">
-              <Label className={getCardTheme(form.card_name) ? 'text-muted-foreground' : ''}>
-                Card Color {getCardTheme(form.card_name) && <span className="text-xs font-normal">(overridden by card theme)</span>}
+              <Label>
+                Card Color
+                {getCardTheme(form.card_name) && (
+                  <span className="ml-1 text-[10px] font-normal text-muted-foreground">(auto)</span>
+                )}
               </Label>
               <Select
                 value={form.color}
@@ -234,7 +239,10 @@ export default function CardModal({ open, onClose, onSaved, card }: Props) {
                 </SelectContent>
               </Select>
             </div>
+          </div>
 
+          {/* Expiry */}
+          <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label>Expiry Month</Label>
               <Select value={form.expiry_month} onValueChange={v => v && setForm(f => ({ ...f, expiry_month: v }))}>
@@ -260,20 +268,20 @@ export default function CardModal({ open, onClose, onSaved, card }: Props) {
                 </SelectContent>
               </Select>
             </div>
-
-            <div className="col-span-2 space-y-1">
-              <Label>Card Holder Name</Label>
-              <Input
-                placeholder="YOUR NAME"
-                value={form.holder_name}
-                onChange={e => setForm(f => ({ ...f, holder_name: e.target.value.toUpperCase() }))}
-                className="uppercase"
-              />
-            </div>
-
           </div>
 
-          <DialogFooter>
+          {/* Holder Name */}
+          <div className="space-y-1">
+            <Label>Card Holder Name <span className="text-xs font-normal text-muted-foreground">(optional)</span></Label>
+            <Input
+              placeholder="YOUR NAME"
+              value={form.holder_name}
+              onChange={e => setForm(f => ({ ...f, holder_name: e.target.value.toUpperCase() }))}
+              className="uppercase"
+            />
+          </div>
+
+          <DialogFooter className="pt-2">
             <Button type="button" variant="outline" onClick={() => { reset(); onClose() }}>Cancel</Button>
             <Button type="submit" disabled={saving}>
               {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{card ? 'Saving…' : 'Adding…'}</> : card ? 'Save Changes' : 'Add Card'}
