@@ -277,12 +277,7 @@ export default function TransactionList() {
               {format(new Date(t.date + 'T00:00:00'), 'dd MMM yyyy')}
             </TableCell>
             <TableCell className="pl-10">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm">{t.description ?? '—'}</span>
-                <Badge variant="outline" className="text-xs gap-1 text-muted-foreground border-primary/30 shrink-0">
-                  <CreditCard className="w-3 h-3 text-primary" />{item.cardName}
-                </Badge>
-              </div>
+              <span className="text-sm">{t.description ?? '—'}</span>
             </TableCell>
             <TableCell>
               <Badge
@@ -400,10 +395,7 @@ export default function TransactionList() {
             <div className="min-w-0 flex-1">
               <p className="text-sm truncate">{t.description ?? t.category}</p>
               <p className={`text-xs ${t.category === 'Card Payment' ? 'text-blue-500' : 'text-muted-foreground'}`}>
-                <span className="inline-flex items-center gap-1 mr-1">
-                  <CreditCard className="w-3 h-3 text-primary" />{item.cardName}
-                </span>
-                · {t.category} · {format(new Date(t.date + 'T00:00:00'), 'dd MMM')}
+                {t.category} · {format(new Date(t.date + 'T00:00:00'), 'dd MMM')}
               </p>
             </div>
             <div className="flex items-center gap-2 shrink-0 ml-2">
