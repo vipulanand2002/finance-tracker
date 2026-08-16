@@ -51,6 +51,13 @@ function buildMonthOptions() {
 const MONTH_OPTIONS = buildMonthOptions()
 
 // ── Helpers ──
+function cardOutstanding(txs: Transaction[], cardId: string) {
+  const ts = txs.filter(t => t.card_id === cardId)
+  const spent = ts.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
+  const paid = ts.filter(t => t.category === 'Card Payment').reduce((s, t) => s + t.amount, 0)
+  return spent - paid
+}
+
 function spendByCategory(txs: Transaction[]) {
   const map = new Map<string, number>()
   for (const t of txs.filter(t => t.type === 'expense' && t.category !== 'Card Payment')) {
@@ -290,6 +297,7 @@ export default function CardsPage() {
   const [viewMode, setViewMode] = useState<'bars' | 'donut'>('bars')
 
   const [cardTxs, setCardTxs] = useState<Transaction[]>([])
+  const [allCardTxs, setAllCardTxs] = useState<Transaction[]>([])
   const [txLoading, setTxLoading] = useState(false)
   const [budgets, setBudgets] = useState<CardBudget[]>([])
 
@@ -335,7 +343,14 @@ export default function CardsPage() {
   useEffect(() => { fetchCards() }, [fetchCards])
 
   useEffect(() => {
-    if (!loading && cards.length > 0) fetchCardTxs(selectedCardId)
+    if (!loading && cards.length > 0) {
+      fetchCardTxs(selectedCardId)
+      // Always keep a full all-card snapshot for outstanding balance display
+      fetch('/api/transactions?has_card=true')
+        .then(r => r.json())
+        .then(d => setAllCardTxs(Array.isArray(d) ? d : []))
+        .catch(() => {})
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cards, selectedCardId])
 
@@ -430,6 +445,16 @@ export default function CardsPage() {
                         <Badge variant="secondary" className="text-xs">{NETWORK_LABEL[card.network]}</Badge>
                       )}
                     </div>
+                    {(() => {
+                      const outstanding = cardOutstanding(allCardTxs, card.id)
+                      return outstanding > 0 ? (
+                        <p className="text-xs font-medium text-red-500">
+                          Due: {formatCurrency(outstanding)}
+                        </p>
+                      ) : allCardTxs.some(t => t.card_id === card.id) ? (
+                        <p className="text-xs font-medium text-emerald-600">Fully paid</p>
+                      ) : null
+                    })()}
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     <Button size="icon" variant="ghost" className="w-8 h-8 text-muted-foreground hover:text-primary"

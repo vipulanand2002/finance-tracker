@@ -343,7 +343,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                   return (
                     <div key={month}>
                       {/* Month header */}
-                      <div className="flex items-center justify-between px-3 py-2 bg-muted/40 sticky top-0 z-10">
+                      <div className="flex items-center justify-between px-3 py-2 bg-background border-b sticky top-0 z-10">
                         <div className="flex items-center gap-2">
                           <button onClick={() => {
                             const allSel = txs.every(t => t.selected)
