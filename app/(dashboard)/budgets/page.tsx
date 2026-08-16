@@ -12,9 +12,10 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Plus, Trash2, BrainCircuit, Loader2 } from 'lucide-react'
+import { Plus, Trash2, BrainCircuit, Loader2, CreditCard } from 'lucide-react'
 import { EXPENSE_CATEGORIES } from '@/lib/constants'
 import { formatCurrency } from '@/lib/utils'
+import { useCardToggle } from '@/lib/useCardToggle'
 import type { Budget, Transaction } from '@/types'
 
 function currency(n: number) { return formatCurrency(n, true) }
@@ -27,6 +28,7 @@ export default function BudgetsPage() {
   const [year, setYear] = useState(now.getFullYear())
   const [budgets, setBudgets] = useState<BudgetWithSpent[]>([])
   const [loading, setLoading] = useState(true)
+  const [includeCards, setIncludeCards] = useCardToggle()
   const [modalOpen, setModalOpen] = useState(false)
   const [newCategory, setNewCategory] = useState('')
   const [newAmount, setNewAmount] = useState('')
@@ -36,9 +38,12 @@ export default function BudgetsPage() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
+      const txUrl = includeCards
+        ? `/api/transactions`
+        : `/api/transactions?exclude_card=true`
       const [budgetRes, txRes] = await Promise.all([
         fetch(`/api/budgets?month=${month}&year=${year}`),
-        fetch(`/api/transactions?exclude_card=true`),
+        fetch(txUrl),
       ])
       const [rawBudgets, rawTx]: [Budget[], Transaction[]] = await Promise.all([
         budgetRes.json(),
@@ -52,7 +57,7 @@ export default function BudgetsPage() {
 
       const withSpent: BudgetWithSpent[] = (rawBudgets ?? []).map(b => ({
         ...b,
-        spent: monthTx.filter(t => (t.type === 'expense' || t.category === 'Card Payment') && t.category === b.category).reduce((s, t) => s + t.amount, 0),
+        spent: monthTx.filter(t => t.type === 'expense' && t.category === b.category).reduce((s, t) => s + t.amount, 0),
       }))
 
       setBudgets(withSpent)
@@ -61,7 +66,7 @@ export default function BudgetsPage() {
     } finally {
       setLoading(false)
     }
-  }, [month, year])
+  }, [month, year, includeCards])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -152,6 +157,16 @@ export default function BudgetsPage() {
             min={2020}
             max={2099}
           />
+          <Button
+            variant={includeCards ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setIncludeCards(!includeCards)}
+            className="gap-1.5 shrink-0"
+            title={includeCards ? 'Card spending counted in budgets' : 'Card spending excluded from budgets'}
+          >
+            <CreditCard className="w-4 h-4" />
+            Cards {includeCards ? 'On' : 'Off'}
+          </Button>
           <Button variant="outline" onClick={getAiRecommendations} disabled={aiLoading}>
             {aiLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <BrainCircuit className="w-4 h-4 mr-2" />}
             AI Suggest

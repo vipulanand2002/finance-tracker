@@ -17,7 +17,6 @@ export async function POST(request: Request) {
   const { data: transactions } = await supabase
     .from('transactions')
     .select('*')
-    .or('card_id.is.null,category.eq.Card Payment')
     .gte('date', from)
     .order('date', { ascending: false })
 

@@ -12,6 +12,7 @@ import StatsCards from '@/components/dashboard/StatsCards'
 import SpendingChart from '@/components/dashboard/SpendingChart'
 import RecentTransactions from '@/components/dashboard/RecentTransactions'
 import BudgetProgress from '@/components/dashboard/BudgetProgress'
+import { useCardToggle } from '@/lib/useCardToggle'
 import type { Transaction, Budget, BudgetWithSpent, CategoryTotal, MonthlyData } from '@/types'
 
 const MONTH_NAMES = [
@@ -23,7 +24,7 @@ export default function DashboardPage() {
   const now = new Date()
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [year, setYear] = useState(now.getFullYear())
-  const [includeCards, setIncludeCards] = useState(false)
+  const [includeCards, setIncludeCards] = useCardToggle()
 
   const [allTx, setAllTx] = useState<Transaction[]>([])
   const [budgets, setBudgets] = useState<Budget[]>([])
@@ -76,21 +77,23 @@ export default function DashboardPage() {
 
   useEffect(() => { fetchData() }, [fetchData])
 
+  // Cards ON: include everything — card expenses count as expenses, Card Payment counts as income
+  // Cards OFF: exclude card imports and Card Payment entries entirely
   const isCountable = useCallback(
-    (t: Transaction) => includeCards ? true : (!t.card_id || t.category === 'Card Payment'),
+    (t: Transaction) => includeCards ? true : (!t.card_id && t.category !== 'Card Payment'),
     [includeCards],
   )
 
   const isExpense = useCallback(
-    (t: Transaction) => includeCards
-      ? t.type === 'expense'
-      : t.type === 'expense' || t.category === 'Card Payment',
-    [includeCards],
+    (t: Transaction) => t.type === 'expense',
+    [],
   )
 
   const isIncome = useCallback(
-    (t: Transaction) => t.type === 'income' && t.category !== 'Card Payment',
-    [],
+    (t: Transaction) => includeCards
+      ? t.type === 'income'
+      : t.type === 'income' && t.category !== 'Card Payment',
+    [includeCards],
   )
 
   const countableTx = useMemo(() => allTx.filter(isCountable), [allTx, isCountable])

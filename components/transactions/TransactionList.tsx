@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
 import { formatCurrency } from '@/lib/utils'
+import { useCardToggle } from '@/lib/useCardToggle'
 import TransactionModal from './TransactionModal'
 import PDFImport from './PDFImport'
 import type { Transaction } from '@/types'
@@ -46,6 +47,7 @@ export default function TransactionList() {
   const [pdfOpen, setPdfOpen] = useState(false)
   const [editing, setEditing] = useState<Transaction | null>(null)
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set())
+  const [includeCards, setIncludeCards] = useCardToggle()
 
   // ── Selection & bulk delete ──
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -59,6 +61,7 @@ export default function TransactionList() {
       if (typeFilter !== 'all') params.set('type', typeFilter)
       if (categoryFilter !== 'all') params.set('category', categoryFilter)
       if (search) params.set('search', search)
+      if (!includeCards) params.set('exclude_card', 'true')
 
       const res = await fetch(`/api/transactions?${params}`)
       const data = await res.json()
@@ -68,7 +71,7 @@ export default function TransactionList() {
     } finally {
       setLoading(false)
     }
-  }, [typeFilter, categoryFilter, search])
+  }, [typeFilter, categoryFilter, search, includeCards])
 
   useEffect(() => {
     fetch('/api/cards').then(r => r.json()).then(d => setCards(Array.isArray(d) ? d : [])).catch(() => {})
@@ -475,6 +478,16 @@ export default function TransactionList() {
         </Select>
 
         <div className="flex gap-2 flex-wrap">
+          <Button
+            variant={includeCards ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setIncludeCards(!includeCards)}
+            className="gap-1.5 shrink-0"
+            title={includeCards ? 'Card transactions shown' : 'Card transactions hidden'}
+          >
+            <CreditCard className="w-4 h-4" />
+            <span className="hidden sm:inline">Cards {includeCards ? 'On' : 'Off'}</span>
+          </Button>
           <Button variant="outline" onClick={() => setPdfOpen(true)} className="shrink-0" title="Import PDF">
             <FileUp className="w-4 h-4 sm:mr-1" />
             <span className="hidden sm:inline">Import PDF</span>

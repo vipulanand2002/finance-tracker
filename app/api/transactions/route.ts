@@ -35,8 +35,8 @@ export async function GET(request: Request) {
     if (from) query = query.gte('date', from)
     if (to) query = query.lte('date', to)
     if (search) query = query.ilike('description', `%${search}%`)
-    // Exclude card transactions but keep Card Payments (real cash outflow)
-    if (excludeCard) query = query.or('card_id.is.null,category.eq.Card Payment')
+    // Exclude all card-related transactions (card imports + Card Payment entries)
+    if (excludeCard) query = query.is('card_id', null).neq('category', 'Card Payment')
     // Filter to specific card or any card transaction
     if (cardId) query = query.eq('card_id', cardId)
     else if (hasCard) query = query.not('card_id', 'is', null)

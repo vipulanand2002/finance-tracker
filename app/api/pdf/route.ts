@@ -179,7 +179,7 @@ export async function POST(request: Request) {
     }
     console.error('PDF extraction error:', err?.name, err?.message)
     return NextResponse.json(
-      { error: `Debug: ${err?.name ?? 'Error'}: ${err?.message ?? 'unknown'}` },
+      { error: 'Could not read the PDF. It may be corrupted, scanned-only, or in an unsupported format.' },
       { status: 500 }
     )
   }
