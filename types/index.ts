@@ -17,6 +17,15 @@ export interface Transaction {
   contacts?: { name: string; email: string | null } | null
 }
 
+export interface CardStatement {
+  id: string
+  card_id: string
+  user_id: string
+  cycle_start: string
+  cycle_end: string
+  imported_at: string
+}
+
 export interface Contact {
   id: string
   user_id: string

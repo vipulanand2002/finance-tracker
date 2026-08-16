@@ -19,12 +19,13 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Plus, CreditCard, Pencil, Trash2, FileUp, BarChart3 } from 'lucide-react'
+import { format } from 'date-fns'
 import CardDisplay, { type CardData } from '@/components/cards/CardDisplay'
 import CardModal from '@/components/cards/CardModal'
 import CardPDFImport from '@/components/cards/CardPDFImport'
 import { CATEGORY_COLORS } from '@/lib/constants'
 import { formatCurrency } from '@/lib/utils'
-import type { Transaction } from '@/types'
+import type { Transaction, CardStatement } from '@/types'
 
 const NETWORK_LABEL: Record<string, string> = {
   visa: 'Visa', mastercard: 'Mastercard', rupay: 'RuPay', amex: 'Amex', other: '',
@@ -294,7 +295,10 @@ export default function CardsPage() {
 
   const [selectedCardId, setSelectedCardId] = useState<string>('all')
   const [selectedMonth, setSelectedMonth] = useState<string>('all')
-  const [viewMode, setViewMode] = useState<'bars' | 'donut'>('bars')
+  const [periodMode, setPeriodMode] = useState<'monthly' | 'cycle'>('monthly')
+  const [selectedCycle, setSelectedCycle] = useState<string>('all')
+  const [statements, setStatements] = useState<CardStatement[]>([])
+  const [chartType, setChartType] = useState<'bars' | 'donut'>('bars')
 
   const [cardTxs, setCardTxs] = useState<Transaction[]>([])
   const [allCardTxs, setAllCardTxs] = useState<Transaction[]>([])
@@ -329,6 +333,16 @@ export default function CardsPage() {
     }
   }, [])
 
+  const fetchStatements = useCallback(async (cardId: string) => {
+    if (cardId === 'all') { setStatements([]); return }
+    try {
+      const data = await fetch(`/api/card-statements?card_id=${cardId}`).then(r => r.json())
+      setStatements(Array.isArray(data) ? data : [])
+    } catch {
+      setStatements([])
+    }
+  }, [])
+
   const fetchBudgets = useCallback(async (cardId: string, monthStr: string) => {
     if (cardId === 'all' || monthStr === 'all') { setBudgets([]); return }
     const [year, month] = monthStr.split('-')
@@ -358,10 +372,20 @@ export default function CardsPage() {
     fetchBudgets(selectedCardId, selectedMonth)
   }, [fetchBudgets, selectedCardId, selectedMonth])
 
+  useEffect(() => {
+    if (periodMode === 'cycle') fetchStatements(selectedCardId)
+  }, [fetchStatements, periodMode, selectedCardId])
+
   const filteredTxs = useMemo(() => {
+    if (periodMode === 'cycle') {
+      if (selectedCycle === 'all') return cardTxs
+      const stmt = statements.find(s => s.id === selectedCycle)
+      if (!stmt) return cardTxs
+      return cardTxs.filter(t => t.date >= stmt.cycle_start && t.date <= stmt.cycle_end)
+    }
     if (selectedMonth === 'all') return cardTxs
     return cardTxs.filter(t => t.date.startsWith(selectedMonth))
-  }, [cardTxs, selectedMonth])
+  }, [cardTxs, periodMode, selectedMonth, selectedCycle, statements])
 
   async function saveBudget(category: string, amount: number) {
     if (selectedCardId === 'all' || selectedMonth === 'all') return
@@ -398,7 +422,7 @@ export default function CardsPage() {
     }
   }
 
-  const canEditBudgets = selectedCardId !== 'all' && selectedMonth !== 'all'
+  const canEditBudgets = selectedCardId !== 'all' && selectedMonth !== 'all' && periodMode === 'monthly'
 
   return (
     <div className="space-y-6">
@@ -478,13 +502,20 @@ export default function CardsPage() {
           {/* Spending Analytics */}
           <Card>
             <CardHeader className="pb-3">
-              <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex flex-col gap-3">
                 <div className="flex items-center gap-2">
                   <BarChart3 className="w-4 h-4 text-primary" />
                   <CardTitle className="text-base">Spending Analytics</CardTitle>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <Select value={selectedCardId} onValueChange={v => v && setSelectedCardId(v)}>
+                  {/* Card selector */}
+                  <Select value={selectedCardId} onValueChange={v => {
+                    if (!v) return
+                    setSelectedCardId(v)
+                    setSelectedCycle('all')
+                    // Cycle mode only works per-card; fall back to monthly for all-cards
+                    if (v === 'all' && periodMode === 'cycle') setPeriodMode('monthly')
+                  }}>
                     <SelectTrigger className="w-40 h-8 text-xs"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Cards</SelectItem>
@@ -493,14 +524,52 @@ export default function CardsPage() {
                       ))}
                     </SelectContent>
                   </Select>
-                  <Select value={selectedMonth} onValueChange={v => v && setSelectedMonth(v)}>
-                    <SelectTrigger className="w-36 h-8 text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {MONTH_OPTIONS.map(opt => (
-                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+
+                  {/* Period mode toggle */}
+                  <div className="flex rounded-md border overflow-hidden text-xs">
+                    <button
+                      className={`px-3 py-1.5 transition-colors ${periodMode === 'monthly' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted text-muted-foreground'}`}
+                      onClick={() => { setPeriodMode('monthly'); setSelectedCycle('all') }}
+                    >
+                      Monthly
+                    </button>
+                    <button
+                      disabled={selectedCardId === 'all'}
+                      className={`px-3 py-1.5 border-l transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${periodMode === 'cycle' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted text-muted-foreground'}`}
+                      onClick={() => { setPeriodMode('cycle'); setSelectedMonth('all') }}
+                    >
+                      Cycle
+                    </button>
+                  </div>
+
+                  {/* Period selector */}
+                  {periodMode === 'monthly' ? (
+                    <Select value={selectedMonth} onValueChange={v => v && setSelectedMonth(v)}>
+                      <SelectTrigger className="w-36 h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {MONTH_OPTIONS.map(opt => (
+                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Select value={selectedCycle} onValueChange={v => v && setSelectedCycle(v)}>
+                      <SelectTrigger className="w-52 h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Cycles</SelectItem>
+                        {statements.map(s => (
+                          <SelectItem key={s.id} value={s.id}>
+                            {format(new Date(s.cycle_start + 'T00:00:00'), 'dd MMM')}
+                            {' – '}
+                            {format(new Date(s.cycle_end + 'T00:00:00'), 'dd MMM yyyy')}
+                          </SelectItem>
+                        ))}
+                        {statements.length === 0 && (
+                          <SelectItem value="none" disabled>No cycles yet — import a PDF</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -522,21 +591,21 @@ export default function CardsPage() {
                       <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Category Breakdown</p>
                       <div className="flex rounded-md border overflow-hidden text-xs">
                         <button
-                          className={`px-3 py-1.5 transition-colors ${viewMode === 'bars' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted text-muted-foreground'}`}
-                          onClick={() => setViewMode('bars')}
+                          className={`px-3 py-1.5 transition-colors ${chartType === 'bars' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted text-muted-foreground'}`}
+                          onClick={() => setChartType('bars')}
                         >
                           Bars
                         </button>
                         <button
-                          className={`px-3 py-1.5 border-l transition-colors ${viewMode === 'donut' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted text-muted-foreground'}`}
-                          onClick={() => setViewMode('donut')}
+                          className={`px-3 py-1.5 border-l transition-colors ${chartType === 'donut' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted text-muted-foreground'}`}
+                          onClick={() => setChartType('donut')}
                         >
                           Donut
                         </button>
                       </div>
                     </div>
 
-                    {viewMode === 'bars' ? (
+                    {chartType === 'bars' ? (
                       <BarChartView txs={filteredTxs} />
                     ) : (
                       <DonutChartView txs={filteredTxs} />

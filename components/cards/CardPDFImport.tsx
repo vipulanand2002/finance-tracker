@@ -200,6 +200,17 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
 
     if (imported > 0) {
       toast.success(`Imported ${imported} transaction${imported !== 1 ? 's' : ''}${failed > 0 ? ` (${failed} failed)` : ''}`)
+      // Save billing cycle range derived from imported transaction dates
+      if (cardId) {
+        const dates = selected.map(t => t.date).filter(Boolean).sort()
+        if (dates.length > 0) {
+          fetch('/api/card-statements', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ card_id: cardId, cycle_start: dates[0], cycle_end: dates[dates.length - 1] }),
+          }).catch(() => {})
+        }
+      }
       onImported(); reset(); onClose()
     } else {
       toast.error('Import failed. Please try again.')
