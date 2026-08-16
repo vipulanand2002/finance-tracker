@@ -221,7 +221,7 @@ export default function DashboardPage() {
           <Button
             variant={includeCards ? 'default' : 'outline'}
             size="sm"
-            onClick={() => setIncludeCards(c => !c)}
+            onClick={() => setIncludeCards(!includeCards)}
             className="gap-1.5 shrink-0"
             title={includeCards ? 'Showing card category spending' : 'Card categories hidden'}
           >
