@@ -12,6 +12,17 @@ export interface Transaction {
   card_id: string | null
   split_id: string | null
   is_discrete: boolean
+  contact_id: string | null
+  created_at: string
+  contacts?: { name: string; email: string | null } | null
+}
+
+export interface Contact {
+  id: string
+  user_id: string
+  name: string
+  email: string | null
+  notes: string | null
   created_at: string
 }
 

@@ -10,10 +10,11 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { EyeOff, Loader2, Settings2, Upload, X } from 'lucide-react'
+import { EyeOff, Loader2, Settings2, Upload, X, SplitSquareVertical } from 'lucide-react'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, TRIP_EXPENSE_CATEGORIES } from '@/lib/constants'
 import { ManageCategories } from '@/components/categories/ManageCategories'
-import type { Transaction, Trip } from '@/types'
+import SplitModal from '@/components/splits/SplitModal'
+import type { Transaction, Trip, Contact } from '@/types'
 
 interface Props {
   open: boolean
@@ -44,6 +45,7 @@ function buildEmptyForm(tripId?: string | null) {
     is_discrete: false,
     receipt_url: '',
     trip_id: tripId ?? null,
+    contact_id: null as string | null,
   }
 }
 
@@ -52,6 +54,8 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
   const [saving, setSaving] = useState(false)
   const [scanningReceipt, setScanningReceipt] = useState(false)
   const [trips, setTrips] = useState<Trip[]>([])
+  const [contacts, setContacts] = useState<Contact[]>([])
+  const [splitOpen, setSplitOpen] = useState(false)
   // API returns full list (seeded with defaults on first call); static arrays are loading fallbacks
   const [expenseCategories, setExpenseCategories] = useState<string[]>([...EXPENSE_CATEGORIES])
   const [incomeCategories, setIncomeCategories] = useState<string[]>([...INCOME_CATEGORIES])
@@ -76,6 +80,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
   useEffect(() => {
     if (!open) return
     fetch('/api/trips').then(r => r.json()).then(d => setTrips(Array.isArray(d) ? d : [])).catch(() => {})
+    fetch('/api/contacts').then(r => r.json()).then(d => setContacts(Array.isArray(d) ? d : [])).catch(() => {})
     loadCategories()
   }, [open])
 
@@ -91,6 +96,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         is_discrete: transaction.is_discrete ?? false,
         receipt_url: transaction.receipt_url ?? '',
         trip_id: transaction.trip_id ?? null,
+        contact_id: transaction.contact_id ?? null,
       })
     } else {
       setForm(buildEmptyForm(defaultTripId))
@@ -147,6 +153,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         is_discrete: form.trip_id ? form.is_discrete : false,
         receipt_url: form.receipt_url || null,
         trip_id: form.trip_id || null,
+        contact_id: form.contact_id || null,
       }
       const url = transaction ? `/api/transactions?id=${transaction.id}` : '/api/transactions'
       const method = transaction ? 'PUT' : 'POST'
@@ -253,6 +260,39 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                 required
               />
             </div>
+
+            {/* Contact tag */}
+            {contacts.length > 0 && (
+              <div className="space-y-1">
+                <Label>Contact <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
+                <Select
+                  value={form.contact_id ?? 'none'}
+                  onValueChange={v => set('contact_id', v === 'none' ? null : v)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Tag a contact" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No contact</SelectItem>
+                    {contacts.map(c => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}{c.email ? ` (${c.email})` : ''}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {form.contact_id && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full mt-1 text-xs"
+                    onClick={() => setSplitOpen(true)}
+                  >
+                    <SplitSquareVertical className="w-3.5 h-3.5 mr-1.5" />
+                    Create split with {contacts.find(c => c.id === form.contact_id)?.name}
+                  </Button>
+                )}
+              </div>
+            )}
 
             {trips.length > 0 && (
               <div className="space-y-1">
@@ -361,6 +401,20 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         onClose={() => setManageCatOpen(false)}
         onChanged={loadCategories}
       />
+
+      {form.contact_id && (() => {
+        const c = contacts.find(x => x.id === form.contact_id)
+        return c ? (
+          <SplitModal
+            open={splitOpen}
+            onClose={() => setSplitOpen(false)}
+            onSaved={() => setSplitOpen(false)}
+            defaultTitle={form.description || undefined}
+            defaultAmount={form.amount || undefined}
+            defaultParticipants={[{ name: c.name, email: c.email ?? '' }]}
+          />
+        ) : null
+      })()}
     </>
   )
 }

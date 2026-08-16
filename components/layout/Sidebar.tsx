@@ -18,6 +18,7 @@ import {
   TrendingUp,
   Plane,
   MessageCircle,
+  BookUser,
 } from 'lucide-react'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 
@@ -27,6 +28,7 @@ const navItems = [
   { label: 'Cards', href: '/cards', icon: CreditCard },
   { label: 'Trips', href: '/trips', icon: Plane },
   { label: 'Budgets', href: '/budgets', icon: Target },
+  { label: 'Contacts', href: '/contacts', icon: BookUser },
   { label: 'Splits', href: '/splits', icon: Users },
   { label: 'Friends', href: '/friends', icon: MessageCircle },
   { label: 'AI Assistant', href: '/ai', icon: BrainCircuit },

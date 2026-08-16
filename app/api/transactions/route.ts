@@ -21,12 +21,13 @@ export async function GET(request: Request) {
   const excludeCard = searchParams.get('exclude_card') === 'true'
   const cardId = searchParams.get('card_id')
   const hasCard = searchParams.get('has_card') === 'true'
+  const contactId = searchParams.get('contact_id')
 
   // For trip-scoped queries: RLS handles visibility (own txs + trip participant txs)
   // For all other queries: restrict to own transactions only
   let query = tripId
-    ? supabase.from('transactions').select('*').eq('trip_id', tripId).order('created_at', { ascending: false })
-    : supabase.from('transactions').select('*').eq('user_id', user.id).order('created_at', { ascending: false })
+    ? supabase.from('transactions').select('*, contacts(name, email)').eq('trip_id', tripId).order('created_at', { ascending: false })
+    : supabase.from('transactions').select('*, contacts(name, email)').eq('user_id', user.id).order('created_at', { ascending: false })
 
   if (!tripId) {
     if (type && type !== 'all') query = query.eq('type', type)
@@ -39,6 +40,7 @@ export async function GET(request: Request) {
     // Filter to specific card or any card transaction
     if (cardId) query = query.eq('card_id', cardId)
     else if (hasCard) query = query.not('card_id', 'is', null)
+    if (contactId) query = query.eq('contact_id', contactId)
   }
 
   const { data, error } = await query

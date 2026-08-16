@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import {
   Plus, Search, MoreHorizontal, Pencil, Trash2, FileUp, AlertTriangle,
-  ChevronDown, ChevronRight, CreditCard, Smartphone, Loader2,
+  ChevronDown, ChevronRight, CreditCard, Smartphone, Loader2, BookUser,
 } from 'lucide-react'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
 import { formatCurrency } from '@/lib/utils'
@@ -320,9 +320,14 @@ export default function TransactionList() {
         {format(new Date(t.date + 'T00:00:00'), 'dd MMM yyyy')}
       </TableCell>
       <TableCell>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm">{t.description ?? '—'}</span>
           {t.is_recurring && <Badge variant="secondary" className="text-xs">Recurring</Badge>}
+          {t.contacts && (
+            <Badge variant="outline" className="text-xs gap-1 text-muted-foreground">
+              <BookUser className="w-3 h-3" />{t.contacts.name}
+            </Badge>
+          )}
         </div>
       </TableCell>
       <TableCell><Badge variant="outline" className="text-xs">{t.category}</Badge></TableCell>
@@ -423,6 +428,7 @@ export default function TransactionList() {
         <p className="text-xs text-muted-foreground">
           {t.category} · {format(new Date(t.date + 'T00:00:00'), 'dd MMM')}
           {t.is_recurring && <span className="ml-1 text-primary">↻</span>}
+          {t.contacts && <span className="ml-1">· <BookUser className="inline w-3 h-3 mb-0.5" /> {t.contacts.name}</span>}
         </p>
       </div>
       <div className="flex items-center gap-2 shrink-0 ml-2">
