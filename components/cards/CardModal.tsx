@@ -20,6 +20,12 @@ interface Props {
 
 const COLORS = Object.keys(CARD_GRADIENTS) as (keyof typeof CARD_GRADIENTS)[]
 
+function ordinal(n: number) {
+  const s = ['th', 'st', 'nd', 'rd']
+  const v = n % 100
+  return n + (s[(v - 20) % 10] || s[v] || s[0])
+}
+
 const empty = {
   card_name: '',
   bank_name: '',
@@ -29,6 +35,8 @@ const empty = {
   expiry_year: '',
   holder_name: '',
   color: 'blue',
+  cycle_start_day: '',
+  statement_day: '',
 }
 
 export default function CardModal({ open, onClose, onSaved, card }: Props) {
@@ -48,6 +56,8 @@ export default function CardModal({ open, onClose, onSaved, card }: Props) {
         expiry_year: card.expiry_year ? String(card.expiry_year) : '',
         holder_name: card.holder_name ?? '',
         color: card.color,
+        cycle_start_day: card.cycle_start_day ? String(card.cycle_start_day) : '',
+        statement_day: card.statement_day ? String(card.statement_day) : '',
       })
       setDetectedNetwork(card.network)
       setLogoUrl(card.logo_url ?? '')
@@ -119,6 +129,8 @@ export default function CardModal({ open, onClose, onSaved, card }: Props) {
         holder_name: form.holder_name.trim() || null,
         color: form.color,
         logo_url: logoUrl || null,
+        cycle_start_day: form.cycle_start_day ? parseInt(form.cycle_start_day) : null,
+        statement_day: form.statement_day ? parseInt(form.statement_day) : null,
       }
 
       const url = card ? `/api/cards?id=${card.id}` : '/api/cards'
@@ -279,6 +291,50 @@ export default function CardModal({ open, onClose, onSaved, card }: Props) {
               onChange={e => setForm(f => ({ ...f, holder_name: e.target.value.toUpperCase() }))}
               className="uppercase"
             />
+          </div>
+
+          {/* Billing Cycle */}
+          <div className="space-y-2 rounded-lg border border-dashed p-3">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Billing Cycle <span className="font-normal normal-case text-muted-foreground/70">(optional)</span>
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Cycle Starts On</Label>
+                <Select value={form.cycle_start_day} onValueChange={v => setForm(f => ({ ...f, cycle_start_day: v }))}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <span className="flex-1 truncate text-left text-muted-foreground">
+                      {form.cycle_start_day ? `${ordinal(parseInt(form.cycle_start_day))} of month` : 'Not set'}
+                    </span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Not set</SelectItem>
+                    {Array.from({ length: 28 }, (_, i) => String(i + 1)).map(d => (
+                      <SelectItem key={d} value={d}>{ordinal(parseInt(d))} of month</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Statement Date</Label>
+                <Select value={form.statement_day} onValueChange={v => setForm(f => ({ ...f, statement_day: v }))}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <span className="flex-1 truncate text-left text-muted-foreground">
+                      {form.statement_day ? `${ordinal(parseInt(form.statement_day))} of month` : 'Not set'}
+                    </span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Not set</SelectItem>
+                    {Array.from({ length: 28 }, (_, i) => String(i + 1)).map(d => (
+                      <SelectItem key={d} value={d}>{ordinal(parseInt(d))} of month</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {form.statement_day && (
+                  <p className="text-[10px] text-emerald-600">Reminder sent for 5 days from this date</p>
+                )}
+              </div>
+            </div>
           </div>
 
           <DialogFooter className="pt-2">

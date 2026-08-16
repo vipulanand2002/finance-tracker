@@ -515,7 +515,13 @@ export default function CardsPage() {
                     // Cycle mode only works per-card; fall back to monthly for all-cards
                     if (v === 'all' && periodMode === 'cycle') setPeriodMode('monthly')
                   }}>
-                    <SelectTrigger className="w-40 h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="w-40 h-8 text-xs">
+                      <span className="flex-1 truncate text-left">
+                        {selectedCardId === 'all'
+                          ? 'All Cards'
+                          : (cards.find(c => c.id === selectedCardId)?.card_name ?? 'Select card')}
+                      </span>
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Cards</SelectItem>
                       {cards.map(card => (

@@ -14,6 +14,8 @@ export interface CardData {
   color: string
   logo_url: string | null
   pdf_password?: string | null
+  cycle_start_day?: number | null
+  statement_day?: number | null
 }
 
 export const CARD_GRADIENTS: Record<string, { from: string; to: string; text: string }> = {
