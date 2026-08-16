@@ -301,7 +301,7 @@ export default function CardModal({ open, onClose, onSaved, card }: Props) {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs">Cycle Starts On</Label>
-                <Select value={form.cycle_start_day} onValueChange={v => setForm(f => ({ ...f, cycle_start_day: v }))}>
+                <Select value={form.cycle_start_day} onValueChange={v => setForm(f => ({ ...f, cycle_start_day: v ?? '' }))}>
                   <SelectTrigger className="h-8 text-xs">
                     <span className="flex-1 truncate text-left text-muted-foreground">
                       {form.cycle_start_day ? `${ordinal(parseInt(form.cycle_start_day))} of month` : 'Not set'}
@@ -317,7 +317,8 @@ export default function CardModal({ open, onClose, onSaved, card }: Props) {
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Statement Date</Label>
-                <Select value={form.statement_day} onValueChange={v => setForm(f => ({ ...f, statement_day: v }))}>
+
+                <Select value={form.statement_day} onValueChange={v => setForm(f => ({ ...f, statement_day: v ?? '' }))}>
                   <SelectTrigger className="h-8 text-xs">
                     <span className="flex-1 truncate text-left text-muted-foreground">
                       {form.statement_day ? `${ordinal(parseInt(form.statement_day))} of month` : 'Not set'}
