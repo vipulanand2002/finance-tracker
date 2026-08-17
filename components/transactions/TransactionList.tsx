@@ -77,7 +77,10 @@ export default function TransactionList() {
 
       const res = await fetch(`/api/transactions?${params}`)
       const data = await res.json()
-      setTransactions(Array.isArray(data) ? data : [])
+      const sorted = Array.isArray(data)
+        ? [...data].sort((a: Transaction, b: Transaction) => b.date.localeCompare(a.date))
+        : []
+      setTransactions(sorted)
     } catch {
       toast.error('Failed to load transactions')
     } finally {
