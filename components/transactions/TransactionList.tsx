@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { format } from 'date-fns'
+import { format, subMonths, startOfMonth, endOfMonth } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -19,7 +19,7 @@ import {
 import {
   Plus, Search, MoreHorizontal, Pencil, Trash2, FileUp, AlertTriangle,
   ChevronDown, ChevronRight, CreditCard, Smartphone, Loader2, BookUser,
-  Building2,
+  Building2, ArrowUpDown,
 } from 'lucide-react'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
 import { formatCurrency } from '@/lib/utils'
@@ -31,20 +31,57 @@ const ALL_CATEGORIES = [...new Set([...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES]
 
 interface CardInfo { id: string; card_name: string }
 
-type View = 'consolidated' | 'bank' | 'card'
+type View   = 'consolidated' | 'bank' | 'card'
+type SortBy = 'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc' | 'alpha-asc' | 'alpha-desc'
 
 type ListItem =
   | { kind: 'tx'; tx: Transaction }
   | { kind: 'card-group'; groupKey: string; cardId: string; cardName: string; month: string; txs: Transaction[]; latestDate: string }
 
+// Build last 13 months + "All time"
+function buildMonthOptions() {
+  const now = new Date()
+  const opts = [{ value: 'all', label: 'All time' }]
+  for (let i = 0; i < 13; i++) {
+    const d = subMonths(startOfMonth(now), i)
+    opts.push({ value: format(d, 'yyyy-MM'), label: format(d, 'MMM yyyy') })
+  }
+  return opts
+}
+const MONTH_OPTIONS = buildMonthOptions()
+
+const SORT_LABELS: Record<SortBy, string> = {
+  'date-desc':   'Newest first',
+  'date-asc':    'Oldest first',
+  'amount-desc': 'Highest amount',
+  'amount-asc':  'Lowest amount',
+  'alpha-asc':   'A → Z',
+  'alpha-desc':  'Z → A',
+}
+
+function applySort(txs: Transaction[], sort: SortBy): Transaction[] {
+  return [...txs].sort((a, b) => {
+    switch (sort) {
+      case 'date-asc':    return a.date.localeCompare(b.date)
+      case 'amount-desc': return b.amount - a.amount
+      case 'amount-asc':  return a.amount - b.amount
+      case 'alpha-asc':   return (a.description ?? a.category).localeCompare(b.description ?? b.category)
+      case 'alpha-desc':  return (b.description ?? b.category).localeCompare(a.description ?? a.category)
+      default:            return b.date.localeCompare(a.date)
+    }
+  })
+}
+
 export default function TransactionList() {
   const router = useRouter()
-  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [rawTransactions, setRawTransactions] = useState<Transaction[]>([])
   const [cards, setCards] = useState<CardInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
+  const [selectedMonth, setSelectedMonth] = useState('all')
+  const [sortBy, setSortBy] = useState<SortBy>('date-desc')
   const [modalOpen, setModalOpen] = useState(false)
   const [pdfOpen, setPdfOpen] = useState(false)
   const [editing, setEditing] = useState<Transaction | null>(null)
@@ -58,11 +95,12 @@ export default function TransactionList() {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [bulkDeleting, setBulkDeleting] = useState(false)
 
+  // Sorted derived state — no re-fetch needed when sort changes
+  const transactions = useMemo(() => applySort(rawTransactions, sortBy), [rawTransactions, sortBy])
+
   function changeView(v: View) {
-    setView(v)
-    localStorage.setItem('ft_tx_view', v)
-    setSelectedIds(new Set())
-    setExpandedCards(new Set())
+    setView(v); localStorage.setItem('ft_tx_view', v)
+    setSelectedIds(new Set()); setExpandedCards(new Set())
   }
 
   const fetchTransactions = useCallback(async () => {
@@ -74,19 +112,21 @@ export default function TransactionList() {
       if (search) params.set('search', search)
       if (view === 'bank') params.set('exclude_card', 'true')
       else if (view === 'card') params.set('has_card', 'true')
+      if (selectedMonth !== 'all') {
+        const d = new Date(selectedMonth + '-01')
+        params.set('from', format(startOfMonth(d), 'yyyy-MM-dd'))
+        params.set('to',   format(endOfMonth(d),   'yyyy-MM-dd'))
+      }
 
       const res = await fetch(`/api/transactions?${params}`)
       const data = await res.json()
-      const sorted = Array.isArray(data)
-        ? [...data].sort((a: Transaction, b: Transaction) => b.date.localeCompare(a.date))
-        : []
-      setTransactions(sorted)
+      setRawTransactions(Array.isArray(data) ? data : [])
     } catch {
       toast.error('Failed to load transactions')
     } finally {
       setLoading(false)
     }
-  }, [typeFilter, categoryFilter, search, view])
+  }, [typeFilter, categoryFilter, search, view, selectedMonth])
 
   useEffect(() => {
     fetch('/api/cards').then(r => r.json()).then(d => setCards(Array.isArray(d) ? d : [])).catch(() => {})
@@ -97,12 +137,13 @@ export default function TransactionList() {
     return () => clearTimeout(timer)
   }, [fetchTransactions, search])
 
-  useEffect(() => { setSelectedIds(new Set()) }, [typeFilter, categoryFilter, search, view])
+  useEffect(() => { setSelectedIds(new Set()) }, [typeFilter, categoryFilter, search, view, selectedMonth])
 
   const cardNameMap = new Map(cards.map(c => [c.id, c.card_name]))
 
-  // Card view: group transactions by card + month
-  const cardItems = useCallback((): ListItem[] => {
+  // Card view: group sorted transactions by card + month
+  const groupedItems = useMemo((): ListItem[] => {
+    if (view !== 'card') return []
     const groupMap = new Map<string, { cardId: string; month: string; txs: Transaction[] }>()
     for (const tx of transactions) {
       if (!tx.card_id) continue
@@ -114,8 +155,7 @@ export default function TransactionList() {
     const items: ListItem[] = []
     for (const [groupKey, { cardId, month, txs }] of groupMap) {
       items.push({
-        kind: 'card-group',
-        groupKey, cardId,
+        kind: 'card-group', groupKey, cardId,
         cardName: cardNameMap.get(cardId) ?? 'Credit Card',
         month, txs,
         latestDate: txs.reduce((max, t) => (t.date > max ? t.date : max), txs[0].date),
@@ -124,20 +164,18 @@ export default function TransactionList() {
     items.sort((a, b) => {
       const dA = a.kind === 'card-group' ? a.latestDate : a.tx.date
       const dB = b.kind === 'card-group' ? b.latestDate : b.tx.date
-      return dB.localeCompare(dA)
+      return sortBy === 'date-asc' ? dA.localeCompare(dB) : dB.localeCompare(dA)
     })
     return items
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transactions, cards])
+  }, [transactions, cards, view, sortBy])
 
-  const groupedItems = view === 'card' ? cardItems() : []
-
-  // Selectable IDs: flat txs for bank/consolidated, expanded sub-rows for card
-  const selectableIds = view === 'card'
-    ? groupedItems.flatMap(i =>
-        i.kind === 'card-group' && expandedCards.has(i.groupKey) ? i.txs.map(t => t.id) : []
-      )
-    : transactions.map(t => t.id)
+  // Selectable IDs
+  const selectableIds = useMemo(() =>
+    view === 'card'
+      ? groupedItems.flatMap(i => i.kind === 'card-group' && expandedCards.has(i.groupKey) ? i.txs.map(t => t.id) : [])
+      : transactions.map(t => t.id),
+  [view, groupedItems, expandedCards, transactions])
 
   const allSelected = selectableIds.length > 0 && selectableIds.every(id => selectedIds.has(id))
   const someSelected = selectedIds.size > 0
@@ -145,9 +183,7 @@ export default function TransactionList() {
   function toggleSelect(id: string) {
     setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
   }
-  function toggleSelectAll() {
-    setSelectedIds(allSelected ? new Set() : new Set(selectableIds))
-  }
+  function toggleSelectAll() { setSelectedIds(allSelected ? new Set() : new Set(selectableIds)) }
   function toggleCard(groupKey: string) {
     setExpandedCards(prev => { const n = new Set(prev); n.has(groupKey) ? n.delete(groupKey) : n.add(groupKey); return n })
   }
@@ -167,8 +203,7 @@ export default function TransactionList() {
     try {
       await Promise.all([...selectedIds].map(id => fetch(`/api/transactions?id=${id}`, { method: 'DELETE' })))
       toast.success(`${selectedIds.size} transaction${selectedIds.size !== 1 ? 's' : ''} deleted`)
-      setSelectedIds(new Set())
-      fetchTransactions()
+      setSelectedIds(new Set()); fetchTransactions()
     } catch { toast.error('Failed to delete some transactions') }
     finally { setBulkDeleting(false); setConfirmOpen(false) }
   }
@@ -191,7 +226,7 @@ export default function TransactionList() {
 
   function groupStats(txs: Transaction[]) {
     const expense = txs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
-    const refund = txs.filter(t => t.type === 'income' && t.category !== 'Card Payment').reduce((s, t) => s + t.amount, 0)
+    const refund  = txs.filter(t => t.type === 'income' && t.category !== 'Card Payment').reduce((s, t) => s + t.amount, 0)
     const payment = txs.filter(t => t.category === 'Card Payment').reduce((s, t) => s + t.amount, 0)
     return { net: refund - expense, payment }
   }
@@ -199,10 +234,7 @@ export default function TransactionList() {
   // ── Shared actions dropdown ──
   const ActionsMenu = ({ t, size = 'md' }: { t: Transaction; size?: 'sm' | 'md' }) => (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        className={`inline-flex items-center justify-center rounded-md hover:bg-muted transition-colors text-muted-foreground ${size === 'sm' ? 'h-7 w-7' : 'h-8 w-8'}`}
-        aria-label="Options"
-      >
+      <DropdownMenuTrigger className={`inline-flex items-center justify-center rounded-md hover:bg-muted transition-colors text-muted-foreground ${size === 'sm' ? 'h-7 w-7' : 'h-8 w-8'}`} aria-label="Options">
         <MoreHorizontal className="w-4 h-4" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
@@ -212,7 +244,7 @@ export default function TransactionList() {
     </DropdownMenu>
   )
 
-  // ── Bank + Consolidated desktop row (showCard adds card badge in consolidated) ──
+  // ── Bank + Consolidated desktop row ──
   const DesktopRow = ({ t, showCard }: { t: Transaction; showCard?: boolean }) => (
     <TableRow className={selectedIds.has(t.id) ? 'bg-primary/5' : ''}>
       <TableCell className="w-10">
@@ -225,11 +257,7 @@ export default function TransactionList() {
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm">{t.description ?? '—'}</span>
           {t.is_recurring && <Badge variant="secondary" className="text-xs">Recurring</Badge>}
-          {t.contacts && (
-            <Badge variant="outline" className="text-xs gap-1 text-muted-foreground">
-              <BookUser className="w-3 h-3" />{t.contacts.name}
-            </Badge>
-          )}
+          {t.contacts && <Badge variant="outline" className="text-xs gap-1 text-muted-foreground"><BookUser className="w-3 h-3" />{t.contacts.name}</Badge>}
           {showCard && t.card_id && cardNameMap.get(t.card_id) && (
             <Badge variant="outline" className="text-xs gap-1 border-primary/30 text-primary shrink-0">
               <CreditCard className="w-3 h-3" />{cardNameMap.get(t.card_id)}
@@ -263,9 +291,7 @@ export default function TransactionList() {
               <CreditCard className="w-3 h-3" />{cardNameMap.get(t.card_id)}
             </span>
           )}
-          {t.contacts && (
-            <span className="text-xs text-muted-foreground">· <BookUser className="inline w-3 h-3 mb-0.5" /> {t.contacts.name}</span>
-          )}
+          {t.contacts && <span className="text-xs text-muted-foreground">· <BookUser className="inline w-3 h-3 mb-0.5" /> {t.contacts.name}</span>}
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0 ml-2">
@@ -277,13 +303,13 @@ export default function TransactionList() {
     </div>
   )
 
-  // ── Credit Card view: grouped desktop row ──
+  // ── Credit Card view: grouped desktop ──
   const CardGroupRow = ({ item }: { item: Extract<ListItem, { kind: 'card-group' }> }) => {
     const expanded = expandedCards.has(item.groupKey)
     const { net, payment } = groupStats(item.txs)
     const dates = item.txs.map(t => t.date).sort()
     const firstDate = format(new Date(dates[0] + 'T00:00:00'), 'dd MMM')
-    const lastDate = format(new Date(dates[dates.length - 1] + 'T00:00:00'), 'dd MMM yyyy')
+    const lastDate  = format(new Date(dates[dates.length - 1] + 'T00:00:00'), 'dd MMM yyyy')
     const dateRange = firstDate === lastDate ? lastDate : `${firstDate} – ${lastDate}`
     const monthLabel = format(new Date(item.month + '-01'), 'MMM yyyy')
 
@@ -306,9 +332,7 @@ export default function TransactionList() {
             </div>
           </TableCell>
           <TableCell>
-            <Badge variant="outline" className="text-xs gap-1">
-              <CreditCard className="w-3 h-3" />{item.cardName}
-            </Badge>
+            <Badge variant="outline" className="text-xs gap-1"><CreditCard className="w-3 h-3" />{item.cardName}</Badge>
           </TableCell>
           <TableCell className="text-right">
             <span className={`font-semibold text-sm ${net >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
@@ -328,9 +352,7 @@ export default function TransactionList() {
             <TableCell className="text-sm text-muted-foreground whitespace-nowrap pl-6">
               {format(new Date(t.date + 'T00:00:00'), 'dd MMM yyyy')}
             </TableCell>
-            <TableCell className="pl-10">
-              <span className="text-sm">{t.description ?? '—'}</span>
-            </TableCell>
+            <TableCell className="pl-10"><span className="text-sm">{t.description ?? '—'}</span></TableCell>
             <TableCell>
               <Badge variant="outline" className={`text-xs ${t.category === 'Card Payment' ? 'border-blue-300 text-blue-600 dark:border-blue-700 dark:text-blue-400' : ''}`}>
                 {t.category}
@@ -348,7 +370,7 @@ export default function TransactionList() {
     )
   }
 
-  // ── Credit Card view: grouped mobile row ──
+  // ── Credit Card view: grouped mobile ──
   const MobileCardGroupRow = ({ item }: { item: Extract<ListItem, { kind: 'card-group' }> }) => {
     const expanded = expandedCards.has(item.groupKey)
     const { net, payment } = groupStats(item.txs)
@@ -374,7 +396,6 @@ export default function TransactionList() {
             {expanded ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
           </div>
         </div>
-
         {expanded && item.txs.map(t => (
           <div key={t.id} className={`flex items-center gap-3 px-4 py-3 border-b pl-8 ${selectedIds.has(t.id) ? 'bg-primary/5' : 'bg-muted/5'}`}>
             <input type="checkbox" className="w-4 h-4 rounded accent-primary cursor-pointer shrink-0" checked={selectedIds.has(t.id)} onChange={() => toggleSelect(t.id)} />
@@ -404,9 +425,9 @@ export default function TransactionList() {
       {/* ── View tabs ── */}
       <div className="flex rounded-lg border overflow-hidden text-sm w-fit">
         {([
-          { key: 'consolidated', label: 'All', icon: null },
-          { key: 'bank', label: 'Bank Account', icon: <Building2 className="w-3.5 h-3.5" /> },
-          { key: 'card', label: 'Credit Cards', icon: <CreditCard className="w-3.5 h-3.5" /> },
+          { key: 'consolidated', label: 'All',          icon: null },
+          { key: 'bank',         label: 'Bank Account', icon: <Building2 className="w-3.5 h-3.5" /> },
+          { key: 'card',         label: 'Credit Cards', icon: <CreditCard className="w-3.5 h-3.5" /> },
         ] as const).map(({ key, label, icon }, i, arr) => (
           <button
             key={key}
@@ -418,47 +439,79 @@ export default function TransactionList() {
         ))}
       </div>
 
-      {/* ── Toolbar ── */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input placeholder="Search…" className="pl-9" value={search} onChange={e => setSearch(e.target.value)} />
+      {/* ── Filters row ── */}
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col sm:flex-row gap-3">
+          {/* Search */}
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input placeholder="Search…" className="pl-9" value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+
+          {/* Month */}
+          <Select value={selectedMonth} onValueChange={v => { if (v) setSelectedMonth(v) }}>
+            <SelectTrigger className="w-full sm:w-36">
+              <span className="flex-1 text-left truncate text-sm">
+                {MONTH_OPTIONS.find(o => o.value === selectedMonth)?.label ?? 'All time'}
+              </span>
+            </SelectTrigger>
+            <SelectContent>
+              {MONTH_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+
+          {/* Type */}
+          <Select value={typeFilter} onValueChange={v => { if (v) setTypeFilter(v) }}>
+            <SelectTrigger className="w-full sm:w-32"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All types</SelectItem>
+              <SelectItem value="income">Income</SelectItem>
+              <SelectItem value="expense">Expense</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* Category */}
+          <Select value={categoryFilter} onValueChange={v => { if (v) setCategoryFilter(v) }}>
+            <SelectTrigger className="w-full sm:w-44"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All categories</SelectItem>
+              {ALL_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
 
-        <Select value={typeFilter} onValueChange={v => { if (v) setTypeFilter(v) }}>
-          <SelectTrigger className="w-full sm:w-36"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All types</SelectItem>
-            <SelectItem value="income">Income</SelectItem>
-            <SelectItem value="expense">Expense</SelectItem>
-          </SelectContent>
-        </Select>
+        {/* Actions + sort row */}
+        <div className="flex gap-2 flex-wrap items-center">
+          {/* Sort */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <ArrowUpDown className="w-3.5 h-3.5 text-muted-foreground" />
+            <Select value={sortBy} onValueChange={v => { if (v) setSortBy(v as SortBy) }}>
+              <SelectTrigger className="h-8 w-36 text-xs">
+                <span className="flex-1 text-left truncate">{SORT_LABELS[sortBy]}</span>
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.entries(SORT_LABELS) as [SortBy, string][]).map(([v, label]) => (
+                  <SelectItem key={v} value={v}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-        <Select value={categoryFilter} onValueChange={v => { if (v) setCategoryFilter(v) }}>
-          <SelectTrigger className="w-full sm:w-44"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All categories</SelectItem>
-            {ALL_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-          </SelectContent>
-        </Select>
+          <div className="flex-1" />
 
-        <div className="flex gap-2 flex-wrap">
-          <Button variant="outline" onClick={() => setPdfOpen(true)} className="shrink-0" title="Import PDF">
-            <FileUp className="w-4 h-4 sm:mr-1" /><span className="hidden sm:inline">Import PDF</span>
+          <Button variant="outline" onClick={() => setPdfOpen(true)} className="shrink-0 h-8" title="Import PDF">
+            <FileUp className="w-4 h-4 sm:mr-1" /><span className="hidden sm:inline text-xs">Import PDF</span>
           </Button>
-          <Button variant="outline" onClick={pasteSms} className="shrink-0" title="Paste UPI SMS from clipboard">
-            <Smartphone className="w-4 h-4 sm:mr-1" /><span className="hidden sm:inline">Paste SMS</span>
+          <Button variant="outline" onClick={pasteSms} className="shrink-0 h-8" title="Paste UPI SMS">
+            <Smartphone className="w-4 h-4 sm:mr-1" /><span className="hidden sm:inline text-xs">Paste SMS</span>
           </Button>
-          <Button onClick={openAdd} className="shrink-0">
-            <Plus className="w-4 h-4 sm:mr-1" /><span>Add</span>
+          <Button onClick={openAdd} className="shrink-0 h-8">
+            <Plus className="w-4 h-4 sm:mr-1" /><span className="text-sm">Add</span>
           </Button>
           {someSelected && (
-            <Button
-              variant="outline"
-              onClick={() => setConfirmOpen(true)}
-              className="shrink-0 border-destructive/40 text-destructive hover:bg-destructive hover:text-destructive-foreground"
-            >
-              <Trash2 className="w-4 h-4 sm:mr-1" /><span>Delete ({selectedIds.size})</span>
+            <Button variant="outline" onClick={() => setConfirmOpen(true)}
+              className="shrink-0 h-8 border-destructive/40 text-destructive hover:bg-destructive hover:text-destructive-foreground">
+              <Trash2 className="w-4 h-4 sm:mr-1" /><span className="text-sm">Delete ({selectedIds.size})</span>
             </Button>
           )}
         </div>
@@ -490,7 +543,7 @@ export default function TransactionList() {
                   </div>
                 )}
                 {view === 'card'
-                  ? groupedItems.map(item => item.kind === 'card-group' && <MobileCardGroupRow key={item.groupKey} item={item} />)
+                  ? groupedItems.map(i => i.kind === 'card-group' && <MobileCardGroupRow key={i.groupKey} item={i} />)
                   : transactions.map(t => <MobileRow key={t.id} t={t} showCard={view === 'consolidated'} />)
                 }
               </div>
@@ -513,7 +566,7 @@ export default function TransactionList() {
                 </TableHeader>
                 <TableBody>
                   {view === 'card'
-                    ? groupedItems.map(item => item.kind === 'card-group' && <CardGroupRow key={item.groupKey} item={item} />)
+                    ? groupedItems.map(i => i.kind === 'card-group' && <CardGroupRow key={i.groupKey} item={i} />)
                     : transactions.map(t => <DesktopRow key={t.id} t={t} showCard={view === 'consolidated'} />)
                   }
                 </TableBody>
