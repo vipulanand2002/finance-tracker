@@ -19,10 +19,10 @@ import {
 import {
   Plus, Search, MoreHorizontal, Pencil, Trash2, FileUp, AlertTriangle,
   ChevronDown, ChevronRight, CreditCard, Smartphone, Loader2, BookUser,
+  Building2,
 } from 'lucide-react'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
 import { formatCurrency } from '@/lib/utils'
-import { useCardToggle } from '@/lib/useCardToggle'
 import TransactionModal from './TransactionModal'
 import PDFImport from './PDFImport'
 import type { Transaction } from '@/types'
@@ -30,6 +30,8 @@ import type { Transaction } from '@/types'
 const ALL_CATEGORIES = [...new Set([...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES])]
 
 interface CardInfo { id: string; card_name: string }
+
+type View = 'consolidated' | 'bank' | 'card'
 
 type ListItem =
   | { kind: 'tx'; tx: Transaction }
@@ -47,12 +49,21 @@ export default function TransactionList() {
   const [pdfOpen, setPdfOpen] = useState(false)
   const [editing, setEditing] = useState<Transaction | null>(null)
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set())
-  const [includeCards, setIncludeCards] = useCardToggle()
+  const [view, setView] = useState<View>(() => {
+    if (typeof window === 'undefined') return 'consolidated'
+    return (localStorage.getItem('ft_tx_view') as View) ?? 'consolidated'
+  })
 
-  // ── Selection & bulk delete ──
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [bulkDeleting, setBulkDeleting] = useState(false)
+
+  function changeView(v: View) {
+    setView(v)
+    localStorage.setItem('ft_tx_view', v)
+    setSelectedIds(new Set())
+    setExpandedCards(new Set())
+  }
 
   const fetchTransactions = useCallback(async () => {
     setLoading(true)
@@ -61,7 +72,8 @@ export default function TransactionList() {
       if (typeFilter !== 'all') params.set('type', typeFilter)
       if (categoryFilter !== 'all') params.set('category', categoryFilter)
       if (search) params.set('search', search)
-      if (!includeCards) params.set('exclude_card', 'true')
+      if (view === 'bank') params.set('exclude_card', 'true')
+      else if (view === 'card') params.set('has_card', 'true')
 
       const res = await fetch(`/api/transactions?${params}`)
       const data = await res.json()
@@ -71,7 +83,7 @@ export default function TransactionList() {
     } finally {
       setLoading(false)
     }
-  }, [typeFilter, categoryFilter, search, includeCards])
+  }, [typeFilter, categoryFilter, search, view])
 
   useEffect(() => {
     fetch('/api/cards').then(r => r.json()).then(d => setCards(Array.isArray(d) ? d : [])).catch(() => {})
@@ -82,82 +94,59 @@ export default function TransactionList() {
     return () => clearTimeout(timer)
   }, [fetchTransactions, search])
 
-  // Clear selection when filters change
-  useEffect(() => { setSelectedIds(new Set()) }, [typeFilter, categoryFilter, search])
+  useEffect(() => { setSelectedIds(new Set()) }, [typeFilter, categoryFilter, search, view])
 
   const cardNameMap = new Map(cards.map(c => [c.id, c.card_name]))
 
-  const listItems = useCallback((): ListItem[] => {
+  // Card view: group transactions by card + month
+  const cardItems = useCallback((): ListItem[] => {
     const groupMap = new Map<string, { cardId: string; month: string; txs: Transaction[] }>()
-    const regular: Transaction[] = []
-
     for (const tx of transactions) {
-      if (tx.card_id) {
-        const month = tx.date.slice(0, 7)
-        const key = `${tx.card_id}-${month}`
-        if (!groupMap.has(key)) groupMap.set(key, { cardId: tx.card_id, month, txs: [] })
-        groupMap.get(key)!.txs.push(tx)
-      } else {
-        regular.push(tx)
-      }
+      if (!tx.card_id) continue
+      const month = tx.date.slice(0, 7)
+      const key = `${tx.card_id}-${month}`
+      if (!groupMap.has(key)) groupMap.set(key, { cardId: tx.card_id, month, txs: [] })
+      groupMap.get(key)!.txs.push(tx)
     }
-
     const items: ListItem[] = []
-
     for (const [groupKey, { cardId, month, txs }] of groupMap) {
       items.push({
         kind: 'card-group',
-        groupKey,
-        cardId,
+        groupKey, cardId,
         cardName: cardNameMap.get(cardId) ?? 'Credit Card',
-        month,
-        txs,
+        month, txs,
         latestDate: txs.reduce((max, t) => (t.date > max ? t.date : max), txs[0].date),
       })
     }
-
-    for (const tx of regular) {
-      items.push({ kind: 'tx', tx })
-    }
-
     items.sort((a, b) => {
-      const dateA = a.kind === 'tx' ? a.tx.date : a.latestDate
-      const dateB = b.kind === 'tx' ? b.tx.date : b.latestDate
-      return dateB.localeCompare(dateA)
+      const dA = a.kind === 'card-group' ? a.latestDate : a.tx.date
+      const dB = b.kind === 'card-group' ? b.latestDate : b.tx.date
+      return dB.localeCompare(dA)
     })
-
     return items
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transactions, cards])
 
-  // All selectable IDs = regular tx rows only (card-group sub-rows selectable individually)
-  const items = listItems()
-  const regularIds = items.filter(i => i.kind === 'tx').map(i => (i as Extract<ListItem, { kind: 'tx' }>).tx.id)
-  const allRegularSelected = regularIds.length > 0 && regularIds.every(id => selectedIds.has(id))
+  const groupedItems = view === 'card' ? cardItems() : []
+
+  // Selectable IDs: flat txs for bank/consolidated, expanded sub-rows for card
+  const selectableIds = view === 'card'
+    ? groupedItems.flatMap(i =>
+        i.kind === 'card-group' && expandedCards.has(i.groupKey) ? i.txs.map(t => t.id) : []
+      )
+    : transactions.map(t => t.id)
+
+  const allSelected = selectableIds.length > 0 && selectableIds.every(id => selectedIds.has(id))
   const someSelected = selectedIds.size > 0
 
   function toggleSelect(id: string) {
-    setSelectedIds(prev => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
+    setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
   }
-
   function toggleSelectAll() {
-    if (allRegularSelected) {
-      setSelectedIds(new Set())
-    } else {
-      setSelectedIds(new Set(regularIds))
-    }
+    setSelectedIds(allSelected ? new Set() : new Set(selectableIds))
   }
-
   function toggleCard(groupKey: string) {
-    setExpandedCards(prev => {
-      const next = new Set(prev)
-      next.has(groupKey) ? next.delete(groupKey) : next.add(groupKey)
-      return next
-    })
+    setExpandedCards(prev => { const n = new Set(prev); n.has(groupKey) ? n.delete(groupKey) : n.add(groupKey); return n })
   }
 
   async function handleDelete(id: string) {
@@ -167,26 +156,18 @@ export default function TransactionList() {
       toast.success('Transaction deleted')
       setSelectedIds(prev => { const n = new Set(prev); n.delete(id); return n })
       fetchTransactions()
-    } catch {
-      toast.error('Failed to delete')
-    }
+    } catch { toast.error('Failed to delete') }
   }
 
   async function handleBulkDelete() {
     setBulkDeleting(true)
     try {
-      await Promise.all([...selectedIds].map(id =>
-        fetch(`/api/transactions?id=${id}`, { method: 'DELETE' })
-      ))
+      await Promise.all([...selectedIds].map(id => fetch(`/api/transactions?id=${id}`, { method: 'DELETE' })))
       toast.success(`${selectedIds.size} transaction${selectedIds.size !== 1 ? 's' : ''} deleted`)
       setSelectedIds(new Set())
       fetchTransactions()
-    } catch {
-      toast.error('Failed to delete some transactions')
-    } finally {
-      setBulkDeleting(false)
-      setConfirmOpen(false)
-    }
+    } catch { toast.error('Failed to delete some transactions') }
+    finally { setBulkDeleting(false); setConfirmOpen(false) }
   }
 
   function openAdd() { setEditing(null); setModalOpen(true) }
@@ -197,9 +178,7 @@ export default function TransactionList() {
       const text = await navigator.clipboard.readText()
       if (!text.trim()) { toast.error('Clipboard is empty'); return }
       router.push(`/share?text=${encodeURIComponent(text)}`)
-    } catch {
-      toast.error('Could not read clipboard. Allow clipboard access and try again.')
-    }
+    } catch { toast.error('Could not read clipboard. Allow clipboard access and try again.') }
   }
 
   function txAmountColor(t: Transaction) {
@@ -214,8 +193,88 @@ export default function TransactionList() {
     return { net: refund - expense, payment }
   }
 
-  // ── Desktop sub-components ──
+  // ── Shared actions dropdown ──
+  const ActionsMenu = ({ t, size = 'md' }: { t: Transaction; size?: 'sm' | 'md' }) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className={`inline-flex items-center justify-center rounded-md hover:bg-muted transition-colors text-muted-foreground ${size === 'sm' ? 'h-7 w-7' : 'h-8 w-8'}`}
+        aria-label="Options"
+      >
+        <MoreHorizontal className="w-4 h-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => openEdit(t)}><Pencil className="w-4 h-4 mr-2" />Edit</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => handleDelete(t.id)} className="text-destructive"><Trash2 className="w-4 h-4 mr-2" />Delete</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
 
+  // ── Bank + Consolidated desktop row (showCard adds card badge in consolidated) ──
+  const DesktopRow = ({ t, showCard }: { t: Transaction; showCard?: boolean }) => (
+    <TableRow className={selectedIds.has(t.id) ? 'bg-primary/5' : ''}>
+      <TableCell className="w-10">
+        <input type="checkbox" className="w-4 h-4 rounded accent-primary cursor-pointer" checked={selectedIds.has(t.id)} onChange={() => toggleSelect(t.id)} />
+      </TableCell>
+      <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+        {format(new Date(t.date + 'T00:00:00'), 'dd MMM yyyy')}
+      </TableCell>
+      <TableCell>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm">{t.description ?? '—'}</span>
+          {t.is_recurring && <Badge variant="secondary" className="text-xs">Recurring</Badge>}
+          {t.contacts && (
+            <Badge variant="outline" className="text-xs gap-1 text-muted-foreground">
+              <BookUser className="w-3 h-3" />{t.contacts.name}
+            </Badge>
+          )}
+          {showCard && t.card_id && cardNameMap.get(t.card_id) && (
+            <Badge variant="outline" className="text-xs gap-1 border-primary/30 text-primary shrink-0">
+              <CreditCard className="w-3 h-3" />{cardNameMap.get(t.card_id)}
+            </Badge>
+          )}
+        </div>
+      </TableCell>
+      <TableCell><Badge variant="outline" className="text-xs">{t.category}</Badge></TableCell>
+      <TableCell className="text-right">
+        <span className={`font-semibold text-sm ${showCard ? txAmountColor(t) : t.type === 'income' ? 'text-emerald-600' : 'text-red-600'}`}>
+          {showCard && t.category === 'Card Payment' ? '' : t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
+        </span>
+      </TableCell>
+      <TableCell><ActionsMenu t={t} /></TableCell>
+    </TableRow>
+  )
+
+  // ── Bank + Consolidated mobile row ──
+  const MobileRow = ({ t, showCard }: { t: Transaction; showCard?: boolean }) => (
+    <div className={`flex items-center gap-3 px-4 py-3 border-b last:border-0 ${selectedIds.has(t.id) ? 'bg-primary/5' : ''}`}>
+      <input type="checkbox" className="w-4 h-4 rounded accent-primary cursor-pointer shrink-0" checked={selectedIds.has(t.id)} onChange={() => toggleSelect(t.id)} />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium truncate">{t.description ?? t.category}</p>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-xs text-muted-foreground">
+            {t.category} · {format(new Date(t.date + 'T00:00:00'), 'dd MMM')}
+            {t.is_recurring && <span className="ml-1 text-primary">↻</span>}
+          </span>
+          {showCard && t.card_id && cardNameMap.get(t.card_id) && (
+            <span className="inline-flex items-center gap-1 text-xs text-primary">
+              <CreditCard className="w-3 h-3" />{cardNameMap.get(t.card_id)}
+            </span>
+          )}
+          {t.contacts && (
+            <span className="text-xs text-muted-foreground">· <BookUser className="inline w-3 h-3 mb-0.5" /> {t.contacts.name}</span>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-2 shrink-0 ml-2">
+        <span className={`text-sm font-semibold ${showCard ? txAmountColor(t) : t.type === 'income' ? 'text-emerald-600' : 'text-red-600'}`}>
+          {showCard && t.category === 'Card Payment' ? '' : t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
+        </span>
+        <ActionsMenu t={t} size="sm" />
+      </div>
+    </div>
+  )
+
+  // ── Credit Card view: grouped desktop row ──
   const CardGroupRow = ({ item }: { item: Extract<ListItem, { kind: 'card-group' }> }) => {
     const expanded = expandedCards.has(item.groupKey)
     const { net, payment } = groupStats(item.txs)
@@ -227,11 +286,7 @@ export default function TransactionList() {
 
     return (
       <>
-        <TableRow
-          className="cursor-pointer hover:bg-muted/60 bg-muted/20 border-b-0"
-          onClick={() => toggleCard(item.groupKey)}
-        >
-          {/* Empty checkbox cell for alignment */}
+        <TableRow className="cursor-pointer hover:bg-muted/60 bg-muted/20 border-b-0" onClick={() => toggleCard(item.groupKey)}>
           <TableCell className="w-10" onClick={e => e.stopPropagation()} />
           <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{dateRange}</TableCell>
           <TableCell>
@@ -248,7 +303,9 @@ export default function TransactionList() {
             </div>
           </TableCell>
           <TableCell>
-            <Badge variant="outline" className="text-xs">Credit Card</Badge>
+            <Badge variant="outline" className="text-xs gap-1">
+              <CreditCard className="w-3 h-3" />{item.cardName}
+            </Badge>
           </TableCell>
           <TableCell className="text-right">
             <span className={`font-semibold text-sm ${net >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
@@ -256,21 +313,14 @@ export default function TransactionList() {
             </span>
           </TableCell>
           <TableCell>
-            {expanded
-              ? <ChevronDown className="w-4 h-4 text-muted-foreground" />
-              : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
+            {expanded ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
           </TableCell>
         </TableRow>
 
         {expanded && item.txs.map(t => (
           <TableRow key={t.id} className="bg-muted/5">
             <TableCell className="w-10" onClick={e => e.stopPropagation()}>
-              <input
-                type="checkbox"
-                className="w-4 h-4 rounded accent-primary cursor-pointer"
-                checked={selectedIds.has(t.id)}
-                onChange={() => toggleSelect(t.id)}
-              />
+              <input type="checkbox" className="w-4 h-4 rounded accent-primary cursor-pointer" checked={selectedIds.has(t.id)} onChange={() => toggleSelect(t.id)} />
             </TableCell>
             <TableCell className="text-sm text-muted-foreground whitespace-nowrap pl-6">
               {format(new Date(t.date + 'T00:00:00'), 'dd MMM yyyy')}
@@ -279,10 +329,7 @@ export default function TransactionList() {
               <span className="text-sm">{t.description ?? '—'}</span>
             </TableCell>
             <TableCell>
-              <Badge
-                variant="outline"
-                className={`text-xs ${t.category === 'Card Payment' ? 'border-blue-300 text-blue-600 dark:border-blue-700 dark:text-blue-400' : ''}`}
-              >
+              <Badge variant="outline" className={`text-xs ${t.category === 'Card Payment' ? 'border-blue-300 text-blue-600 dark:border-blue-700 dark:text-blue-400' : ''}`}>
                 {t.category}
               </Badge>
             </TableCell>
@@ -291,69 +338,14 @@ export default function TransactionList() {
                 {t.category === 'Card Payment' ? '' : t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
               </span>
             </TableCell>
-            <TableCell>
-              <DropdownMenu>
-                <DropdownMenuTrigger className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-muted transition-colors text-muted-foreground" aria-label="Options">
-                  <MoreHorizontal className="w-4 h-4" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => openEdit(t)}><Pencil className="w-4 h-4 mr-2" />Edit</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleDelete(t.id)} className="text-destructive"><Trash2 className="w-4 h-4 mr-2" />Delete</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </TableCell>
+            <TableCell><ActionsMenu t={t} /></TableCell>
           </TableRow>
         ))}
       </>
     )
   }
 
-  const DesktopRow = ({ t }: { t: Transaction }) => (
-    <TableRow className={selectedIds.has(t.id) ? 'bg-primary/5' : ''}>
-      <TableCell className="w-10">
-        <input
-          type="checkbox"
-          className="w-4 h-4 rounded accent-primary cursor-pointer"
-          checked={selectedIds.has(t.id)}
-          onChange={() => toggleSelect(t.id)}
-        />
-      </TableCell>
-      <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
-        {format(new Date(t.date + 'T00:00:00'), 'dd MMM yyyy')}
-      </TableCell>
-      <TableCell>
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm">{t.description ?? '—'}</span>
-          {t.is_recurring && <Badge variant="secondary" className="text-xs">Recurring</Badge>}
-          {t.contacts && (
-            <Badge variant="outline" className="text-xs gap-1 text-muted-foreground">
-              <BookUser className="w-3 h-3" />{t.contacts.name}
-            </Badge>
-          )}
-        </div>
-      </TableCell>
-      <TableCell><Badge variant="outline" className="text-xs">{t.category}</Badge></TableCell>
-      <TableCell className="text-right">
-        <span className={`font-semibold text-sm ${t.type === 'income' ? 'text-emerald-600' : 'text-red-600'}`}>
-          {t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
-        </span>
-      </TableCell>
-      <TableCell>
-        <DropdownMenu>
-          <DropdownMenuTrigger className="inline-flex items-center justify-center h-8 w-8 rounded-md hover:bg-muted transition-colors text-muted-foreground" aria-label="Options">
-            <MoreHorizontal className="w-4 h-4" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => openEdit(t)}><Pencil className="w-4 h-4 mr-2" />Edit</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handleDelete(t.id)} className="text-destructive"><Trash2 className="w-4 h-4 mr-2" />Delete</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </TableCell>
-    </TableRow>
-  )
-
-  // ── Mobile sub-components ──
-
+  // ── Credit Card view: grouped mobile row ──
   const MobileCardGroupRow = ({ item }: { item: Extract<ListItem, { kind: 'card-group' }> }) => {
     const expanded = expandedCards.has(item.groupKey)
     const { net, payment } = groupStats(item.txs)
@@ -361,10 +353,7 @@ export default function TransactionList() {
 
     return (
       <>
-        <div
-          className="flex items-center justify-between p-4 border-b bg-muted/20 cursor-pointer"
-          onClick={() => toggleCard(item.groupKey)}
-        >
+        <div className="flex items-center justify-between p-4 border-b bg-muted/20 cursor-pointer" onClick={() => toggleCard(item.groupKey)}>
           <div className="flex items-center gap-2 min-w-0 flex-1">
             <CreditCard className="w-4 h-4 text-primary shrink-0" />
             <div className="min-w-0">
@@ -385,12 +374,7 @@ export default function TransactionList() {
 
         {expanded && item.txs.map(t => (
           <div key={t.id} className={`flex items-center gap-3 px-4 py-3 border-b pl-8 ${selectedIds.has(t.id) ? 'bg-primary/5' : 'bg-muted/5'}`}>
-            <input
-              type="checkbox"
-              className="w-4 h-4 rounded accent-primary cursor-pointer shrink-0"
-              checked={selectedIds.has(t.id)}
-              onChange={() => toggleSelect(t.id)}
-            />
+            <input type="checkbox" className="w-4 h-4 rounded accent-primary cursor-pointer shrink-0" checked={selectedIds.has(t.id)} onChange={() => toggleSelect(t.id)} />
             <div className="min-w-0 flex-1">
               <p className="text-sm truncate">{t.description ?? t.category}</p>
               <p className={`text-xs ${t.category === 'Card Payment' ? 'text-blue-500' : 'text-muted-foreground'}`}>
@@ -401,15 +385,7 @@ export default function TransactionList() {
               <span className={`text-sm font-semibold ${txAmountColor(t)}`}>
                 {t.category === 'Card Payment' ? '' : t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
               </span>
-              <DropdownMenu>
-                <DropdownMenuTrigger className="inline-flex items-center justify-center h-7 w-7 rounded-md hover:bg-muted transition-colors text-muted-foreground" aria-label="Options">
-                  <MoreHorizontal className="w-4 h-4" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => openEdit(t)}><Pencil className="w-4 h-4 mr-2" />Edit</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleDelete(t.id)} className="text-destructive"><Trash2 className="w-4 h-4 mr-2" />Delete</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <ActionsMenu t={t} size="sm" />
             </div>
           </div>
         ))}
@@ -417,41 +393,28 @@ export default function TransactionList() {
     )
   }
 
-  const MobileRow = ({ t }: { t: Transaction }) => (
-    <div className={`flex items-center gap-3 px-4 py-3 border-b last:border-0 ${selectedIds.has(t.id) ? 'bg-primary/5' : ''}`}>
-      <input
-        type="checkbox"
-        className="w-4 h-4 rounded accent-primary cursor-pointer shrink-0"
-        checked={selectedIds.has(t.id)}
-        onChange={() => toggleSelect(t.id)}
-      />
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium truncate">{t.description ?? t.category}</p>
-        <p className="text-xs text-muted-foreground">
-          {t.category} · {format(new Date(t.date + 'T00:00:00'), 'dd MMM')}
-          {t.is_recurring && <span className="ml-1 text-primary">↻</span>}
-          {t.contacts && <span className="ml-1">· <BookUser className="inline w-3 h-3 mb-0.5" /> {t.contacts.name}</span>}
-        </p>
-      </div>
-      <div className="flex items-center gap-2 shrink-0 ml-2">
-        <span className={`text-sm font-semibold ${t.type === 'income' ? 'text-emerald-600' : 'text-red-600'}`}>
-          {t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
-        </span>
-        <DropdownMenu>
-          <DropdownMenuTrigger className="inline-flex items-center justify-center h-7 w-7 rounded-md hover:bg-muted transition-colors text-muted-foreground" aria-label="Options">
-            <MoreHorizontal className="w-4 h-4" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => openEdit(t)}><Pencil className="w-4 h-4 mr-2" />Edit</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handleDelete(t.id)} className="text-destructive"><Trash2 className="w-4 h-4 mr-2" />Delete</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </div>
-  )
+  const isEmpty = view === 'card' ? groupedItems.length === 0 : transactions.length === 0
 
   return (
     <div className="space-y-4">
+
+      {/* ── View tabs ── */}
+      <div className="flex rounded-lg border overflow-hidden text-sm w-fit">
+        {([
+          { key: 'consolidated', label: 'All', icon: null },
+          { key: 'bank', label: 'Bank Account', icon: <Building2 className="w-3.5 h-3.5" /> },
+          { key: 'card', label: 'Credit Cards', icon: <CreditCard className="w-3.5 h-3.5" /> },
+        ] as const).map(({ key, label, icon }, i, arr) => (
+          <button
+            key={key}
+            className={`flex items-center gap-1.5 px-4 py-2 transition-colors ${i < arr.length - 1 ? 'border-r' : ''} ${view === key ? 'bg-primary text-primary-foreground' : 'hover:bg-muted text-muted-foreground'}`}
+            onClick={() => changeView(key)}
+          >
+            {icon}{label}
+          </button>
+        ))}
+      </div>
+
       {/* ── Toolbar ── */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
@@ -477,27 +440,14 @@ export default function TransactionList() {
         </Select>
 
         <div className="flex gap-2 flex-wrap">
-          <Button
-            variant={includeCards ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setIncludeCards(!includeCards)}
-            className="gap-1.5 shrink-0"
-            title={includeCards ? 'Card transactions shown' : 'Card transactions hidden'}
-          >
-            <CreditCard className="w-4 h-4" />
-            <span className="hidden sm:inline">Cards {includeCards ? 'On' : 'Off'}</span>
-          </Button>
           <Button variant="outline" onClick={() => setPdfOpen(true)} className="shrink-0" title="Import PDF">
-            <FileUp className="w-4 h-4 sm:mr-1" />
-            <span className="hidden sm:inline">Import PDF</span>
+            <FileUp className="w-4 h-4 sm:mr-1" /><span className="hidden sm:inline">Import PDF</span>
           </Button>
           <Button variant="outline" onClick={pasteSms} className="shrink-0" title="Paste UPI SMS from clipboard">
-            <Smartphone className="w-4 h-4 sm:mr-1" />
-            <span className="hidden sm:inline">Paste SMS</span>
+            <Smartphone className="w-4 h-4 sm:mr-1" /><span className="hidden sm:inline">Paste SMS</span>
           </Button>
           <Button onClick={openAdd} className="shrink-0">
-            <Plus className="w-4 h-4 sm:mr-1" />
-            <span>Add</span>
+            <Plus className="w-4 h-4 sm:mr-1" /><span>Add</span>
           </Button>
           {someSelected && (
             <Button
@@ -505,8 +455,7 @@ export default function TransactionList() {
               onClick={() => setConfirmOpen(true)}
               className="shrink-0 border-destructive/40 text-destructive hover:bg-destructive hover:text-destructive-foreground"
             >
-              <Trash2 className="w-4 h-4 sm:mr-1" />
-              <span>Delete ({selectedIds.size})</span>
+              <Trash2 className="w-4 h-4 sm:mr-1" /><span>Delete ({selectedIds.size})</span>
             </Button>
           )}
         </div>
@@ -519,51 +468,38 @@ export default function TransactionList() {
             <div className="p-4 space-y-3">
               {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
             </div>
-          ) : items.length === 0 ? (
+          ) : isEmpty ? (
             <div className="py-16 text-center text-muted-foreground">
               <p className="mb-3">No transactions found</p>
               <Button size="sm" onClick={openAdd}><Plus className="w-4 h-4 mr-1" />Add your first transaction</Button>
             </div>
           ) : (
             <>
-              {/* Mobile view */}
+              {/* Mobile */}
               <div className="md:hidden">
-                {/* Mobile select-all bar */}
-                {regularIds.length > 0 && (
+                {view !== 'card' && (
                   <div className="flex items-center gap-3 px-4 py-2.5 border-b bg-muted/30">
-                    <input
-                      type="checkbox"
-                      className="w-4 h-4 rounded accent-primary cursor-pointer"
-                      checked={allRegularSelected}
-                      onChange={toggleSelectAll}
-                    />
+                    <input type="checkbox" className="w-4 h-4 rounded accent-primary cursor-pointer" checked={allSelected} onChange={toggleSelectAll} />
                     <span className="text-xs text-muted-foreground">
-                      {allRegularSelected ? 'Deselect all' : `Select all (${regularIds.length})`}
+                      {allSelected ? 'Deselect all' : `Select all (${transactions.length})`}
                     </span>
-                    {someSelected && (
-                      <span className="ml-auto text-xs font-medium text-primary">{selectedIds.size} selected</span>
-                    )}
+                    {someSelected && <span className="ml-auto text-xs font-medium text-primary">{selectedIds.size} selected</span>}
                   </div>
                 )}
-                {items.map((item) =>
-                  item.kind === 'card-group'
-                    ? <MobileCardGroupRow key={item.groupKey} item={item} />
-                    : <MobileRow key={item.tx.id} t={item.tx} />
-                )}
+                {view === 'card'
+                  ? groupedItems.map(item => item.kind === 'card-group' && <MobileCardGroupRow key={item.groupKey} item={item} />)
+                  : transactions.map(t => <MobileRow key={t.id} t={t} showCard={view === 'consolidated'} />)
+                }
               </div>
 
-              {/* Desktop table */}
+              {/* Desktop */}
               <Table className="hidden md:table">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10">
-                      <input
-                        type="checkbox"
-                        className="w-4 h-4 rounded accent-primary cursor-pointer"
-                        checked={allRegularSelected}
-                        onChange={toggleSelectAll}
-                        title="Select all"
-                      />
+                      {view !== 'card' && (
+                        <input type="checkbox" className="w-4 h-4 rounded accent-primary cursor-pointer" checked={allSelected} onChange={toggleSelectAll} title="Select all" />
+                      )}
                     </TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead>Description</TableHead>
@@ -573,11 +509,10 @@ export default function TransactionList() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {items.map((item) =>
-                    item.kind === 'card-group'
-                      ? <CardGroupRow key={item.groupKey} item={item} />
-                      : <DesktopRow key={item.tx.id} t={item.tx} />
-                  )}
+                  {view === 'card'
+                    ? groupedItems.map(item => item.kind === 'card-group' && <CardGroupRow key={item.groupKey} item={item} />)
+                    : transactions.map(t => <DesktopRow key={t.id} t={t} showCard={view === 'consolidated'} />)
+                  }
                 </TableBody>
               </Table>
             </>
@@ -585,7 +520,7 @@ export default function TransactionList() {
         </CardContent>
       </Card>
 
-      {/* ── Confirmation dialog ── */}
+      {/* ── Delete confirmation ── */}
       {confirmOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => !bulkDeleting && setConfirmOpen(false)}>
           <div className="bg-card border rounded-xl p-6 max-w-sm w-full space-y-4 shadow-xl" onClick={e => e.stopPropagation()}>
@@ -595,13 +530,11 @@ export default function TransactionList() {
               </div>
               <div>
                 <p className="font-semibold">Delete {selectedIds.size} transaction{selectedIds.size !== 1 ? 's' : ''}?</p>
-                <p className="text-sm text-muted-foreground mt-1">This action cannot be undone. The selected records will be permanently removed.</p>
+                <p className="text-sm text-muted-foreground mt-1">This cannot be undone.</p>
               </div>
             </div>
             <div className="flex gap-2 justify-end pt-1">
-              <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={bulkDeleting}>
-                Cancel
-              </Button>
+              <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={bulkDeleting}>Cancel</Button>
               <Button variant="destructive" onClick={handleBulkDelete} disabled={bulkDeleting}>
                 {bulkDeleting && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
                 {bulkDeleting ? 'Deleting…' : 'Delete'}
@@ -611,12 +544,7 @@ export default function TransactionList() {
         </div>
       )}
 
-      <TransactionModal
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        onSaved={fetchTransactions}
-        transaction={editing}
-      />
+      <TransactionModal open={modalOpen} onClose={() => setModalOpen(false)} onSaved={fetchTransactions} transaction={editing} />
       <PDFImport open={pdfOpen} onClose={() => setPdfOpen(false)} onImported={fetchTransactions} />
     </div>
   )
