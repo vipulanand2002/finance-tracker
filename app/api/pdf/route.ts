@@ -5,8 +5,12 @@ import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY! })
 
-// llama-3.3-70b-versatile has 12K TPM free tier (8b-instant is only 6K)
-const PDF_MODEL = 'llama-3.3-70b-versatile'
+// Model priority list — first available wins. Groq deprecates models; fallbacks prevent hard failures.
+const PDF_MODELS = [
+  'llama-3.3-70b-versatile',   // primary
+  'llama-3.1-70b-versatile',   // fallback
+  'llama3-70b-8192',           // older but long-lived
+]
 
 // ~8,000 tokens of text per chunk — leaves ~3K headroom under the 12K TPM limit
 // for the prompt/schema/rules overhead. 1 token ≈ 4 chars → 8,000 * 4 = 32,000 chars
@@ -77,21 +81,35 @@ Return a JSON array with objects: { date:"YYYY-MM-DD", description:"<merchant, m
 Statement:
 ${chunkText}`
 
-  const completion = await groq.chat.completions.create({
-    model: PDF_MODEL,
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.1,
-    max_tokens: 4096,
-  })
+  let lastErr: any
+  for (const model of PDF_MODELS) {
+    try {
+      const completion = await groq.chat.completions.create({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.1,
+        max_tokens: 4096,
+      })
 
-  const raw = completion.choices[0]?.message?.content ?? ''
-  const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim()
-  try {
-    const parsed = JSON.parse(clean)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
+      const raw = completion.choices[0]?.message?.content ?? ''
+      const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim()
+      try {
+        const parsed = JSON.parse(clean)
+        return Array.isArray(parsed) ? parsed : []
+      } catch {
+        return []
+      }
+    } catch (err: any) {
+      lastErr = err
+      // 404 = model deprecated/removed — try the next one
+      if (err?.status === 404) {
+        console.warn(`Groq model ${model} not available, trying fallback`)
+        continue
+      }
+      throw err
+    }
   }
+  throw lastErr
 }
 
 // Normalize CR/+ credit markers so the AI reliably identifies them as income.
@@ -210,7 +228,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ transactions: result })
   } catch (err: any) {
-    console.error('PDF parse error:', err)
+    // Surface the real Groq error for easier diagnosis
+    const groqMsg: string = err?.error?.error?.message ?? err?.message ?? ''
+    console.error('PDF parse error — status:', err?.status, '| message:', groqMsg)
 
     if (err?.status === 429 || err?.status === 413) {
       return NextResponse.json(
@@ -218,9 +238,21 @@ export async function POST(request: Request) {
         { status: 429 }
       )
     }
+    if (err?.status === 401) {
+      return NextResponse.json(
+        { error: 'AI service authentication failed — check GROQ_API_KEY in environment variables.' },
+        { status: 500 }
+      )
+    }
+    if (err?.status === 404) {
+      return NextResponse.json(
+        { error: 'No AI model available — all Groq models in the fallback list returned 404. Update PDF_MODELS in /api/pdf/route.ts.' },
+        { status: 500 }
+      )
+    }
 
     return NextResponse.json(
-      { error: 'Failed to parse PDF. Make sure it is a readable bank statement.' },
+      { error: groqMsg || 'Failed to parse PDF. Make sure it is a readable bank statement.' },
       { status: 500 }
     )
   }
