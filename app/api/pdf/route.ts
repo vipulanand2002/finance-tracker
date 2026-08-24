@@ -5,16 +5,56 @@ import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY! })
 
-// Model priority list — first available wins. Groq deprecates models; fallbacks prevent hard failures.
-const PDF_MODELS = [
-  'llama-3.3-70b-versatile',   // primary
-  'llama-3.1-70b-versatile',   // fallback
-  'llama3-70b-8192',           // older but long-lived
-]
-
 // ~8,000 tokens of text per chunk — leaves ~3K headroom under the 12K TPM limit
 // for the prompt/schema/rules overhead. 1 token ≈ 4 chars → 8,000 * 4 = 32,000 chars
 const MAX_CHUNK_CHARS = 32000
+
+// Prefer larger, newer chat/instruct models. Patterns ordered best→worst.
+const MODEL_PREFERENCE: RegExp[] = [
+  /llama-3\.3-70b/,
+  /llama.*3.*70b.*versatile/,
+  /llama.*70b/,
+  /qwen.*72b/,
+  /mixtral.*8x7b/,
+  /llama.*3.*8b.*instant/,
+  /llama.*8b/,
+]
+
+// Exclude non-chat models regardless of name match
+const MODEL_EXCLUDE = /whisper|guard|tts|embed|vision|preview/i
+
+// Module-level cache — survives warm Lambda invocations, avoids per-request latency
+let modelCache: { id: string; expiresAt: number } | null = null
+
+async function resolveBestModel(invalidate = false): Promise<string> {
+  if (invalidate) modelCache = null
+  const now = Date.now()
+  if (modelCache && now < modelCache.expiresAt) return modelCache.id
+
+  try {
+    const page = await groq.models.list()
+    const ids: string[] = (page.data ?? []).map((m: any) => String(m.id))
+    const eligible = ids.filter(id => !MODEL_EXCLUDE.test(id))
+
+    for (const pattern of MODEL_PREFERENCE) {
+      const match = eligible.find(id => pattern.test(id))
+      if (match) {
+        modelCache = { id: match, expiresAt: now + 3_600_000 }
+        console.log('[PDF] Using Groq model:', match)
+        return match
+      }
+    }
+
+    // Any eligible model is better than nothing
+    const fallback = eligible[0] ?? 'llama3-70b-8192'
+    modelCache = { id: fallback, expiresAt: now + 3_600_000 }
+    console.log('[PDF] Using Groq fallback model:', fallback)
+    return fallback
+  } catch (err) {
+    console.warn('[PDF] Could not list Groq models, using default:', err)
+    return 'llama3-70b-8192'
+  }
+}
 
 async function extractPdfText(buffer: ArrayBuffer, password?: string): Promise<string> {
   // pdf-parse bundles its own pdfjs v2 which is Node.js-native (no browser APIs).
@@ -67,6 +107,20 @@ async function extractPdfText(buffer: ArrayBuffer, password?: string): Promise<s
   return lines.join('\n')
 }
 
+function isModelGone(err: any): boolean {
+  const msg = (err?.error?.error?.message ?? err?.message ?? '').toLowerCase()
+  return (
+    err?.status === 404 ||
+    err?.status === 410 ||
+    (err?.status === 400 && (
+      msg.includes('decommission') ||
+      msg.includes('deprecated') ||
+      msg.includes('no longer supported') ||
+      msg.includes('not supported')
+    ))
+  )
+}
+
 async function parseChunk(chunkText: string, categories: string, billingContext: string): Promise<any[]> {
   const prompt = `Extract transactions from this bank statement. ${billingContext}
 
@@ -81,8 +135,9 @@ Return a JSON array with objects: { date:"YYYY-MM-DD", description:"<merchant, m
 Statement:
 ${chunkText}`
 
-  let lastErr: any
-  for (const model of PDF_MODELS) {
+  // Two attempts: first with cached model, second with a fresh model list if the cached one is gone
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const model = await resolveBestModel(attempt > 0)
     try {
       const completion = await groq.chat.completions.create({
         model,
@@ -94,22 +149,19 @@ ${chunkText}`
       const raw = completion.choices[0]?.message?.content ?? ''
       const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim()
       try {
-        const parsed = JSON.parse(clean)
-        return Array.isArray(parsed) ? parsed : []
+        return Array.isArray(JSON.parse(clean)) ? JSON.parse(clean) : []
       } catch {
         return []
       }
     } catch (err: any) {
-      lastErr = err
-      // 404 = model deprecated/removed — try the next one
-      if (err?.status === 404) {
-        console.warn(`Groq model ${model} not available, trying fallback`)
+      if (isModelGone(err) && attempt === 0) {
+        console.warn(`[PDF] Model ${model} gone (${err?.status}), retrying with fresh model list`)
         continue
       }
       throw err
     }
   }
-  throw lastErr
+  throw new Error('No available Groq model found after refreshing model list')
 }
 
 // Normalize CR/+ credit markers so the AI reliably identifies them as income.
@@ -241,12 +293,6 @@ export async function POST(request: Request) {
     if (err?.status === 401) {
       return NextResponse.json(
         { error: 'AI service authentication failed — check GROQ_API_KEY in environment variables.' },
-        { status: 500 }
-      )
-    }
-    if (err?.status === 404) {
-      return NextResponse.json(
-        { error: 'No AI model available — all Groq models in the fallback list returned 404. Update PDF_MODELS in /api/pdf/route.ts.' },
         { status: 500 }
       )
     }
