@@ -220,15 +220,35 @@ async function callGemini(prompt: string): Promise<string> {
 }
 
 async function parseChunk(chunkText: string, categories: string, billingContext: string): Promise<any[]> {
-  const prompt = `Extract ALL transactions from this bank statement. ${billingContext}
+  const prompt = `You are a precise bank statement parser. Extract ONLY actual debit/credit transactions from the text below. ${billingContext}
 
-Respond with ONLY a valid JSON array — no explanation, no markdown, no code fences, all keys must be double-quoted.
-Each element: { "date":"YYYY-MM-DD", "description":"<merchant, max 60 chars>", "amount":<positive number>, "type":"income" or "expense", "category":"<from list>" }
+Respond with ONLY a valid JSON array — no explanation, no markdown, no code fences, all keys double-quoted.
+Each element: { "date":"YYYY-MM-DD", "description":"<merchant or payee, max 60 chars>", "amount":<positive number>, "type":"income" or "expense", "category":"<from list>" }
 
-Rules:
-- type is "income" for CREDIT entries, refunds, cashback, deposits; "expense" for everything else
-- Omit balance lines (opening/closing balance, totals) and non-transaction lines (headers, account info)
-- Categories: ${categories}
+STRICT INCLUSION RULE — include a row ONLY if ALL three are true:
+1. It has a specific calendar date (day/month/year)
+2. It has a clear merchant, payee, or transfer description (not a label like "Amount" or "Balance")
+3. It has a single debit OR credit monetary amount
+
+STRICT EXCLUSION — skip any row that is:
+- Opening balance, closing balance, available balance, or any "balance" line
+- Credit limit, available credit, minimum amount due, total amount due
+- Reward points, cashback earned, miles, or non-monetary values
+- Column headers (Date, Description, Debit, Credit, Amount, Balance, etc.)
+- Summary totals, subtotals, or aggregate rows (Total Debit, Total Credit, etc.)
+- Account info, statement period, customer name, account number, branch details
+- Page numbers, footnotes, or promotional text
+- Any row whose description is a generic label rather than a real merchant/payee
+- Rows with amount = 0
+
+TYPE RULES:
+- "income" = CR / CREDIT / deposit / refund / cashback / reversal / payment received
+- "expense" = DR / DEBIT / purchase / withdrawal / charge / fee / EMI
+
+If a row shows both a debit column and a credit column, use whichever is non-zero.
+If unsure whether a row is a real transaction, SKIP IT — false negatives are better than hallucinations.
+
+Categories: ${categories}
 
 Statement text:
 ${chunkText}`
@@ -394,19 +414,33 @@ export async function POST(request: Request) {
       if (Array.isArray(txs)) allTransactions.push(...txs)
     }
 
+    // Post-processing: drop clearly invalid rows
+    const JUNK_DESC = /^(balance|total|subtotal|opening|closing|minimum|credit limit|available|amount due|statement|reward|cashback earned|points|miles|interest|principal|fees?|charges?|date|description|debit|credit|particulars|narration|details|ref(erence)?|sl\.?\s*no|sr\.?\s*no|s\.?\s*no)\.?$/i
+    const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+    const filtered = allTransactions.filter(t => {
+      if (!t.date || !DATE_RE.test(t.date)) return false
+      if (!t.amount || typeof t.amount !== 'number' || t.amount <= 0) return false
+      if (!t.description || typeof t.description !== 'string') return false
+      const desc = t.description.trim()
+      if (desc.length < 3) return false
+      if (JUNK_DESC.test(desc)) return false
+      return true
+    })
+    console.log(`[PDF] Filtered ${allTransactions.length - filtered.length} junk rows, kept ${filtered.length}`)
+
     // Sort merged results by date descending
-    allTransactions.sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''))
+    filtered.sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''))
 
     // For credit card imports, fix wrong income categories (Salary, Gift, etc.)
     // while keeping type=income so they display as credits, not debits.
     // Refund stays Refund; everything else is a bill payment → Card Payment.
     const result = isCard
-      ? allTransactions.map(t => {
+      ? filtered.map(t => {
           if (t.type !== 'income') return t
           if (t.category === 'Refund') return t
           return { ...t, category: 'Card Payment' }
         })
-      : allTransactions
+      : filtered
 
     return NextResponse.json({ transactions: result })
   } catch (err: any) {
