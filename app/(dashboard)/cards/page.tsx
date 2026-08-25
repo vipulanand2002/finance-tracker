@@ -56,8 +56,8 @@ const MONTH_OPTIONS = buildMonthOptions()
 function cardOutstanding(txs: Transaction[], cardId: string) {
   const ts = txs.filter(t => t.card_id === cardId)
   const spent = ts.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
-  const paid = ts.filter(t => t.category === 'Card Payment').reduce((s, t) => s + t.amount, 0)
-  return spent - paid
+  const credited = ts.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
+  return Math.max(0, spent - credited)
 }
 
 function spendByCategory(txs: Transaction[]) {
