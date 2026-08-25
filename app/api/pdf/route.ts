@@ -11,29 +11,40 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY! })
 const MAX_CHUNK_CHARS = 12000
 
 // Prefer larger, newer chat/instruct models. Patterns ordered best→worst.
-// Case-insensitive; broadened to catch whatever Groq currently offers.
+// Updated based on real Groq model list (Aug 2026):
+//   gpt-oss-120b, qwen/qwen3.6-27b, gpt-oss-20b, groq/compound, allam-2-7b
 const MODEL_PREFERENCE: RegExp[] = [
+  // Large OpenAI OSS models hosted on Groq
+  /gpt-oss-120b/i,
+  /gpt-oss-20b/i,
+  // Llama 4
   /llama-4.*maverick/i,
   /llama-4.*scout/i,
   /llama.*4.*\d+b/i,
+  // Llama 3.x 70B
   /llama-3\.3-70b/i,
   /llama.*3.*70b/i,
   /llama.*70b/i,
-  /qwen.*72b/i,
-  /qwen.*32b/i,
-  /qwen.*instruct/i,
-  /deepseek.*r2|deepseek.*v3/i,
+  // Qwen (matches qwen3.6-27b, qwen-72b, etc.)
+  /qwen/i,
+  // DeepSeek
+  /deepseek/i,
+  // Mixtral / Gemma
   /mixtral.*8x7b/i,
   /gemma.*27b/i,
-  /llama.*3.*8b.*instant/i,
+  // Groq compound (last resort — has lower token limits)
+  /groq\/compound(?!.*mini)/i,
+  // Smaller models
+  /llama.*8b.*instant/i,
   /llama.*8b/i,
   /gemma.*9b/i,
+  /gpt-oss/i,
+  /groq\/compound/i,
 ]
 
-// Exclude non-chat model families — TTS, STT, embedding, safety, audio, vision.
-// Use specific names/families so we never accidentally pick a TTS or audio model.
+// Exclude non-chat model families — TTS, STT, embedding, safety, guard, audio, vision.
 const MODEL_EXCLUDE =
-  /whisper|guard|tts|embed|vision|preview|orpheus|playai|speech|audio|distil-whisper/i
+  /whisper|guard|safeguard|tts|embed|vision|preview|orpheus|playai|speech|audio|distil-whisper/i
 
 // Module-level cache — survives warm Lambda invocations, avoids per-request latency
 let modelCache: { id: string; expiresAt: number } | null = null
@@ -131,16 +142,18 @@ async function extractPdfText(buffer: ArrayBuffer, password?: string): Promise<s
   return lines.join('\n')
 }
 
-function isModelGone(err: any): boolean {
+function isModelUnusable(err: any): boolean {
   const msg = (err?.error?.error?.message ?? err?.message ?? '').toLowerCase()
   return (
     err?.status === 404 ||
     err?.status === 410 ||
+    err?.status === 413 || // request too large for this model — try next
     (err?.status === 400 && (
       msg.includes('decommission') ||
       msg.includes('deprecated') ||
       msg.includes('no longer supported') ||
-      msg.includes('not supported')
+      msg.includes('not supported') ||
+      msg.includes('terms') // terms not accepted (e.g. orpheus)
     ))
   )
 }
@@ -235,7 +248,7 @@ ${chunkText}`
           await new Promise(r => setTimeout(r, wait))
           continue
         }
-        if (isModelGone(err) && modelAttempt === 0) {
+        if (isModelUnusable(err) && modelAttempt === 0) {
           console.warn(`[PDF] Model ${model} gone (${err?.status}), refreshing model list`)
           break // break inner → outer loop will pick a fresh model
         }
@@ -369,9 +382,9 @@ export async function POST(request: Request) {
     const groqMsg: string = err?.error?.error?.message ?? err?.message ?? ''
     console.error('PDF parse error — status:', err?.status, '| message:', groqMsg)
 
-    if (err?.status === 429 || err?.status === 413) {
+    if (err?.status === 429) {
       return NextResponse.json(
-        { error: 'AI rate limit hit — the statement may be too large. Try importing fewer pages or wait a minute.' },
+        { error: 'AI rate limit hit. Please wait a minute and try again.' },
         { status: 429 }
       )
     }
