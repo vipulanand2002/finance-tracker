@@ -201,8 +201,8 @@ function getRetryAfterMs(err: any, defaultMs = 15_000): number {
 }
 
 async function callGemini(prompt: string): Promise<string> {
-  const apiKey = process.env.GOOGLE_AI_API_KEY
-  if (!apiKey) throw Object.assign(new Error('GOOGLE_AI_API_KEY not configured'), { skip: true })
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey) throw Object.assign(new Error('GEMINI_API_KEY not configured'), { skip: true })
 
   const genai = new GoogleGenerativeAI(apiKey)
   const model = genai.getGenerativeModel({
@@ -247,6 +247,7 @@ ${chunkText}`
   for (const model of models) {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
+        const isThinkingModel = /qwen|deepseek/i.test(model)
         const completion = await groq.chat.completions.create({
           model,
           messages: [
@@ -255,6 +256,7 @@ ${chunkText}`
           ],
           temperature: 0.1,
           max_tokens: 4096,
+          ...(isThinkingModel ? { enable_thinking: false } as any : {}),
         })
 
         const raw = completion.choices[0]?.message?.content ?? ''
