@@ -46,49 +46,35 @@ const MODEL_PREFERENCE: RegExp[] = [
 const MODEL_EXCLUDE =
   /whisper|guard|safeguard|tts|embed|vision|preview|orpheus|playai|speech|audio|distil-whisper/i
 
-// Module-level cache — survives warm Lambda invocations, avoids per-request latency
-let modelCache: { id: string; expiresAt: number } | null = null
+// Cache the full ordered model list, not just one model, so we can iterate through fallbacks
+let modelsCache: { ordered: string[]; expiresAt: number } | null = null
 
-async function resolveBestModel(invalidate = false): Promise<string> {
-  if (invalidate) modelCache = null
+async function resolveModels(invalidate = false): Promise<string[]> {
+  if (invalidate) modelsCache = null
   const now = Date.now()
-  if (modelCache && now < modelCache.expiresAt) return modelCache.id
+  if (modelsCache && now < modelsCache.expiresAt) return modelsCache.ordered
 
-  try {
-    const page = await groq.models.list()
-    const ids: string[] = (page.data ?? []).map((m: any) => String(m.id))
-    const eligible = ids.filter(id => !MODEL_EXCLUDE.test(id))
+  const page = await groq.models.list()
+  const ids: string[] = (page.data ?? []).map((m: any) => String(m.id))
+  const eligible = ids.filter(id => !MODEL_EXCLUDE.test(id))
 
-    // Always log so Vercel shows what Groq currently has — helps future diagnosis
-    console.log('[PDF] Groq models available:', ids.join(', '))
-    console.log('[PDF] Eligible (non-excluded):', eligible.join(', '))
+  console.log('[PDF] Groq models available:', ids.join(', '))
+  console.log('[PDF] Eligible (non-excluded):', eligible.join(', '))
 
-    for (const pattern of MODEL_PREFERENCE) {
-      const match = eligible.find(id => pattern.test(id))
-      if (match) {
-        modelCache = { id: match, expiresAt: now + 3_600_000 }
-        console.log('[PDF] Selected model:', match)
-        return match
-      }
+  // Sort by MODEL_PREFERENCE order; unmatched models go to the end
+  const ordered: string[] = []
+  for (const pattern of MODEL_PREFERENCE) {
+    for (const id of eligible) {
+      if (pattern.test(id) && !ordered.includes(id)) ordered.push(id)
     }
-
-    // Last-resort: prefer anything with "instruct" or "chat" in the name;
-    // fall back to first eligible model rather than a hardcoded name that may not exist.
-    const chatFallback =
-      eligible.find(id => /instruct|chat|versatile|instant/i.test(id)) ??
-      eligible[0]
-
-    if (chatFallback) {
-      modelCache = { id: chatFallback, expiresAt: now + 3_600_000 }
-      console.log('[PDF] No preferred model matched; using:', chatFallback)
-      return chatFallback
-    }
-
-    throw new Error('No eligible chat model found in Groq model list')
-  } catch (err) {
-    console.error('[PDF] Could not list Groq models:', err)
-    throw err // propagate — better to fail clearly than silently pick a TTS model
   }
+  for (const id of eligible) {
+    if (!ordered.includes(id)) ordered.push(id)
+  }
+
+  console.log('[PDF] Model priority order:', ordered.join(', '))
+  modelsCache = { ordered, expiresAt: now + 3_600_000 }
+  return ordered
 }
 
 async function extractPdfText(buffer: ArrayBuffer, password?: string): Promise<string> {
@@ -224,39 +210,49 @@ Rules:
 Statement text:
 ${chunkText}`
 
-  // Outer loop: swap to a fresh model on decommission (max 2 model selections)
-  for (let modelAttempt = 0; modelAttempt < 2; modelAttempt++) {
-    const model = await resolveBestModel(modelAttempt > 0)
+  const models = await resolveModels()
 
-    // Inner loop: retry the same model on rate limit (max 3 tries, ~30 s total wait)
-    for (let rateAttempt = 0; rateAttempt < 3; rateAttempt++) {
+  for (const model of models) {
+    // Retry loop for rate limits only
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const completion = await groq.chat.completions.create({
           model,
           messages: [{ role: 'user', content: prompt }],
           temperature: 0.1,
-          max_tokens: 2000, // reduced: limits output tokens → lower TPM usage
+          max_tokens: 2000,
         })
 
         const raw = completion.choices[0]?.message?.content ?? ''
         console.log(`[PDF] model=${model} outLen=${raw.length} preview=${raw.slice(0, 100)}`)
+
+        if (!raw.trim()) {
+          console.warn(`[PDF] ${model} returned empty content — skipping to next model`)
+          break // skip to next model
+        }
+
         return extractJsonArray(raw)
       } catch (err: any) {
-        if (err?.status === 429 && rateAttempt < 2) {
+        if (err?.status === 429 && attempt < 2) {
           const wait = getRetryAfterMs(err)
-          console.warn(`[PDF] Rate limited on ${model}. Waiting ${wait}ms (attempt ${rateAttempt + 1}/3)`)
+          console.warn(`[PDF] Rate limited on ${model}. Waiting ${wait}ms (attempt ${attempt + 1}/3)`)
           await new Promise(r => setTimeout(r, wait))
           continue
         }
-        if (isModelUnusable(err) && modelAttempt === 0) {
-          console.warn(`[PDF] Model ${model} gone (${err?.status}), refreshing model list`)
-          break // break inner → outer loop will pick a fresh model
+        if (isModelUnusable(err)) {
+          console.warn(`[PDF] ${model} unusable (${err?.status}) — skipping to next model`)
+          break // skip to next model
         }
         throw err
       }
     }
+    // Reached here = this model failed cleanly; try the next one
   }
-  throw new Error('No available Groq model found after refreshing model list')
+
+  // All models exhausted — refresh list in case Groq added something new, then give up
+  console.error('[PDF] All models failed. Refreshing model list for next attempt.')
+  await resolveModels(true)
+  throw new Error('All available Groq models failed to extract transactions. Check Vercel logs for details.')
 }
 
 // Normalize CR/+ credit markers so the AI reliably identifies them as income.
