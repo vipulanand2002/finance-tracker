@@ -121,21 +121,54 @@ function isModelGone(err: any): boolean {
   )
 }
 
+// Robustly extract a JSON array from a model response that may include
+// prose, code fences, or a wrapper object {"transactions":[...]}.
+function extractJsonArray(raw: string): any[] {
+  // Strip all code fences globally (models often add them mid-response)
+  const stripped = raw.replace(/```(?:json)?/gi, '').trim()
+
+  // 1. Direct parse — covers bare arrays and {"transactions":[...]} wrappers
+  try {
+    const parsed = JSON.parse(stripped)
+    if (Array.isArray(parsed)) return parsed
+    if (Array.isArray(parsed?.transactions)) return parsed.transactions
+  } catch { /* fall through */ }
+
+  // 2. Bracket-match: find the first [...] in the text, ignore surrounding prose
+  const start = stripped.indexOf('[')
+  if (start !== -1) {
+    let depth = 0, end = -1
+    for (let i = start; i < stripped.length; i++) {
+      if (stripped[i] === '[') depth++
+      else if (stripped[i] === ']') { depth--; if (depth === 0) { end = i; break } }
+    }
+    if (end !== -1) {
+      try {
+        const parsed = JSON.parse(stripped.slice(start, end + 1))
+        if (Array.isArray(parsed)) return parsed
+      } catch { /* fall through */ }
+    }
+  }
+
+  console.warn('[PDF] extractJsonArray failed. Raw output (first 300 chars):', raw.slice(0, 300))
+  return []
+}
+
 async function parseChunk(chunkText: string, categories: string, billingContext: string): Promise<any[]> {
-  const prompt = `Extract transactions from this bank statement. ${billingContext}
+  const prompt = `Extract ALL transactions from this bank statement. ${billingContext}
 
-Return a JSON array with objects: { date:"YYYY-MM-DD", description:"<merchant, max 60 chars>", amount:<positive number>, type:"income"|"expense", category:"<from list>" }
+Respond with ONLY a raw JSON array — no explanation, no markdown, no code fences.
+Each element: { "date":"YYYY-MM-DD", "description":"<merchant, max 60 chars>", "amount":<positive number>, "type":"income" or "expense", "category":"<from list>" }
 
-- type is "income" if amount is marked (CREDIT), or is a refund/cashback/deposit; otherwise "expense"
-- Skip balance summary lines (opening balance, closing balance, total)
-- Skip non-transaction lines (address, account info, page headers)
+Rules:
+- type is "income" for CREDIT entries, refunds, cashback, deposits; "expense" for everything else
+- Omit balance lines (opening/closing balance, totals) and non-transaction lines (headers, account info)
 - Categories: ${categories}
-- Return ONLY the JSON array, no explanation
 
-Statement:
+Statement text:
 ${chunkText}`
 
-  // Two attempts: first with cached model, second with a fresh model list if the cached one is gone
+  // Two attempts: first with cached model, second with fresh model list if the cached one is gone
   for (let attempt = 0; attempt < 2; attempt++) {
     const model = await resolveBestModel(attempt > 0)
     try {
@@ -147,12 +180,8 @@ ${chunkText}`
       })
 
       const raw = completion.choices[0]?.message?.content ?? ''
-      const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim()
-      try {
-        return Array.isArray(JSON.parse(clean)) ? JSON.parse(clean) : []
-      } catch {
-        return []
-      }
+      console.log(`[PDF] Model: ${model} | output length: ${raw.length} | preview: ${raw.slice(0, 120)}`)
+      return extractJsonArray(raw)
     } catch (err: any) {
       if (isModelGone(err) && attempt === 0) {
         console.warn(`[PDF] Model ${model} gone (${err?.status}), retrying with fresh model list`)
