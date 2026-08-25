@@ -608,7 +608,16 @@ export default function CardsPage() {
                     </Select>
                   ) : (
                     <Select value={selectedCycle} onValueChange={v => v && setSelectedCycle(v)}>
-                      <SelectTrigger className="w-52 h-8 text-xs"><SelectValue placeholder="All Cycles" /></SelectTrigger>
+                      <SelectTrigger className="w-52 h-8 text-xs">
+                        <span className="flex-1 truncate text-left">
+                          {(() => {
+                            if (selectedCycle === 'all') return 'All Cycles'
+                            const s = statements.find(st => st.id === selectedCycle)
+                            if (!s) return 'All Cycles'
+                            return `${format(new Date(s.cycle_start + 'T00:00:00'), 'dd MMM')} – ${format(new Date(s.cycle_end + 'T00:00:00'), 'dd MMM yyyy')}`
+                          })()}
+                        </span>
+                      </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All Cycles</SelectItem>
                         {statements.map(s => (
