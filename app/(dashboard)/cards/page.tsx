@@ -550,7 +550,7 @@ export default function CardsPage() {
                   {/* Period selector */}
                   {periodMode === 'monthly' ? (
                     <Select value={selectedMonth} onValueChange={v => v && setSelectedMonth(v)}>
-                      <SelectTrigger className="w-36 h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="w-36 h-8 text-xs"><SelectValue placeholder="All Time" /></SelectTrigger>
                       <SelectContent>
                         {MONTH_OPTIONS.map(opt => (
                           <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
@@ -559,7 +559,7 @@ export default function CardsPage() {
                     </Select>
                   ) : (
                     <Select value={selectedCycle} onValueChange={v => v && setSelectedCycle(v)}>
-                      <SelectTrigger className="w-52 h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="w-52 h-8 text-xs"><SelectValue placeholder="All Cycles" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All Cycles</SelectItem>
                         {statements.map(s => (
@@ -633,6 +633,33 @@ export default function CardsPage() {
                       canEdit={canEditBudgets}
                     />
                   </div>
+
+                  {/* Transaction list */}
+                  {filteredTxs.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">
+                        Transactions ({filteredTxs.length})
+                      </p>
+                      <div className="border rounded-lg overflow-hidden divide-y max-h-96 overflow-y-auto">
+                        {[...filteredTxs]
+                          .sort((a, b) => b.date.localeCompare(a.date))
+                          .map((t, i) => (
+                            <div key={t.id ?? i} className="flex items-center gap-3 px-3 py-2.5 hover:bg-muted/20">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm truncate">{t.description}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {format(new Date(t.date + 'T00:00:00'), 'dd MMM yyyy')}
+                                  {' · '}{t.category}
+                                </p>
+                              </div>
+                              <span className={`text-sm font-semibold shrink-0 ${t.type === 'income' ? 'text-emerald-600' : 'text-red-600'}`}>
+                                {t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
+                              </span>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
             </CardContent>
@@ -649,7 +676,7 @@ export default function CardsPage() {
       <CardPDFImport
         open={Boolean(pdfCard)}
         onClose={() => setPdfCard(null)}
-        onImported={fetchCards}
+        onImported={() => { fetchCards(); fetchCardTxs(selectedCardId) }}
         cardId={pdfCard?.id}
         cardName={pdfCard?.card_name}
         savedPassword={pdfCard?.pdf_password}
