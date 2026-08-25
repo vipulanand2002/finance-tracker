@@ -206,7 +206,7 @@ async function callGemini(prompt: string): Promise<string> {
 
   const genai = new GoogleGenerativeAI(apiKey)
   const model = genai.getGenerativeModel({
-    model: 'gemini-2.0-flash',
+    model: 'gemini-3.6-flash',
     generationConfig: { temperature: 0.1, maxOutputTokens: 4096 },
   })
   const result = await model.generateContent(prompt)
@@ -247,7 +247,6 @@ ${chunkText}`
   for (const model of models) {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const isThinkingModel = /qwen|deepseek/i.test(model)
         const completion = await groq.chat.completions.create({
           model,
           messages: [
@@ -256,7 +255,6 @@ ${chunkText}`
           ],
           temperature: 0.1,
           max_tokens: 4096,
-          ...(isThinkingModel ? { enable_thinking: false } as any : {}),
         })
 
         const raw = completion.choices[0]?.message?.content ?? ''
