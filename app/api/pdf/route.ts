@@ -41,9 +41,10 @@ const MODEL_PREFERENCE: RegExp[] = [
   /gpt-oss/i,
 ]
 
-// Exclude non-chat model families — TTS, STT, embedding, safety, guard, audio, vision.
+// Exclude non-chat model families and reasoning models that ignore /no_think on Groq.
+// Qwen3 floods its output with <think> blocks that exhaust max_tokens, leaving no JSON.
 const MODEL_EXCLUDE =
-  /whisper|guard|safeguard|tts|embed|vision|preview|orpheus|playai|speech|audio|distil-whisper/i
+  /whisper|guard|safeguard|tts|embed|vision|preview|orpheus|playai|speech|audio|distil-whisper|qwen/i
 
 // Cache the full ordered model list, not just one model, so we can iterate through fallbacks
 let modelsCache: { ordered: string[]; expiresAt: number } | null = null
@@ -206,11 +207,11 @@ async function callGemini(prompt: string): Promise<string> {
 
   const genai = new GoogleGenerativeAI(apiKey)
   const model = genai.getGenerativeModel({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3.6-flash',
     generationConfig: {
       temperature: 0.1,
       maxOutputTokens: 8192,
-      // Disable built-in reasoning so all output tokens go to the JSON response
+      // thinkingBudget:0 disables reasoning tokens so all output budget goes to JSON
       thinkingConfig: { thinkingBudget: 0 },
     } as any,
   })
