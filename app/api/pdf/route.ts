@@ -122,30 +122,40 @@ function isModelGone(err: any): boolean {
   )
 }
 
-// Robustly extract a JSON array from a model response that may include
-// prose, code fences, or a wrapper object {"transactions":[...]}.
-function extractJsonArray(raw: string): any[] {
-  // Strip all code fences globally (models often add them mid-response)
-  const stripped = raw.replace(/```(?:json)?/gi, '').trim()
+// Some models emit JS object-literal syntax with unquoted keys: {date: "..."}.
+// This is valid JS but not valid JSON. Repair it before parsing.
+function repairJsonKeys(text: string): string {
+  // Match { or , followed by optional whitespace + unquoted identifier + colon
+  // Skip already-quoted keys (they start with " after the { / ,)
+  return text.replace(/([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)(\s*:)/g, '$1"$2"$3')
+}
 
-  // 1. Direct parse — covers bare arrays and {"transactions":[...]} wrappers
+// Robustly extract a JSON array from a model response that may include
+// prose, code fences, unquoted keys, or a wrapper object {"transactions":[...]}.
+function extractJsonArray(raw: string): any[] {
+  // Strip all code fences globally
+  const stripped = raw.replace(/```(?:json)?/gi, '').trim()
+  // Repair unquoted keys so JSON.parse can handle JS object literal output
+  const repaired = repairJsonKeys(stripped)
+
+  // 1. Direct parse of repaired text
   try {
-    const parsed = JSON.parse(stripped)
+    const parsed = JSON.parse(repaired)
     if (Array.isArray(parsed)) return parsed
     if (Array.isArray(parsed?.transactions)) return parsed.transactions
   } catch { /* fall through */ }
 
   // 2. Bracket-match: find the first [...] in the text, ignore surrounding prose
-  const start = stripped.indexOf('[')
+  const start = repaired.indexOf('[')
   if (start !== -1) {
     let depth = 0, end = -1
-    for (let i = start; i < stripped.length; i++) {
-      if (stripped[i] === '[') depth++
-      else if (stripped[i] === ']') { depth--; if (depth === 0) { end = i; break } }
+    for (let i = start; i < repaired.length; i++) {
+      if (repaired[i] === '[') depth++
+      else if (repaired[i] === ']') { depth--; if (depth === 0) { end = i; break } }
     }
     if (end !== -1) {
       try {
-        const parsed = JSON.parse(stripped.slice(start, end + 1))
+        const parsed = JSON.parse(repaired.slice(start, end + 1))
         if (Array.isArray(parsed)) return parsed
       } catch { /* fall through */ }
     }
@@ -167,7 +177,7 @@ function getRetryAfterMs(err: any, defaultMs = 15_000): number {
 async function parseChunk(chunkText: string, categories: string, billingContext: string): Promise<any[]> {
   const prompt = `Extract ALL transactions from this bank statement. ${billingContext}
 
-Respond with ONLY a raw JSON array — no explanation, no markdown, no code fences.
+Respond with ONLY a valid JSON array — no explanation, no markdown, no code fences, all keys must be double-quoted.
 Each element: { "date":"YYYY-MM-DD", "description":"<merchant, max 60 chars>", "amount":<positive number>, "type":"income" or "expense", "category":"<from list>" }
 
 Rules:
