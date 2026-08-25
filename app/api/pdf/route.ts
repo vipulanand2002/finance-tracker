@@ -5,9 +5,10 @@ import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY! })
 
-// ~8,000 tokens of text per chunk — leaves ~3K headroom under the 12K TPM limit
-// for the prompt/schema/rules overhead. 1 token ≈ 4 chars → 8,000 * 4 = 32,000 chars
-const MAX_CHUNK_CHARS = 32000
+// ~3,000 tokens of input text per chunk.  Groq free tier caps many models at
+// 6,000 TPM; keeping input+output well under that lets us avoid rate limits.
+// 1 token ≈ 4 chars → 3,000 * 4 = 12,000 chars
+const MAX_CHUNK_CHARS = 12000
 
 // Prefer larger, newer chat/instruct models. Patterns ordered best→worst.
 const MODEL_PREFERENCE: RegExp[] = [
@@ -154,6 +155,15 @@ function extractJsonArray(raw: string): any[] {
   return []
 }
 
+function getRetryAfterMs(err: any, defaultMs = 15_000): number {
+  // Groq may send retry-after as seconds in a header
+  const header =
+    err?.headers?.['retry-after'] ??
+    (typeof err?.headers?.get === 'function' ? err.headers.get('retry-after') : undefined)
+  const secs = header ? parseInt(String(header), 10) : NaN
+  return isNaN(secs) ? defaultMs : Math.min(secs * 1000, 30_000) // cap at 30 s
+}
+
 async function parseChunk(chunkText: string, categories: string, billingContext: string): Promise<any[]> {
   const prompt = `Extract ALL transactions from this bank statement. ${billingContext}
 
@@ -168,26 +178,36 @@ Rules:
 Statement text:
 ${chunkText}`
 
-  // Two attempts: first with cached model, second with fresh model list if the cached one is gone
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const model = await resolveBestModel(attempt > 0)
-    try {
-      const completion = await groq.chat.completions.create({
-        model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.1,
-        max_tokens: 4096,
-      })
+  // Outer loop: swap to a fresh model on decommission (max 2 model selections)
+  for (let modelAttempt = 0; modelAttempt < 2; modelAttempt++) {
+    const model = await resolveBestModel(modelAttempt > 0)
 
-      const raw = completion.choices[0]?.message?.content ?? ''
-      console.log(`[PDF] Model: ${model} | output length: ${raw.length} | preview: ${raw.slice(0, 120)}`)
-      return extractJsonArray(raw)
-    } catch (err: any) {
-      if (isModelGone(err) && attempt === 0) {
-        console.warn(`[PDF] Model ${model} gone (${err?.status}), retrying with fresh model list`)
-        continue
+    // Inner loop: retry the same model on rate limit (max 3 tries, ~30 s total wait)
+    for (let rateAttempt = 0; rateAttempt < 3; rateAttempt++) {
+      try {
+        const completion = await groq.chat.completions.create({
+          model,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.1,
+          max_tokens: 2000, // reduced: limits output tokens → lower TPM usage
+        })
+
+        const raw = completion.choices[0]?.message?.content ?? ''
+        console.log(`[PDF] model=${model} outLen=${raw.length} preview=${raw.slice(0, 100)}`)
+        return extractJsonArray(raw)
+      } catch (err: any) {
+        if (err?.status === 429 && rateAttempt < 2) {
+          const wait = getRetryAfterMs(err)
+          console.warn(`[PDF] Rate limited on ${model}. Waiting ${wait}ms (attempt ${rateAttempt + 1}/3)`)
+          await new Promise(r => setTimeout(r, wait))
+          continue
+        }
+        if (isModelGone(err) && modelAttempt === 0) {
+          console.warn(`[PDF] Model ${model} gone (${err?.status}), refreshing model list`)
+          break // break inner → outer loop will pick a fresh model
+        }
+        throw err
       }
-      throw err
     }
   }
   throw new Error('No available Groq model found after refreshing model list')
@@ -286,10 +306,13 @@ export async function POST(request: Request) {
   try {
     const compressed = compressPdfText(text)
     const chunks = splitIntoChunks(compressed)
+    console.log(`[PDF] ${chunks.length} chunk(s), compressed length: ${compressed.length}`)
     const allTransactions: any[] = []
 
-    for (const chunk of chunks) {
-      const txs = await parseChunk(chunk, allCategories, billingContext)
+    for (let i = 0; i < chunks.length; i++) {
+      // Small proactive delay between chunks to stay under TPM on free tier
+      if (i > 0) await new Promise(r => setTimeout(r, 3000))
+      const txs = await parseChunk(chunks[i], allCategories, billingContext)
       if (Array.isArray(txs)) allTransactions.push(...txs)
     }
 
