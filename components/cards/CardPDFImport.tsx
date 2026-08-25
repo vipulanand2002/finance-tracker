@@ -50,6 +50,8 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
   const [statementDay, setStatementDay] = useState('')
   const [filename, setFilename] = useState('')
   const [parseError, setParseError] = useState<string | null>(null)
+  const [cycleStart, setCycleStart] = useState('')
+  const [cycleEnd, setCycleEnd] = useState('')
   const [trips, setTrips] = useState<Trip[]>([])
   const [expenseCategories, setExpenseCategories] = useState<string[]>([...EXPENSE_CATEGORIES])
   const [incomeCategories, setIncomeCategories] = useState<string[]>([...INCOME_CATEGORIES])
@@ -78,6 +80,8 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
     setStatementDay('')
     setFilename('')
     setParseError(null)
+    setCycleStart('')
+    setCycleEnd('')
     if (fileRef.current) fileRef.current.value = ''
     // Keep password pre-filled for convenience
   }
@@ -140,9 +144,22 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
         return
       }
 
-      setTransactions(data.transactions.map((t: Omit<EditableTx, 'note' | 'trip_id' | 'selected' | 'expanded'>) => ({
-        ...t, note: '', trip_id: null, selected: true, expanded: false,
-      })))
+      const parsed: EditableTx[] = data.transactions.map(
+        (t: Omit<EditableTx, 'note' | 'trip_id' | 'selected' | 'expanded'>) => ({
+          ...t, note: '', trip_id: null, selected: true, expanded: false,
+        })
+      )
+      setTransactions(parsed)
+
+      // Pre-fill cycle range from min/max transaction dates; user can adjust
+      if (cardId) {
+        const dates = parsed.map(t => t.date).filter(Boolean).sort()
+        if (dates.length > 0) {
+          setCycleStart(dates[0])
+          setCycleEnd(dates[dates.length - 1])
+        }
+      }
+
       setStep('review')
 
       // Password worked — save it to the card for future use
@@ -200,16 +217,13 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
 
     if (imported > 0) {
       toast.success(`Imported ${imported} transaction${imported !== 1 ? 's' : ''}${failed > 0 ? ` (${failed} failed)` : ''}`)
-      // Save billing cycle range derived from imported transaction dates
-      if (cardId) {
-        const dates = selected.map(t => t.date).filter(Boolean).sort()
-        if (dates.length > 0) {
-          await fetch('/api/card-statements', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ card_id: cardId, cycle_start: dates[0], cycle_end: dates[dates.length - 1] }),
-          }).catch(() => {})
-        }
+      // Save billing cycle using the user-selected dates
+      if (cardId && cycleStart && cycleEnd) {
+        await fetch('/api/card-statements', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ card_id: cardId, cycle_start: cycleStart, cycle_end: cycleEnd }),
+        }).catch(() => {})
       }
       onImported(); reset(); onClose()
     } else {
@@ -339,6 +353,28 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                 )}
               </div>
             </div>
+
+            {/* Billing cycle date range — only for card imports */}
+            {cardId && step === 'review' && (
+              <div className="flex items-center gap-3 px-3 py-2.5 border-b bg-muted/20 shrink-0">
+                <span className="text-xs font-medium text-muted-foreground shrink-0">Billing Cycle</span>
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <Input
+                    type="date"
+                    value={cycleStart}
+                    onChange={e => setCycleStart(e.target.value)}
+                    className="h-7 text-xs flex-1 min-w-0"
+                  />
+                  <span className="text-xs text-muted-foreground shrink-0">to</span>
+                  <Input
+                    type="date"
+                    value={cycleEnd}
+                    onChange={e => setCycleEnd(e.target.value)}
+                    className="h-7 text-xs flex-1 min-w-0"
+                  />
+                </div>
+              </div>
+            )}
 
             {step === 'importing' ? (
               <div className="flex-1 flex flex-col items-center justify-center gap-3">
