@@ -210,10 +210,10 @@ async function callGemini(prompt: string): Promise<string> {
     model: 'gemini-3.6-flash',
     generationConfig: {
       temperature: 0.1,
-      maxOutputTokens: 8192,
-      // thinkingBudget:0 disables reasoning tokens so all output budget goes to JSON
-      thinkingConfig: { thinkingBudget: 0 },
-    } as any,
+      // 65536 ensures thinking tokens + full JSON output both fit.
+      // Gemini 3.6 counts internal reasoning against maxOutputTokens.
+      maxOutputTokens: 65536,
+    },
   })
   const result = await model.generateContent(prompt)
   return result.response.text()
