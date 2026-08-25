@@ -11,12 +11,11 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY! })
 const MAX_CHUNK_CHARS = 12000
 
 // Prefer larger, newer chat/instruct models. Patterns ordered best→worst.
-// Updated based on real Groq model list (Aug 2026):
-//   gpt-oss-120b, qwen/qwen3.6-27b, gpt-oss-20b, groq/compound, allam-2-7b
+// Verified working on Groq Aug 2026: qwen/qwen3.6-27b (produces output).
+// gpt-oss-120b and gpt-oss-20b consistently return empty — moved to bottom.
 const MODEL_PREFERENCE: RegExp[] = [
-  // Large OpenAI OSS models hosted on Groq
-  /gpt-oss-120b/i,
-  /gpt-oss-20b/i,
+  // Qwen — confirmed working (thinking blocks stripped by extractJsonArray)
+  /qwen/i,
   // Llama 4
   /llama-4.*maverick/i,
   /llama-4.*scout/i,
@@ -25,21 +24,20 @@ const MODEL_PREFERENCE: RegExp[] = [
   /llama-3\.3-70b/i,
   /llama.*3.*70b/i,
   /llama.*70b/i,
-  // Qwen (matches qwen3.6-27b, qwen-72b, etc.)
-  /qwen/i,
-  // DeepSeek
+  // DeepSeek (also a reasoning model — thinking blocks handled)
   /deepseek/i,
   // Mixtral / Gemma
   /mixtral.*8x7b/i,
   /gemma.*27b/i,
-  // Groq compound (last resort — has lower token limits)
+  // Groq compound
   /groq\/compound(?!.*mini)/i,
   // Smaller models
   /llama.*8b.*instant/i,
   /llama.*8b/i,
   /gemma.*9b/i,
-  /gpt-oss/i,
   /groq\/compound/i,
+  // OpenAI OSS on Groq — returns empty content currently, last resort
+  /gpt-oss/i,
 ]
 
 // Exclude non-chat model families — TTS, STT, embedding, safety, guard, audio, vision.
@@ -153,10 +151,15 @@ function repairJsonKeys(text: string): string {
 }
 
 // Robustly extract a JSON array from a model response that may include
-// prose, code fences, unquoted keys, or a wrapper object {"transactions":[...]}.
+// prose, code fences, unquoted keys, <think> blocks, or a wrapper object {"transactions":[...]}.
 function extractJsonArray(raw: string): any[] {
+  // Strip <think>...</think> reasoning blocks (Qwen3, DeepSeek-R1, etc.)
+  let cleaned = raw.replace(/<think>[\s\S]*?<\/think>/gi, '')
+  // Handle unclosed <think> tag (model output cut off mid-thought)
+  cleaned = cleaned.replace(/<think>[\s\S]*/i, '').trim()
+
   // Strip all code fences globally
-  const stripped = raw.replace(/```(?:json)?/gi, '').trim()
+  const stripped = cleaned.replace(/```(?:json)?/gi, '').trim()
   // Repair unquoted keys so JSON.parse can handle JS object literal output
   const repaired = repairJsonKeys(stripped)
 
