@@ -51,6 +51,8 @@ function buildEmptyForm(tripId?: string | null, cardId?: string | null) {
   }
 }
 
+interface CardStatement { id: string; cycle_start: string; cycle_end: string }
+
 export default function TransactionModal({ open, onClose, onSaved, transaction, defaultTripId, defaultCardId }: Props) {
   const [form, setForm] = useState(() => buildEmptyForm(defaultTripId, defaultCardId))
   const [saving, setSaving] = useState(false)
@@ -58,6 +60,8 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
   const [trips, setTrips] = useState<Trip[]>([])
   const [contacts, setContacts] = useState<Contact[]>([])
   const [splitOpen, setSplitOpen] = useState(false)
+  const [cardStatements, setCardStatements] = useState<CardStatement[]>([])
+  const [selectedCycleId, setSelectedCycleId] = useState<string>('none')
   // API returns full list (seeded with defaults on first call); static arrays are loading fallbacks
   const [expenseCategories, setExpenseCategories] = useState<string[]>([...EXPENSE_CATEGORIES])
   const [incomeCategories, setIncomeCategories] = useState<string[]>([...INCOME_CATEGORIES])
@@ -84,7 +88,16 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
     fetch('/api/trips').then(r => r.json()).then(d => setTrips(Array.isArray(d) ? d : [])).catch(() => {})
     fetch('/api/contacts').then(r => r.json()).then(d => setContacts(Array.isArray(d) ? d : [])).catch(() => {})
     loadCategories()
-  }, [open])
+    if (defaultCardId && !transaction) {
+      fetch(`/api/card-statements?card_id=${defaultCardId}`)
+        .then(r => r.json())
+        .then(d => setCardStatements(Array.isArray(d) ? d.slice(0, 6) : []))
+        .catch(() => setCardStatements([]))
+    } else {
+      setCardStatements([])
+    }
+    setSelectedCycleId('none')
+  }, [open, defaultCardId, transaction])
 
   useEffect(() => {
     if (transaction) {
@@ -253,6 +266,43 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                 rows={2}
               />
             </div>
+
+            {/* Billing cycle picker — only when adding a card transaction */}
+            {cardStatements.length > 0 && (
+              <div className="space-y-1">
+                <Label>Billing Cycle <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
+                <Select
+                  value={selectedCycleId}
+                  onValueChange={v => {
+                    if (!v) return
+                    setSelectedCycleId(v)
+                    if (v !== 'none') {
+                      const stmt = cardStatements.find(s => s.id === v)
+                      if (stmt) set('date', stmt.cycle_end)
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Add to a billing cycle" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No cycle</SelectItem>
+                    {cardStatements.map(s => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {format(new Date(s.cycle_start + 'T00:00:00'), 'dd MMM')}
+                        {' – '}
+                        {format(new Date(s.cycle_end + 'T00:00:00'), 'dd MMM yyyy')}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedCycleId !== 'none' && (
+                  <p className="text-xs text-muted-foreground">
+                    Date set to cycle end — adjust if needed
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="space-y-1">
               <Label htmlFor="date">Date *</Label>

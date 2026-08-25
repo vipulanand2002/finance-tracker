@@ -204,7 +204,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
       if (cardId) {
         const dates = selected.map(t => t.date).filter(Boolean).sort()
         if (dates.length > 0) {
-          fetch('/api/card-statements', {
+          await fetch('/api/card-statements', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ card_id: cardId, cycle_start: dates[0], cycle_end: dates[dates.length - 1] }),

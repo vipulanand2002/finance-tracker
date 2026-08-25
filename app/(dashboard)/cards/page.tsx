@@ -725,7 +725,7 @@ export default function CardsPage() {
       <CardPDFImport
         open={Boolean(pdfCard)}
         onClose={() => setPdfCard(null)}
-        onImported={() => { fetchCards(); fetchCardTxs(selectedCardId) }}
+        onImported={() => { fetchCards(); fetchCardTxs(selectedCardId); fetchStatements(selectedCardId) }}
         cardId={pdfCard?.id}
         cardName={pdfCard?.card_name}
         savedPassword={pdfCard?.pdf_password}
@@ -734,7 +734,7 @@ export default function CardsPage() {
       <CardPDFImport
         open={analyticsPdfOpen}
         onClose={() => setAnalyticsPdfOpen(false)}
-        onImported={() => { setAnalyticsPdfOpen(false); fetchCards(); fetchCardTxs(selectedCardId) }}
+        onImported={() => { setAnalyticsPdfOpen(false); fetchCards(); fetchCardTxs(selectedCardId); fetchStatements(selectedCardId) }}
         cardId={analyticsCard?.id}
         cardName={analyticsCard?.card_name}
         savedPassword={analyticsCard?.pdf_password}
