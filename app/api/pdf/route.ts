@@ -222,15 +222,16 @@ ${chunkText}`
         const completion = await groq.chat.completions.create({
           model,
           messages: [
-            // System message suppresses chain-of-thought on Qwen3 / DeepSeek-R1
-            // and guides all models to output JSON directly without preamble.
-            { role: 'system', content: '/no_think You are a JSON extraction tool. Output ONLY a raw JSON array. No explanation, no markdown, no code fences.' },
-            { role: 'user', content: prompt },
+            { role: 'system', content: 'You are a JSON extraction tool. Output ONLY a raw JSON array. No explanation, no markdown, no code fences.' },
+            // /no_think at the START of the user message is Qwen3's canonical
+            // way to disable chain-of-thought reasoning (system message is ignored for this).
+            // It is a no-op for all other models.
+            { role: 'user', content: `/no_think\n\n${prompt}` },
           ],
           temperature: 0.1,
-          // Thinking models consume thousands of tokens on reasoning before outputting;
-          // 2000 was too small → thinking filled the budget, JSON never appeared.
-          max_tokens: 8192,
+          // 4096 stays within every model's per-request output cap on Groq.
+          // With /no_think suppressing Qwen3 reasoning, JSON output fits well within this.
+          max_tokens: 4096,
         })
 
         const raw = completion.choices[0]?.message?.content ?? ''
