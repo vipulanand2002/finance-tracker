@@ -22,6 +22,7 @@ interface Props {
   onSaved: () => void
   transaction?: Transaction | null
   defaultTripId?: string | null
+  defaultCardId?: string | null
 }
 
 const DATE_KEY = 'lastTransactionDate'
@@ -34,7 +35,7 @@ function getDefaultDate() {
   return format(new Date(), 'yyyy-MM-dd')
 }
 
-function buildEmptyForm(tripId?: string | null) {
+function buildEmptyForm(tripId?: string | null, cardId?: string | null) {
   return {
     amount: '',
     type: 'expense' as 'income' | 'expense',
@@ -46,11 +47,12 @@ function buildEmptyForm(tripId?: string | null) {
     receipt_url: '',
     trip_id: tripId ?? null,
     contact_id: null as string | null,
+    card_id: cardId ?? null,
   }
 }
 
-export default function TransactionModal({ open, onClose, onSaved, transaction, defaultTripId }: Props) {
-  const [form, setForm] = useState(() => buildEmptyForm(defaultTripId))
+export default function TransactionModal({ open, onClose, onSaved, transaction, defaultTripId, defaultCardId }: Props) {
+  const [form, setForm] = useState(() => buildEmptyForm(defaultTripId, defaultCardId))
   const [saving, setSaving] = useState(false)
   const [scanningReceipt, setScanningReceipt] = useState(false)
   const [trips, setTrips] = useState<Trip[]>([])
@@ -97,11 +99,12 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         receipt_url: transaction.receipt_url ?? '',
         trip_id: transaction.trip_id ?? null,
         contact_id: transaction.contact_id ?? null,
+        card_id: transaction.card_id ?? null,
       })
     } else {
-      setForm(buildEmptyForm(defaultTripId))
+      setForm(buildEmptyForm(defaultTripId, defaultCardId))
     }
-  }, [transaction, open, defaultTripId])
+  }, [transaction, open, defaultTripId, defaultCardId])
 
   const categories = form.type === 'income'
     ? incomeCategories
@@ -154,6 +157,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         receipt_url: form.receipt_url || null,
         trip_id: form.trip_id || null,
         contact_id: form.contact_id || null,
+        card_id: form.card_id || null,
       }
       const url = transaction ? `/api/transactions?id=${transaction.id}` : '/api/transactions'
       const method = transaction ? 'PUT' : 'POST'

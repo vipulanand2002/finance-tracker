@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { format, subMonths, startOfMonth } from 'date-fns'
 import {
@@ -18,10 +19,11 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, CreditCard, Pencil, Trash2, FileUp, BarChart3 } from 'lucide-react'
+import { Plus, CreditCard, Pencil, Trash2, FileUp, BarChart3, Smartphone } from 'lucide-react'
 import CardDisplay, { type CardData } from '@/components/cards/CardDisplay'
 import CardModal from '@/components/cards/CardModal'
 import CardPDFImport from '@/components/cards/CardPDFImport'
+import TransactionModal from '@/components/transactions/TransactionModal'
 import { CATEGORY_COLORS } from '@/lib/constants'
 import { formatCurrency } from '@/lib/utils'
 import type { Transaction, CardStatement } from '@/types'
@@ -286,11 +288,14 @@ function BudgetSection({
 
 // ── Main Page ──
 export default function CardsPage() {
+  const router = useRouter()
   const [cards, setCards] = useState<CardData[]>([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [editCard, setEditCard] = useState<CardData | null>(null)
   const [pdfCard, setPdfCard] = useState<CardData | null>(null)
+  const [txModalOpen, setTxModalOpen] = useState(false)
+  const [analyticsPdfOpen, setAnalyticsPdfOpen] = useState(false)
 
   const [selectedCardId, setSelectedCardId] = useState<string>('all')
   const [selectedMonth, setSelectedMonth] = useState<string>('all')
@@ -423,6 +428,16 @@ export default function CardsPage() {
 
   const canEditBudgets = selectedCardId !== 'all' && selectedMonth !== 'all' && periodMode === 'monthly'
 
+  async function pasteSms() {
+    try {
+      const text = await navigator.clipboard.readText()
+      if (!text.trim()) { toast.error('Clipboard is empty'); return }
+      router.push(`/share?text=${encodeURIComponent(text)}`)
+    } catch { toast.error('Could not read clipboard. Allow clipboard access and try again.') }
+  }
+
+  const analyticsCard = selectedCardId !== 'all' ? cards.find(c => c.id === selectedCardId) ?? null : null
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -502,9 +517,43 @@ export default function CardsPage() {
           <Card>
             <CardHeader className="pb-3">
               <div className="flex flex-col gap-3">
-                <div className="flex items-center gap-2">
-                  <BarChart3 className="w-4 h-4 text-primary" />
-                  <CardTitle className="text-base">Spending Analytics</CardTitle>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4 text-primary" />
+                    <CardTitle className="text-base">Spending Analytics</CardTitle>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      variant="outline" size="sm" className="h-8 text-xs"
+                      onClick={() => {
+                        if (selectedCardId === 'all') { toast.error('Select a specific card first'); return }
+                        setAnalyticsPdfOpen(true)
+                      }}
+                      title="Import PDF statement"
+                    >
+                      <FileUp className="w-3.5 h-3.5 sm:mr-1" />
+                      <span className="hidden sm:inline">Import PDF</span>
+                    </Button>
+                    <Button
+                      variant="outline" size="sm" className="h-8 text-xs"
+                      onClick={pasteSms}
+                      title="Paste UPI SMS"
+                    >
+                      <Smartphone className="w-3.5 h-3.5 sm:mr-1" />
+                      <span className="hidden sm:inline">Paste SMS</span>
+                    </Button>
+                    <Button
+                      size="sm" className="h-8 text-xs"
+                      onClick={() => {
+                        if (selectedCardId === 'all') { toast.error('Select a specific card first'); return }
+                        setTxModalOpen(true)
+                      }}
+                      title="Add card transaction"
+                    >
+                      <Plus className="w-3.5 h-3.5 sm:mr-1" />
+                      <span className="hidden sm:inline">Add</span>
+                    </Button>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
                   {/* Card selector */}
@@ -680,6 +729,22 @@ export default function CardsPage() {
         cardId={pdfCard?.id}
         cardName={pdfCard?.card_name}
         savedPassword={pdfCard?.pdf_password}
+      />
+      {/* Analytics-section Import PDF (for selected card) */}
+      <CardPDFImport
+        open={analyticsPdfOpen}
+        onClose={() => setAnalyticsPdfOpen(false)}
+        onImported={() => { setAnalyticsPdfOpen(false); fetchCards(); fetchCardTxs(selectedCardId) }}
+        cardId={analyticsCard?.id}
+        cardName={analyticsCard?.card_name}
+        savedPassword={analyticsCard?.pdf_password}
+      />
+      {/* Add single card transaction */}
+      <TransactionModal
+        open={txModalOpen}
+        onClose={() => setTxModalOpen(false)}
+        onSaved={() => { fetchCardTxs(selectedCardId) }}
+        defaultCardId={selectedCardId !== 'all' ? selectedCardId : null}
       />
     </div>
   )
