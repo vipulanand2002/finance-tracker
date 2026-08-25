@@ -206,8 +206,13 @@ async function callGemini(prompt: string): Promise<string> {
 
   const genai = new GoogleGenerativeAI(apiKey)
   const model = genai.getGenerativeModel({
-    model: 'gemini-3.6-flash',
-    generationConfig: { temperature: 0.1, maxOutputTokens: 4096 },
+    model: 'gemini-2.5-flash',
+    generationConfig: {
+      temperature: 0.1,
+      maxOutputTokens: 8192,
+      // Disable built-in reasoning so all output tokens go to the JSON response
+      thinkingConfig: { thinkingBudget: 0 },
+    } as any,
   })
   const result = await model.generateContent(prompt)
   return result.response.text()
