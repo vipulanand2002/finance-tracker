@@ -11,18 +11,29 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY! })
 const MAX_CHUNK_CHARS = 12000
 
 // Prefer larger, newer chat/instruct models. Patterns ordered best→worst.
+// Case-insensitive; broadened to catch whatever Groq currently offers.
 const MODEL_PREFERENCE: RegExp[] = [
-  /llama-3\.3-70b/,
-  /llama.*3.*70b.*versatile/,
-  /llama.*70b/,
-  /qwen.*72b/,
-  /mixtral.*8x7b/,
-  /llama.*3.*8b.*instant/,
-  /llama.*8b/,
+  /llama-4.*maverick/i,
+  /llama-4.*scout/i,
+  /llama.*4.*\d+b/i,
+  /llama-3\.3-70b/i,
+  /llama.*3.*70b/i,
+  /llama.*70b/i,
+  /qwen.*72b/i,
+  /qwen.*32b/i,
+  /qwen.*instruct/i,
+  /deepseek.*r2|deepseek.*v3/i,
+  /mixtral.*8x7b/i,
+  /gemma.*27b/i,
+  /llama.*3.*8b.*instant/i,
+  /llama.*8b/i,
+  /gemma.*9b/i,
 ]
 
-// Exclude non-chat models regardless of name match
-const MODEL_EXCLUDE = /whisper|guard|tts|embed|vision|preview/i
+// Exclude non-chat model families — TTS, STT, embedding, safety, audio, vision.
+// Use specific names/families so we never accidentally pick a TTS or audio model.
+const MODEL_EXCLUDE =
+  /whisper|guard|tts|embed|vision|preview|orpheus|playai|speech|audio|distil-whisper/i
 
 // Module-level cache — survives warm Lambda invocations, avoids per-request latency
 let modelCache: { id: string; expiresAt: number } | null = null
@@ -37,23 +48,35 @@ async function resolveBestModel(invalidate = false): Promise<string> {
     const ids: string[] = (page.data ?? []).map((m: any) => String(m.id))
     const eligible = ids.filter(id => !MODEL_EXCLUDE.test(id))
 
+    // Always log so Vercel shows what Groq currently has — helps future diagnosis
+    console.log('[PDF] Groq models available:', ids.join(', '))
+    console.log('[PDF] Eligible (non-excluded):', eligible.join(', '))
+
     for (const pattern of MODEL_PREFERENCE) {
       const match = eligible.find(id => pattern.test(id))
       if (match) {
         modelCache = { id: match, expiresAt: now + 3_600_000 }
-        console.log('[PDF] Using Groq model:', match)
+        console.log('[PDF] Selected model:', match)
         return match
       }
     }
 
-    // Any eligible model is better than nothing
-    const fallback = eligible[0] ?? 'llama3-70b-8192'
-    modelCache = { id: fallback, expiresAt: now + 3_600_000 }
-    console.log('[PDF] Using Groq fallback model:', fallback)
-    return fallback
+    // Last-resort: prefer anything with "instruct" or "chat" in the name;
+    // fall back to first eligible model rather than a hardcoded name that may not exist.
+    const chatFallback =
+      eligible.find(id => /instruct|chat|versatile|instant/i.test(id)) ??
+      eligible[0]
+
+    if (chatFallback) {
+      modelCache = { id: chatFallback, expiresAt: now + 3_600_000 }
+      console.log('[PDF] No preferred model matched; using:', chatFallback)
+      return chatFallback
+    }
+
+    throw new Error('No eligible chat model found in Groq model list')
   } catch (err) {
-    console.warn('[PDF] Could not list Groq models, using default:', err)
-    return 'llama3-70b-8192'
+    console.error('[PDF] Could not list Groq models:', err)
+    throw err // propagate — better to fail clearly than silently pick a TTS model
   }
 }
 
