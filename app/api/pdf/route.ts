@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import Groq from 'groq-sdk'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 import { NextResponse } from 'next/server'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
 
@@ -199,6 +200,19 @@ function getRetryAfterMs(err: any, defaultMs = 15_000): number {
   return isNaN(secs) ? defaultMs : Math.min(secs * 1000, 30_000) // cap at 30 s
 }
 
+async function callGemini(prompt: string): Promise<string> {
+  const apiKey = process.env.GOOGLE_AI_API_KEY
+  if (!apiKey) throw Object.assign(new Error('GOOGLE_AI_API_KEY not configured'), { skip: true })
+
+  const genai = new GoogleGenerativeAI(apiKey)
+  const model = genai.getGenerativeModel({
+    model: 'gemini-2.0-flash',
+    generationConfig: { temperature: 0.1, maxOutputTokens: 4096 },
+  })
+  const result = await model.generateContent(prompt)
+  return result.response.text()
+}
+
 async function parseChunk(chunkText: string, categories: string, billingContext: string): Promise<any[]> {
   const prompt = `Extract ALL transactions from this bank statement. ${billingContext}
 
@@ -213,35 +227,43 @@ Rules:
 Statement text:
 ${chunkText}`
 
+  // ── Primary: Gemini 2.0 Flash (1M TPM free tier, no thinking overhead) ──
+  try {
+    const raw = await callGemini(prompt)
+    console.log(`[PDF] gemini outLen=${raw.length} preview=${raw.slice(0, 100)}`)
+    if (raw.trim()) return extractJsonArray(raw)
+    console.warn('[PDF] Gemini returned empty — falling back to Groq')
+  } catch (err: any) {
+    if (err?.skip) {
+      console.log('[PDF] Gemini not configured — using Groq')
+    } else {
+      console.warn('[PDF] Gemini error, falling back to Groq:', err?.message ?? err)
+    }
+  }
+
+  // ── Fallback: iterate available Groq models ──
   const models = await resolveModels()
 
   for (const model of models) {
-    // Retry loop for rate limits only
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const completion = await groq.chat.completions.create({
           model,
           messages: [
             { role: 'system', content: 'You are a JSON extraction tool. Output ONLY a raw JSON array. No explanation, no markdown, no code fences.' },
-            // /no_think at the START of the user message is Qwen3's canonical
-            // way to disable chain-of-thought reasoning (system message is ignored for this).
-            // It is a no-op for all other models.
             { role: 'user', content: `/no_think\n\n${prompt}` },
           ],
           temperature: 0.1,
-          // 4096 stays within every model's per-request output cap on Groq.
-          // With /no_think suppressing Qwen3 reasoning, JSON output fits well within this.
           max_tokens: 4096,
         })
 
         const raw = completion.choices[0]?.message?.content ?? ''
-        console.log(`[PDF] model=${model} outLen=${raw.length} preview=${raw.slice(0, 100)}`)
+        console.log(`[PDF] groq model=${model} outLen=${raw.length} preview=${raw.slice(0, 100)}`)
 
         if (!raw.trim()) {
-          console.warn(`[PDF] ${model} returned empty content — skipping to next model`)
-          break // skip to next model
+          console.warn(`[PDF] ${model} returned empty — skipping`)
+          break
         }
-
         return extractJsonArray(raw)
       } catch (err: any) {
         if (err?.status === 429 && attempt < 2) {
@@ -251,19 +273,16 @@ ${chunkText}`
           continue
         }
         if (isModelUnusable(err)) {
-          console.warn(`[PDF] ${model} unusable (${err?.status}) — skipping to next model`)
-          break // skip to next model
+          console.warn(`[PDF] ${model} unusable (${err?.status}) — skipping`)
+          break
         }
         throw err
       }
     }
-    // Reached here = this model failed cleanly; try the next one
   }
 
-  // All models exhausted — refresh list in case Groq added something new, then give up
-  console.error('[PDF] All models failed. Refreshing model list for next attempt.')
-  await resolveModels(true)
-  throw new Error('All available Groq models failed to extract transactions. Check Vercel logs for details.')
+  await resolveModels(true) // refresh for next request
+  throw new Error('All AI providers failed. Check Vercel logs for details.')
 }
 
 // Normalize CR/+ credit markers so the AI reliably identifies them as income.
