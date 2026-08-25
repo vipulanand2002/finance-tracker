@@ -322,6 +322,13 @@ export default function CardsPage() {
     }
   }, [])
 
+  const refreshAllCardTxs = useCallback(() => {
+    fetch('/api/transactions?has_card=true')
+      .then(r => r.json())
+      .then(d => setAllCardTxs(Array.isArray(d) ? d : []))
+      .catch(() => {})
+  }, [])
+
   const fetchCardTxs = useCallback(async (cardId: string) => {
     setTxLoading(true)
     try {
@@ -363,11 +370,7 @@ export default function CardsPage() {
   useEffect(() => {
     if (!loading && cards.length > 0) {
       fetchCardTxs(selectedCardId)
-      // Always keep a full all-card snapshot for outstanding balance display
-      fetch('/api/transactions?has_card=true')
-        .then(r => r.json())
-        .then(d => setAllCardTxs(Array.isArray(d) ? d : []))
-        .catch(() => {})
+      refreshAllCardTxs()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cards, selectedCardId])
@@ -758,7 +761,7 @@ export default function CardsPage() {
       <TransactionModal
         open={txModalOpen}
         onClose={() => setTxModalOpen(false)}
-        onSaved={() => { fetchCardTxs(selectedCardId) }}
+        onSaved={() => { fetchCardTxs(selectedCardId); refreshAllCardTxs() }}
         defaultCardId={selectedCardId !== 'all' ? selectedCardId : null}
       />
     </div>
