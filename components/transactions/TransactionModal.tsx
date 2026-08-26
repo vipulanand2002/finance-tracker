@@ -333,19 +333,21 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                     ))}
                   </SelectContent>
                 </Select>
-                {form.contact_id && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="w-full mt-1 text-xs"
-                    onClick={() => setSplitOpen(true)}
-                  >
-                    <SplitSquareVertical className="w-3.5 h-3.5 mr-1.5" />
-                    Create split with {contacts.find(c => c.id === form.contact_id)?.name}
-                  </Button>
-                )}
               </div>
+            )}
+
+            {/* Split — always visible for expense transactions */}
+            {form.type === 'expense' && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full text-xs"
+                onClick={() => setSplitOpen(true)}
+              >
+                <SplitSquareVertical className="w-3.5 h-3.5 mr-1.5" />
+                Split this expense
+              </Button>
             )}
 
             {trips.length > 0 && (
@@ -456,19 +458,19 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         onChanged={loadCategories}
       />
 
-      {form.contact_id && (() => {
-        const c = contacts.find(x => x.id === form.contact_id)
-        return c ? (
+      {(() => {
+        const c = form.contact_id ? contacts.find(x => x.id === form.contact_id) : null
+        return (
           <SplitModal
             open={splitOpen}
             onClose={() => setSplitOpen(false)}
             onSaved={() => setSplitOpen(false)}
             defaultTitle={form.description || undefined}
             defaultAmount={form.amount || undefined}
-            contactId={form.contact_id}
-            defaultParticipants={[{ name: c.name, email: c.email ?? '' }]}
+            contactId={form.contact_id ?? null}
+            defaultParticipants={c ? [{ name: c.name, email: c.email ?? '' }] : undefined}
           />
-        ) : null
+        )
       })()}
     </>
   )

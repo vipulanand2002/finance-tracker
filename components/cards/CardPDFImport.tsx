@@ -576,8 +576,8 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                                   )}
                                 </div>
 
-                                {/* Split — only when a contact is selected */}
-                                {tx.contact_id && tx.type === 'expense' && (
+                                {/* Split — always visible for expense transactions */}
+                                {tx.type === 'expense' && (
                                   <div className="space-y-1.5 pt-1 border-t">
                                     <div className="flex items-center gap-2">
                                       <input
@@ -592,24 +592,42 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                                         })}
                                         className="w-3.5 h-3.5 rounded"
                                       />
-                                      <Label htmlFor={`split-${absIdx}`} className="text-xs cursor-pointer">
-                                        Create split with {contacts.find(c => c.id === tx.contact_id)?.name}
+                                      <Label htmlFor={`split-${absIdx}`} className="text-xs cursor-pointer font-medium">
+                                        Create split
                                       </Label>
                                     </div>
                                     {tx.split_enabled && (
-                                      <div className="flex items-center gap-2 pl-5">
-                                        <Label className="text-xs text-muted-foreground shrink-0">Their share</Label>
-                                        <Input
-                                          type="number"
-                                          min="0.01"
-                                          step="0.01"
-                                          value={tx.split_amount}
-                                          onChange={e => updateTx(absIdx, { split_amount: e.target.value })}
-                                          className="h-7 text-xs w-28"
-                                        />
-                                        <span className="text-xs text-muted-foreground">
-                                          of {formatCurrency(tx.amount)}
-                                        </span>
+                                      <div className="pl-5 space-y-2">
+                                        {contacts.length > 0 && (
+                                          <Select
+                                            value={tx.contact_id ?? 'none'}
+                                            onValueChange={v => updateTx(absIdx, { contact_id: v === 'none' ? null : v })}
+                                          >
+                                            <SelectTrigger className="h-7 text-xs">
+                                              <SelectValue placeholder="Select who to split with" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              <SelectItem value="none">Select contact</SelectItem>
+                                              {contacts.map(c => (
+                                                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                                              ))}
+                                            </SelectContent>
+                                          </Select>
+                                        )}
+                                        <div className="flex items-center gap-2">
+                                          <Label className="text-xs text-muted-foreground shrink-0">Their share</Label>
+                                          <Input
+                                            type="number"
+                                            min="0.01"
+                                            step="0.01"
+                                            value={tx.split_amount}
+                                            onChange={e => updateTx(absIdx, { split_amount: e.target.value })}
+                                            className="h-7 text-xs w-28"
+                                          />
+                                          <span className="text-xs text-muted-foreground">
+                                            of {formatCurrency(tx.amount)}
+                                          </span>
+                                        </div>
                                       </div>
                                     )}
                                   </div>
