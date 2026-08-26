@@ -11,10 +11,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   Upload, Loader2, CheckSquare, Square, Eye, EyeOff,
   ChevronDown, ChevronUp, FileText, ArrowUpCircle, ArrowDownCircle, KeyRound,
+  UserCircle2, Briefcase,
 } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
-import type { Trip } from '@/types'
+import type { Trip, Contact } from '@/types'
 
 interface EditableTx {
   date: string
@@ -53,6 +54,9 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
   const [cycleStart, setCycleStart] = useState('')
   const [cycleEnd, setCycleEnd] = useState('')
   const [trips, setTrips] = useState<Trip[]>([])
+  const [contacts, setContacts] = useState<Contact[]>([])
+  const [globalContactId, setGlobalContactId] = useState<string | null>(null)
+  const [globalTripId, setGlobalTripId] = useState<string | null>(null)
   const [expenseCategories, setExpenseCategories] = useState<string[]>([...EXPENSE_CATEGORIES])
   const [incomeCategories, setIncomeCategories] = useState<string[]>([...INCOME_CATEGORIES])
   const fileRef = useRef<HTMLInputElement>(null)
@@ -64,6 +68,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
   useEffect(() => {
     if (!open) return
     fetch('/api/trips').then(r => r.json()).then(d => setTrips(Array.isArray(d) ? d : [])).catch(() => {})
+    fetch('/api/contacts').then(r => r.json()).then(d => setContacts(Array.isArray(d) ? d : [])).catch(() => {})
     fetch('/api/categories')
       .then(r => r.json())
       .then((data: { list_type: string; name: string }[]) => {
@@ -82,6 +87,8 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
     setParseError(null)
     setCycleStart('')
     setCycleEnd('')
+    setGlobalContactId(null)
+    setGlobalTripId(null)
     if (fileRef.current) fileRef.current.value = ''
     // Keep password pre-filled for convenience
   }
@@ -207,7 +214,8 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
           body: JSON.stringify({
             amount: t.amount, type: t.type, category: t.category,
             description: desc, date: t.date, is_recurring: false, receipt_url: null,
-            trip_id: t.trip_id ?? null,
+            trip_id: t.trip_id ?? globalTripId ?? null,
+            contact_id: globalContactId ?? null,
             card_id: cardId ?? null,
           }),
         })
@@ -373,6 +381,44 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                     className="h-7 text-xs flex-1 min-w-0"
                   />
                 </div>
+              </div>
+            )}
+
+            {/* Contact + Trip associations — applied to all imported transactions */}
+            {step === 'review' && (contacts.length > 0 || trips.length > 0) && (
+              <div className="flex items-center gap-2 px-3 py-2.5 border-b bg-muted/20 shrink-0">
+                {contacts.length > 0 && (
+                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                    <UserCircle2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <Select value={globalContactId ?? 'none'} onValueChange={v => setGlobalContactId(v === 'none' ? null : v)}>
+                      <SelectTrigger className="h-7 text-xs flex-1">
+                        <SelectValue placeholder="Contact (optional)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No contact</SelectItem>
+                        {contacts.map(c => (
+                          <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                {trips.length > 0 && (
+                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                    <Briefcase className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <Select value={globalTripId ?? 'none'} onValueChange={v => setGlobalTripId(v === 'none' ? null : v)}>
+                      <SelectTrigger className="h-7 text-xs flex-1">
+                        <SelectValue placeholder="Trip (optional)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No trip</SelectItem>
+                        {trips.filter(t => !t.is_closed).map(t => (
+                          <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
             )}
 
