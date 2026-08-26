@@ -11,7 +11,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   Upload, Loader2, CheckSquare, Square, Eye, EyeOff,
   ChevronDown, ChevronUp, FileText, ArrowUpCircle, ArrowDownCircle, KeyRound,
-  Briefcase,
 } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
@@ -56,7 +55,6 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
   const [cycleEnd, setCycleEnd] = useState('')
   const [trips, setTrips] = useState<Trip[]>([])
   const [contacts, setContacts] = useState<Contact[]>([])
-  const [globalTripId, setGlobalTripId] = useState<string | null>(null)
   const [expenseCategories, setExpenseCategories] = useState<string[]>([...EXPENSE_CATEGORIES])
   const [incomeCategories, setIncomeCategories] = useState<string[]>([...INCOME_CATEGORIES])
   const fileRef = useRef<HTMLInputElement>(null)
@@ -87,7 +85,6 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
     setParseError(null)
     setCycleStart('')
     setCycleEnd('')
-    setGlobalTripId(null)
     if (fileRef.current) fileRef.current.value = ''
     // Keep password pre-filled for convenience
   }
@@ -213,7 +210,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
           body: JSON.stringify({
             amount: t.amount, type: t.type, category: t.category,
             description: desc, date: t.date, is_recurring: false, receipt_url: null,
-            trip_id: t.trip_id ?? globalTripId ?? null,
+            trip_id: t.trip_id ?? null,
             contact_id: t.contact_id ?? null,
             card_id: cardId ?? null,
           }),
@@ -383,23 +380,6 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
               </div>
             )}
 
-            {/* Global trip — default for all transactions (overridable per row) */}
-            {step === 'review' && trips.length > 0 && (
-              <div className="flex items-center gap-1.5 px-3 py-2.5 border-b bg-muted/20 shrink-0">
-                <Briefcase className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                <Select value={globalTripId ?? 'none'} onValueChange={v => setGlobalTripId(v === 'none' ? null : v)}>
-                  <SelectTrigger className="h-7 text-xs flex-1">
-                    <SelectValue placeholder="Link all to a trip (optional)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No trip</SelectItem>
-                    {trips.filter(t => !t.is_closed).map(t => (
-                      <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
 
             {step === 'importing' ? (
               <div className="flex-1 flex flex-col items-center justify-center gap-3">
