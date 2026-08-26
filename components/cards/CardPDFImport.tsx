@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   Upload, Loader2, CheckSquare, Square, Eye, EyeOff,
   ChevronDown, ChevronUp, FileText, ArrowUpCircle, ArrowDownCircle, KeyRound,
-  UserCircle2, Briefcase,
+  Briefcase,
 } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
@@ -25,6 +25,7 @@ interface EditableTx {
   category: string
   note: string
   trip_id: string | null
+  contact_id: string | null
   selected: boolean
   expanded: boolean
 }
@@ -55,7 +56,6 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
   const [cycleEnd, setCycleEnd] = useState('')
   const [trips, setTrips] = useState<Trip[]>([])
   const [contacts, setContacts] = useState<Contact[]>([])
-  const [globalContactId, setGlobalContactId] = useState<string | null>(null)
   const [globalTripId, setGlobalTripId] = useState<string | null>(null)
   const [expenseCategories, setExpenseCategories] = useState<string[]>([...EXPENSE_CATEGORIES])
   const [incomeCategories, setIncomeCategories] = useState<string[]>([...INCOME_CATEGORIES])
@@ -87,7 +87,6 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
     setParseError(null)
     setCycleStart('')
     setCycleEnd('')
-    setGlobalContactId(null)
     setGlobalTripId(null)
     if (fileRef.current) fileRef.current.value = ''
     // Keep password pre-filled for convenience
@@ -152,8 +151,8 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
       }
 
       const parsed: EditableTx[] = data.transactions.map(
-        (t: Omit<EditableTx, 'note' | 'trip_id' | 'selected' | 'expanded'>) => ({
-          ...t, note: '', trip_id: null, selected: true, expanded: false,
+        (t: Omit<EditableTx, 'note' | 'trip_id' | 'contact_id' | 'selected' | 'expanded'>) => ({
+          ...t, note: '', trip_id: null, contact_id: null, selected: true, expanded: false,
         })
       )
       setTransactions(parsed)
@@ -215,7 +214,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
             amount: t.amount, type: t.type, category: t.category,
             description: desc, date: t.date, is_recurring: false, receipt_url: null,
             trip_id: t.trip_id ?? globalTripId ?? null,
-            contact_id: globalContactId ?? null,
+            contact_id: t.contact_id ?? null,
             card_id: cardId ?? null,
           }),
         })
@@ -384,41 +383,21 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
               </div>
             )}
 
-            {/* Contact + Trip associations — applied to all imported transactions */}
-            {step === 'review' && (contacts.length > 0 || trips.length > 0) && (
-              <div className="flex items-center gap-2 px-3 py-2.5 border-b bg-muted/20 shrink-0">
-                {contacts.length > 0 && (
-                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                    <UserCircle2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                    <Select value={globalContactId ?? 'none'} onValueChange={v => setGlobalContactId(v === 'none' ? null : v)}>
-                      <SelectTrigger className="h-7 text-xs flex-1">
-                        <SelectValue placeholder="Contact (optional)" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">No contact</SelectItem>
-                        {contacts.map(c => (
-                          <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-                {trips.length > 0 && (
-                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                    <Briefcase className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                    <Select value={globalTripId ?? 'none'} onValueChange={v => setGlobalTripId(v === 'none' ? null : v)}>
-                      <SelectTrigger className="h-7 text-xs flex-1">
-                        <SelectValue placeholder="Trip (optional)" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">No trip</SelectItem>
-                        {trips.filter(t => !t.is_closed).map(t => (
-                          <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
+            {/* Global trip — default for all transactions (overridable per row) */}
+            {step === 'review' && trips.length > 0 && (
+              <div className="flex items-center gap-1.5 px-3 py-2.5 border-b bg-muted/20 shrink-0">
+                <Briefcase className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                <Select value={globalTripId ?? 'none'} onValueChange={v => setGlobalTripId(v === 'none' ? null : v)}>
+                  <SelectTrigger className="h-7 text-xs flex-1">
+                    <SelectValue placeholder="Link all to a trip (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No trip</SelectItem>
+                    {trips.filter(t => !t.is_closed).map(t => (
+                      <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
 
@@ -546,27 +525,50 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                                     placeholder="Add a personal note…"
                                   />
                                 </div>
-                                {trips.length > 0 && (
-                                  <div className="space-y-1">
-                                    <Label className="text-xs">
-                                      Trip <span className="text-muted-foreground font-normal">(optional)</span>
-                                    </Label>
-                                    <Select
-                                      value={tx.trip_id ?? 'none'}
-                                      onValueChange={v => updateTx(absIdx, { trip_id: v === 'none' ? null : v })}
-                                    >
-                                      <SelectTrigger className="h-8 text-xs">
-                                        <SelectValue placeholder="Link to a trip" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="none">No trip</SelectItem>
-                                        {trips.filter(t => !t.is_closed).map(t => (
-                                          <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                  </div>
-                                )}
+                                <div className="grid grid-cols-2 gap-2.5">
+                                  {contacts.length > 0 && (
+                                    <div className="space-y-1">
+                                      <Label className="text-xs">
+                                        Contact <span className="text-muted-foreground font-normal">(optional)</span>
+                                      </Label>
+                                      <Select
+                                        value={tx.contact_id ?? 'none'}
+                                        onValueChange={v => updateTx(absIdx, { contact_id: v === 'none' ? null : v })}
+                                      >
+                                        <SelectTrigger className="h-8 text-xs">
+                                          <SelectValue placeholder="Link to a contact" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="none">No contact</SelectItem>
+                                          {contacts.map(c => (
+                                            <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                  )}
+                                  {trips.length > 0 && (
+                                    <div className="space-y-1">
+                                      <Label className="text-xs">
+                                        Trip <span className="text-muted-foreground font-normal">(optional)</span>
+                                      </Label>
+                                      <Select
+                                        value={tx.trip_id ?? 'none'}
+                                        onValueChange={v => updateTx(absIdx, { trip_id: v === 'none' ? null : v })}
+                                      >
+                                        <SelectTrigger className="h-8 text-xs">
+                                          <SelectValue placeholder="Link to a trip" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="none">No trip</SelectItem>
+                                          {trips.filter(t => !t.is_closed).map(t => (
+                                            <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             )}
                           </div>
