@@ -21,7 +21,17 @@ import {
 } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import SplitModal from '@/components/splits/SplitModal'
-import type { Contact, Transaction } from '@/types'
+import type { Contact, Transaction, SplitParticipantSummary } from '@/types'
+
+interface ContactSplit {
+  id: string
+  title: string
+  total_amount: number
+  date: string
+  category: string
+  contact_id: string | null
+  split_participants?: SplitParticipantSummary[]
+}
 
 function initials(name: string) {
   return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
@@ -53,6 +63,7 @@ export default function ContactsPage() {
   // Contact detail sheet
   const [selected, setSelected] = useState<Contact | null>(null)
   const [contactTxs, setContactTxs] = useState<Transaction[]>([])
+  const [contactSplits, setContactSplits] = useState<ContactSplit[]>([])
   const [loadingTxs, setLoadingTxs] = useState(false)
 
   // Split from contact
@@ -125,10 +136,16 @@ export default function ContactsPage() {
   function openDetail(c: Contact) {
     setSelected(c)
     setContactTxs([])
+    setContactSplits([])
     setLoadingTxs(true)
-    fetch(`/api/transactions?contact_id=${c.id}`)
-      .then(r => r.json())
-      .then(d => setContactTxs(Array.isArray(d) ? d : []))
+    Promise.all([
+      fetch(`/api/transactions?contact_id=${c.id}`).then(r => r.json()),
+      fetch(`/api/splits?contact_id=${c.id}`).then(r => r.json()),
+    ])
+      .then(([txs, splits]) => {
+        setContactTxs(Array.isArray(txs) ? txs : [])
+        setContactSplits(Array.isArray(splits) ? splits : [])
+      })
       .catch(() => {})
       .finally(() => setLoadingTxs(false))
   }
@@ -147,6 +164,14 @@ export default function ContactsPage() {
   const totalSpent = contactTxs
     .filter(t => t.type === 'expense')
     .reduce((s, t) => s + t.amount, 0)
+
+  // Sum of what contacts owe across all splits (unpaid participants)
+  const totalSplitOwed = contactSplits.reduce((sum, split) => {
+    const unpaid = (split.split_participants ?? [])
+      .filter(p => !p.is_paid)
+      .reduce((s, p) => s + p.amount_owed, 0)
+    return sum + unpaid
+  }, 0)
 
   return (
     <div className="space-y-6">
@@ -281,16 +306,34 @@ export default function ContactsPage() {
 
               <div className="flex-1 overflow-y-auto">
                 {/* Stats */}
-                {!loadingTxs && contactTxs.length > 0 && (
-                  <div className="px-6 py-4 border-b flex items-center gap-6">
-                    <div>
-                      <p className="text-xs text-muted-foreground">Transactions</p>
-                      <p className="font-semibold">{contactTxs.length}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Total spent</p>
-                      <p className="font-semibold text-red-600">{formatCurrency(totalSpent)}</p>
-                    </div>
+                {!loadingTxs && (contactTxs.length > 0 || contactSplits.length > 0) && (
+                  <div className="px-6 py-4 border-b flex items-center gap-6 flex-wrap">
+                    {contactTxs.length > 0 && (
+                      <>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Transactions</p>
+                          <p className="font-semibold">{contactTxs.length}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Total spent</p>
+                          <p className="font-semibold text-red-600">{formatCurrency(totalSpent)}</p>
+                        </div>
+                      </>
+                    )}
+                    {contactSplits.length > 0 && (
+                      <>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Splits</p>
+                          <p className="font-semibold">{contactSplits.length}</p>
+                        </div>
+                        {totalSplitOwed > 0 && (
+                          <div>
+                            <p className="text-xs text-muted-foreground">Owes you</p>
+                            <p className="font-semibold text-amber-600">{formatCurrency(totalSplitOwed)}</p>
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
                 )}
 
@@ -305,7 +348,7 @@ export default function ContactsPage() {
                       {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-14 rounded-lg" />)}
                     </div>
                   ) : contactTxs.length === 0 ? (
-                    <p className="text-sm text-muted-foreground py-6 text-center">
+                    <p className="text-sm text-muted-foreground py-4 text-center">
                       No transactions tagged with {selected.name} yet.
                     </p>
                   ) : (
@@ -323,6 +366,36 @@ export default function ContactsPage() {
                           </span>
                         </div>
                       ))}
+                    </div>
+                  )}
+
+                  {/* Splits section */}
+                  {!loadingTxs && contactSplits.length > 0 && (
+                    <div className="mt-5">
+                      <p className="text-sm font-medium mb-3 flex items-center gap-2">
+                        <SplitSquareVertical className="w-4 h-4" />
+                        Splits
+                      </p>
+                      <div className="space-y-2">
+                        {contactSplits.map(split => {
+                          const participants = split.split_participants ?? []
+                          const owed = participants.filter(p => !p.is_paid).reduce((s, p) => s + p.amount_owed, 0)
+                          const settled = owed === 0
+                          return (
+                            <div key={split.id} className="p-3 rounded-lg border bg-card space-y-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-sm font-medium truncate">{split.title}</p>
+                                <span className={`text-sm font-semibold shrink-0 ${settled ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                  {settled ? 'Settled' : `Owes ${formatCurrency(owed)}`}
+                                </span>
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                {format(new Date(split.date + 'T00:00:00'), 'dd MMM yyyy')} · {split.category} · Total {formatCurrency(split.total_amount)}
+                              </p>
+                            </div>
+                          )
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>

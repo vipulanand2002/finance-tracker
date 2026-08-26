@@ -25,6 +25,8 @@ interface EditableTx {
   note: string
   trip_id: string | null
   contact_id: string | null
+  split_enabled: boolean
+  split_amount: string
   selected: boolean
   expanded: boolean
 }
@@ -149,7 +151,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
 
       const parsed: EditableTx[] = data.transactions.map(
         (t: Omit<EditableTx, 'note' | 'trip_id' | 'contact_id' | 'selected' | 'expanded'>) => ({
-          ...t, note: '', trip_id: null, contact_id: null, selected: true, expanded: false,
+          ...t, note: '', trip_id: null, contact_id: null, split_enabled: false, split_amount: '', selected: true, expanded: false,
         })
       )
       setTransactions(parsed)
@@ -215,7 +217,31 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
             card_id: cardId ?? null,
           }),
         })
-        if (res.ok) imported++; else failed++
+        if (res.ok) {
+          imported++
+          // Create a split if requested
+          if (t.split_enabled && t.contact_id && t.split_amount && parseFloat(t.split_amount) > 0) {
+            const contact = contacts.find(c => c.id === t.contact_id)
+            if (contact) {
+              await fetch('/api/splits', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  title: t.description,
+                  total_amount: t.amount,
+                  category: t.category,
+                  date: t.date,
+                  contact_id: t.contact_id,
+                  participants: [
+                    { name: contact.name, email: contact.email ?? '', amount: parseFloat(t.split_amount) },
+                  ],
+                }),
+              }).catch(() => {})
+            }
+          }
+        } else {
+          failed++
+        }
       } catch { failed++ }
     }
 
@@ -549,6 +575,45 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                                     </div>
                                   )}
                                 </div>
+
+                                {/* Split — only when a contact is selected */}
+                                {tx.contact_id && tx.type === 'expense' && (
+                                  <div className="space-y-1.5 pt-1 border-t">
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        type="checkbox"
+                                        id={`split-${absIdx}`}
+                                        checked={tx.split_enabled}
+                                        onChange={e => updateTx(absIdx, {
+                                          split_enabled: e.target.checked,
+                                          split_amount: e.target.checked
+                                            ? (tx.amount / 2).toFixed(2)
+                                            : '',
+                                        })}
+                                        className="w-3.5 h-3.5 rounded"
+                                      />
+                                      <Label htmlFor={`split-${absIdx}`} className="text-xs cursor-pointer">
+                                        Create split with {contacts.find(c => c.id === tx.contact_id)?.name}
+                                      </Label>
+                                    </div>
+                                    {tx.split_enabled && (
+                                      <div className="flex items-center gap-2 pl-5">
+                                        <Label className="text-xs text-muted-foreground shrink-0">Their share</Label>
+                                        <Input
+                                          type="number"
+                                          min="0.01"
+                                          step="0.01"
+                                          value={tx.split_amount}
+                                          onChange={e => updateTx(absIdx, { split_amount: e.target.value })}
+                                          className="h-7 text-xs w-28"
+                                        />
+                                        <span className="text-xs text-muted-foreground">
+                                          of {formatCurrency(tx.amount)}
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>

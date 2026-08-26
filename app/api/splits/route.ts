@@ -9,13 +9,16 @@ async function getUser() {
   return { supabase, user }
 }
 
-// GET /api/splits          — all splits for the user (created + participating by user_id or email)
-// GET /api/splits?trip_id=X — splits linked to a specific trip
+// GET /api/splits             — all splits for the user
+// GET /api/splits?trip_id=X   — splits linked to a specific trip
+// GET /api/splits?contact_id=X — splits linked to a specific contact
 export async function GET(request: Request) {
   const { supabase, user } = await getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const tripId = new URL(request.url).searchParams.get('trip_id')
+  const params = new URL(request.url).searchParams
+  const tripId = params.get('trip_id')
+  const contactId = params.get('contact_id')
 
   let query = supabase
     .from('expense_splits')
@@ -23,6 +26,7 @@ export async function GET(request: Request) {
     .order('date', { ascending: false })
 
   if (tripId) query = query.eq('trip_id', tripId)
+  if (contactId) query = query.eq('contact_id', contactId)
 
   // RLS (split_creators_all + split_participants_view via is_split_participant)
   // now handles visibility by both user_id and email — single query suffices

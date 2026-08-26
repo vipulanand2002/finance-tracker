@@ -24,12 +24,13 @@ interface Props {
   defaultTitle?: string
   defaultAmount?: string | number
   tripId?: string | null
+  contactId?: string | null
   defaultParticipants?: { name: string; email: string }[]
 }
 
 const emptyParticipant = (): Participant => ({ name: '', email: '', amount: '' })
 
-export default function SplitModal({ open, onClose, onSaved, defaultTitle, defaultAmount, tripId, defaultParticipants }: Props) {
+export default function SplitModal({ open, onClose, onSaved, defaultTitle, defaultAmount, tripId, contactId, defaultParticipants }: Props) {
   const [title, setTitle] = useState('')
   const [totalAmount, setTotalAmount] = useState('')
   const [category, setCategory] = useState('Food & Dining')
@@ -121,6 +122,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         body: JSON.stringify({
           title: title.trim(), total_amount: total, category, description: description || null, date,
           trip_id: tripId ?? null,
+          contact_id: contactId ?? null,
           participants: validParticipants.map(p => ({
             name: p.name.trim(),
             email: p.email.trim() || undefined,

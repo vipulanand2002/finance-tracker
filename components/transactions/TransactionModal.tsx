@@ -465,6 +465,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
             onSaved={() => setSplitOpen(false)}
             defaultTitle={form.description || undefined}
             defaultAmount={form.amount || undefined}
+            contactId={form.contact_id}
             defaultParticipants={[{ name: c.name, email: c.email ?? '' }]}
           />
         ) : null
