@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, CheckCircle2, Circle, Trash2, Users, UserPlus } from 'lucide-react'
+import { Plus, CheckCircle2, Circle, Trash2, Users, UserPlus, Mail, Loader2 } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import SplitModal from '@/components/splits/SplitModal'
 import FriendsSheet from '@/components/friends/FriendsSheet'
@@ -40,6 +40,21 @@ export default function SplitsPage() {
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [friendsOpen, setFriendsOpen] = useState(false)
+  const [sendingEmail, setSendingEmail] = useState(false)
+
+  async function sendSummaryEmail() {
+    setSendingEmail(true)
+    try {
+      const res = await fetch('/api/mail/split-summary', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Failed')
+      toast.success('Summary sent to your email!')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to send email')
+    } finally {
+      setSendingEmail(false)
+    }
+  }
 
   const fetchSplits = useCallback(async () => {
     setLoading(true)
@@ -181,6 +196,12 @@ export default function SplitsPage() {
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => setFriendsOpen(true)}>
             <UserPlus className="w-4 h-4 mr-1" /> Friends
+          </Button>
+          <Button variant="outline" onClick={sendSummaryEmail} disabled={sendingEmail}>
+            {sendingEmail
+              ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Sending…</>
+              : <><Mail className="w-4 h-4 mr-1" /> Email Summary</>
+            }
           </Button>
           <Button onClick={() => setModalOpen(true)}>
             <Plus className="w-4 h-4 mr-1" /> New Split
