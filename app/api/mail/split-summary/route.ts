@@ -3,20 +3,20 @@ import { NextResponse } from 'next/server'
 import { Resend } from 'resend'
 import { buildSplitReminderEmail } from '@/lib/email-templates/split-reminder'
 
-const resend = new Resend(process.env.RESEND_API_KEY)
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://finance-tracker.vercel.app'
 const FROM_EMAIL = process.env.RESEND_FROM_EMAIL ?? 'FinanceTracker <onboarding@resend.dev>'
 
 // POST /api/mail/split-summary
 // Body: { split_id: string }  — sends reminder emails to all unpaid participants who have an email
 export async function POST(request: Request) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
   if (!process.env.RESEND_API_KEY) {
     return NextResponse.json({ error: 'Email service not configured — add RESEND_API_KEY to Vercel env vars' }, { status: 503 })
   }
+  const resend = new Resend(process.env.RESEND_API_KEY)
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { split_id } = await request.json()
   if (!split_id) return NextResponse.json({ error: 'split_id required' }, { status: 400 })
