@@ -52,15 +52,11 @@ export function buildSplitReminderEmail(opts: {
   const participantRows = allParticipants.map(p => `
     <tr>
       <td style="padding:10px 0;border-bottom:1px solid #f1f5f9;vertical-align:middle;">
-        <div style="display:flex;align-items:center;gap:10px;">
-          <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">
-            <span style="font-size:13px;font-weight:700;color:#fff;line-height:1;">${p.name.charAt(0).toUpperCase()}</span>
-          </div>
-          <div>
-            <div style="font-size:13px;font-weight:600;color:#0f172a;">${p.name}</div>
-            ${p.email ? `<div style="font-size:11px;color:#94a3b8;">${p.email}</div>` : ''}
-          </div>
-        </div>
+        <span style="display:inline-block;width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);text-align:center;line-height:32px;font-size:13px;font-weight:700;color:#fff;vertical-align:middle;">${p.name.charAt(0).toUpperCase()}</span>
+        <span style="display:inline-block;vertical-align:middle;margin-left:10px;">
+          <div style="font-size:13px;font-weight:600;color:#0f172a;">${p.name}</div>
+          ${p.email ? `<div style="font-size:11px;color:#94a3b8;">${p.email}</div>` : ''}
+        </span>
       </td>
       <td style="padding:10px 0;border-bottom:1px solid #f1f5f9;text-align:right;vertical-align:middle;">
         <span style="font-size:14px;font-weight:700;color:${p.is_paid ? '#10b981' : '#ef4444'};">${fmt(p.amount_owed)}</span>
@@ -92,11 +88,9 @@ export function buildSplitReminderEmail(opts: {
         <!-- ══ LOGO ══ -->
         <tr>
           <td align="center" style="padding-bottom:24px;">
-            <div style="display:inline-flex;align-items:center;gap:10px;background:#ffffff;border:1px solid #e2e8f0;border-radius:40px;padding:10px 22px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
-              <div style="width:34px;height:34px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:9px;display:inline-flex;align-items:center;justify-content:center;">
-                <span style="font-size:17px;line-height:1;">💹</span>
-              </div>
-              <span style="font-size:17px;font-weight:800;color:#0f172a;letter-spacing:-0.3px;">Finance<span style="color:#6366f1;">Tracker</span></span>
+            <div style="display:inline-block;background:#ffffff;border:1px solid #e2e8f0;border-radius:40px;padding:10px 22px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+              <span style="display:inline-block;width:34px;height:34px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:9px;text-align:center;line-height:34px;font-size:17px;vertical-align:middle;">💹</span>
+              <span style="display:inline-block;font-size:17px;font-weight:800;color:#0f172a;letter-spacing:-0.3px;vertical-align:middle;margin-left:10px;">Finance<span style="color:#6366f1;">Tracker</span></span>
             </div>
           </td>
         </tr>
