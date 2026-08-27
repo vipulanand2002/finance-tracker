@@ -40,19 +40,24 @@ export default function SplitsPage() {
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [friendsOpen, setFriendsOpen] = useState(false)
-  const [sendingEmail, setSendingEmail] = useState(false)
+  const [sendingReminder, setSendingReminder] = useState<string | null>(null) // split id being emailed
 
-  async function sendSummaryEmail() {
-    setSendingEmail(true)
+  async function sendReminder(splitId: string, participantCount: number) {
+    setSendingReminder(splitId)
     try {
-      const res = await fetch('/api/mail/split-summary', { method: 'POST' })
+      const res = await fetch('/api/mail/split-summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ split_id: splitId }),
+      })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Failed')
-      toast.success('Summary sent to your email!')
+      const n = data.sent ?? participantCount
+      toast.success(`Reminder sent to ${n} participant${n !== 1 ? 's' : ''}!`)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to send email')
+      toast.error(err instanceof Error ? err.message : 'Failed to send reminder')
     } finally {
-      setSendingEmail(false)
+      setSendingReminder(null)
     }
   }
 
@@ -172,14 +177,34 @@ export default function SplitsPage() {
             ))}
           </div>
 
-          <div className="mt-3 pt-3 border-t flex items-center justify-between">
+          <div className="mt-3 pt-3 border-t flex items-center justify-between gap-2 flex-wrap">
             <span className="text-xs text-muted-foreground">{paid}/{total} paid</span>
-            {!split.is_settled && paid === total && (
-              <Button size="sm" variant="outline" onClick={() => settle(split.id)}>
-                Mark as settled
-              </Button>
-            )}
-            {split.is_settled && <Badge className="text-xs bg-emerald-100 text-emerald-700">Settled</Badge>}
+            <div className="flex items-center gap-2">
+              {/* Send reminder to unpaid participants who have emails */}
+              {!split.is_settled && split.split_participants.some(p => !p.is_paid && p.participant_email) && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => sendReminder(
+                    split.id,
+                    split.split_participants.filter(p => !p.is_paid && p.participant_email).length
+                  )}
+                  disabled={sendingReminder === split.id}
+                  className="text-xs h-7"
+                >
+                  {sendingReminder === split.id
+                    ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Sending…</>
+                    : <><Mail className="w-3 h-3 mr-1" />Send Reminder</>
+                  }
+                </Button>
+              )}
+              {!split.is_settled && paid === total && (
+                <Button size="sm" variant="outline" onClick={() => settle(split.id)} className="h-7 text-xs">
+                  Mark as settled
+                </Button>
+              )}
+              {split.is_settled && <Badge className="text-xs bg-emerald-100 text-emerald-700">Settled</Badge>}
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -196,12 +221,6 @@ export default function SplitsPage() {
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => setFriendsOpen(true)}>
             <UserPlus className="w-4 h-4 mr-1" /> Friends
-          </Button>
-          <Button variant="outline" onClick={sendSummaryEmail} disabled={sendingEmail}>
-            {sendingEmail
-              ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Sending…</>
-              : <><Mail className="w-4 h-4 mr-1" /> Email Summary</>
-            }
           </Button>
           <Button onClick={() => setModalOpen(true)}>
             <Plus className="w-4 h-4 mr-1" /> New Split
