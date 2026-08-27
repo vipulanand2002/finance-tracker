@@ -34,6 +34,7 @@ interface Props {
   open: boolean
   onClose: () => void
   onUpdated: () => void
+  inline?: boolean
 }
 
 function safeDate(s: string | null | undefined) {
@@ -84,7 +85,7 @@ interface TripSplit {
   split_participants: TripSplitParticipant[]
 }
 
-export default function TripDetailSheet({ trip, open, onClose, onUpdated }: Props) {
+export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline = false }: Props) {
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(false)
   const [addExpenseOpen, setAddExpenseOpen] = useState(false)
@@ -303,12 +304,10 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated }: Prop
 
   const splitDefaultTitle = trip.name + (trip.destination ? ` – ${trip.destination}` : '')
 
-  return (
+  const _sheetInner = (
     <>
-      <Sheet open={open} onOpenChange={v => { if (!v) onClose() }}>
-        <SheetContent className="w-full sm:max-w-xl overflow-y-auto p-0" side="right">
           {/* Cover image / gradient header */}
-          <div className="relative h-40 sm:h-44 w-full shrink-0">
+          <div className={`relative w-full shrink-0 ${inline ? 'h-48 sm:h-56 rounded-2xl overflow-hidden mb-1' : 'h-40 sm:h-44'}`}>
             {trip.image_url ? (
               <img src={trip.image_url} alt={trip.name} className="w-full h-full object-cover" />
             ) : (
@@ -1128,9 +1127,11 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated }: Prop
             </div>
             </TabsContent>
           </Tabs>
-        </SheetContent>
-      </Sheet>
+    </>
+  )
 
+  const _modals = (
+    <>
       <TransactionModal
         open={addExpenseOpen}
         onClose={() => setAddExpenseOpen(false)}
@@ -1154,6 +1155,21 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated }: Prop
             .map(m => ({ name: m.name || m.email.split('@')[0], email: m.email })),
         ]}
       />
+    </>
+  )
+
+  if (inline) {
+    return <>{_sheetInner}{_modals}</>
+  }
+
+  return (
+    <>
+      <Sheet open={open} onOpenChange={v => { if (!v) onClose() }}>
+        <SheetContent className="w-full sm:max-w-xl overflow-y-auto p-0" side="right">
+          {_sheetInner}
+        </SheetContent>
+      </Sheet>
+      {_modals}
     </>
   )
 }

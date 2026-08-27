@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Plus, MapPin, Calendar, Pencil, Trash2, Plane, Receipt, LockKeyhole, Users } from 'lucide-react'
+import { Plus, MapPin, Calendar, Pencil, Trash2, Plane, Receipt, LockKeyhole, Users, ArrowLeft } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import TripModal from '@/components/trips/TripModal'
 import TripDetailSheet from '@/components/trips/TripDetailSheet'
@@ -78,6 +78,48 @@ export default function TripsPage() {
     return new Date(t.end_date) >= new Date()
   })
 
+  // ── Detail view (inline) ──────────────────────────────────────────────────
+  if (detailTripId && detailTrip) {
+    return (
+      <div className="space-y-4">
+        {/* Back nav */}
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" className="-ml-2" onClick={() => setDetailTripId(null)}>
+            <ArrowLeft className="w-4 h-4 mr-1" /> Trips
+          </Button>
+          <span className="text-muted-foreground">/</span>
+          <span className="font-semibold text-sm truncate">{detailTrip.name}</span>
+          {detailTrip.is_owner !== false && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto"
+              onClick={() => { setEditTrip(detailTrip); setModalOpen(true) }}
+            >
+              <Pencil className="w-3.5 h-3.5 mr-1" /> Edit
+            </Button>
+          )}
+        </div>
+
+        <TripDetailSheet
+          trip={detailTrip}
+          open={true}
+          onClose={() => setDetailTripId(null)}
+          onUpdated={fetchTrips}
+          inline={true}
+        />
+
+        <TripModal
+          open={modalOpen}
+          onClose={() => { setModalOpen(false); setEditTrip(null) }}
+          onSaved={fetchTrips}
+          trip={editTrip}
+        />
+      </div>
+    )
+  }
+
+  // ── List view ─────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -261,13 +303,6 @@ export default function TripsPage() {
         onClose={() => { setModalOpen(false); setEditTrip(null) }}
         onSaved={fetchTrips}
         trip={editTrip}
-      />
-
-      <TripDetailSheet
-        trip={detailTrip}
-        open={Boolean(detailTripId)}
-        onClose={() => setDetailTripId(null)}
-        onUpdated={fetchTrips}
       />
     </div>
   )
