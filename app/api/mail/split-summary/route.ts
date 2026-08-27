@@ -87,15 +87,16 @@ export async function POST(request: Request) {
     })
 
     if (sendError) {
-      console.error(`[mail/split-summary] Failed to send to ${participant.participant_email}:`, sendError)
-      errors.push(participant.participant_email)
+      const msg = (sendError as { message?: string; name?: string })?.message ?? JSON.stringify(sendError)
+      console.error(`[mail/split-summary] Failed to send to ${participant.participant_email}:`, msg)
+      errors.push(`${participant.participant_email}: ${msg}`)
     } else {
       sent++
     }
   }
 
   if (sent === 0) {
-    return NextResponse.json({ error: 'All emails failed to send' }, { status: 500 })
+    return NextResponse.json({ error: `All emails failed: ${errors.join(' | ')}` }, { status: 500 })
   }
 
   return NextResponse.json({
