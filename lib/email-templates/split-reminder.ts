@@ -15,7 +15,6 @@ function capitalize(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
-const APP_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="38" height="38" style="display:inline-block;vertical-align:middle;border-radius:9px;"><rect width="512" height="512" rx="80" fill="#09090b"/><path d="M160 320 L256 160 L352 320" stroke="#22c55e" stroke-width="32" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="256" cy="160" r="20" fill="#22c55e"/><path d="M140 360 H372" stroke="#22c55e" stroke-width="20" stroke-linecap="round"/></svg>`
 
 export interface ReminderParticipant {
   name: string
@@ -90,7 +89,7 @@ export function buildSplitReminderEmail(opts: {
           <td style="background:#ffffff;border-bottom:1px solid #f1f5f9;padding:14px 24px;">
             <table width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
-                <td style="vertical-align:middle;">${APP_LOGO_SVG}</td>
+                <td style="vertical-align:middle;"><img src="${appUrl}/icons/icon-192.png" width="38" height="38" alt="" style="display:inline-block;vertical-align:middle;border-radius:9px;"/></td>
                 <td style="text-align:right;vertical-align:middle;">
                   <a href="${appUrl}" style="font-size:12px;font-weight:600;color:#6366f1;text-decoration:none;border:1px solid #c7d2fe;border-radius:20px;padding:5px 14px;">Open App →</a>
                 </td>
