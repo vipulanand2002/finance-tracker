@@ -1,18 +1,31 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
-import { Resend } from 'resend'
+import nodemailer from 'nodemailer'
 import { buildSplitReminderEmail } from '@/lib/email-templates/split-reminder'
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://finance-tracker.vercel.app'
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL ?? 'FinanceTracker <onboarding@resend.dev>'
+
+function createTransporter() {
+  const user = process.env.GMAIL_USER
+  const pass = process.env.GMAIL_APP_PASSWORD
+  if (!user || !pass) throw new Error('GMAIL_USER and GMAIL_APP_PASSWORD env vars are required')
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: { user, pass },
+  })
+}
 
 // POST /api/mail/split-summary
-// Body: { split_id: string }  — sends reminder emails to all unpaid participants who have an email
+// Body: { split_id: string } — sends reminder to all unpaid participants who have an email
 export async function POST(request: Request) {
-  if (!process.env.RESEND_API_KEY) {
-    return NextResponse.json({ error: 'Email service not configured — add RESEND_API_KEY to Vercel env vars' }, { status: 503 })
+  const gmailUser = process.env.GMAIL_USER
+  const gmailPass = process.env.GMAIL_APP_PASSWORD
+  if (!gmailUser || !gmailPass) {
+    return NextResponse.json(
+      { error: 'Email service not configured — add GMAIL_USER and GMAIL_APP_PASSWORD to Vercel env vars' },
+      { status: 503 }
+    )
   }
-  const resend = new Resend(process.env.RESEND_API_KEY)
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -34,7 +47,7 @@ export async function POST(request: Request) {
   // Get creator display name
   const { data: profile } = await supabase
     .from('profiles')
-    .select('full_name, email')
+    .select('full_name')
     .eq('id', user.id)
     .single()
 
@@ -42,14 +55,17 @@ export async function POST(request: Request) {
 
   // Send to each unpaid participant that has an email
   const toNotify = (split.split_participants ?? []).filter(
-    (p: { participant_email: string | null; is_paid: boolean }) =>
-      !p.is_paid && p.participant_email
+    (p: { participant_email: string | null; is_paid: boolean }) => !p.is_paid && p.participant_email
   )
 
   if (toNotify.length === 0) {
-    return NextResponse.json({ error: 'No unpaid participants with email addresses found' }, { status: 400 })
+    return NextResponse.json(
+      { error: 'No unpaid participants with email addresses found' },
+      { status: 400 }
+    )
   }
 
+  const transporter = createTransporter()
   let sent = 0
   const errors: string[] = []
 
@@ -79,19 +95,18 @@ export async function POST(request: Request) {
       appUrl: APP_URL,
     })
 
-    const { error: sendError } = await resend.emails.send({
-      from: FROM_EMAIL,
-      to: participant.participant_email,
-      subject,
-      html,
-    })
-
-    if (sendError) {
-      const msg = (sendError as { message?: string; name?: string })?.message ?? JSON.stringify(sendError)
-      console.error(`[mail/split-summary] Failed to send to ${participant.participant_email}:`, msg)
-      errors.push(`${participant.participant_email}: ${msg}`)
-    } else {
+    try {
+      await transporter.sendMail({
+        from: `"FinanceTracker via ${creatorName}" <${gmailUser}>`,
+        to: participant.participant_email,
+        subject,
+        html,
+      })
       sent++
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`[mail] Failed to send to ${participant.participant_email}:`, msg)
+      errors.push(`${participant.participant_email}: ${msg}`)
     }
   }
 
