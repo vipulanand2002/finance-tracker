@@ -52,19 +52,15 @@ export function buildSplitReminderEmail(opts: {
   const participantRows = allParticipants.map(p => `
     <tr>
       <td style="padding:10px 0;border-bottom:1px solid #f1f5f9;vertical-align:middle;">
-        <table cellpadding="0" cellspacing="0">
-          <tr>
-            <td style="vertical-align:middle;padding-right:10px;">
-              <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);text-align:center;line-height:32px;">
-                <span style="font-size:13px;font-weight:700;color:#fff;">${p.name.charAt(0).toUpperCase()}</span>
-              </div>
-            </td>
-            <td style="vertical-align:middle;">
-              <div style="font-size:13px;font-weight:600;color:#0f172a;line-height:1.3;">${p.name}</div>
-              ${p.email ? `<div style="font-size:11px;color:#94a3b8;line-height:1.3;">${p.email}</div>` : ''}
-            </td>
-          </tr>
-        </table>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <span style="font-size:13px;font-weight:700;color:#fff;line-height:1;">${p.name.charAt(0).toUpperCase()}</span>
+          </div>
+          <div>
+            <div style="font-size:13px;font-weight:600;color:#0f172a;">${p.name}</div>
+            ${p.email ? `<div style="font-size:11px;color:#94a3b8;">${p.email}</div>` : ''}
+          </div>
+        </div>
       </td>
       <td style="padding:10px 0;border-bottom:1px solid #f1f5f9;text-align:right;vertical-align:middle;">
         <span style="font-size:14px;font-weight:700;color:${p.is_paid ? '#10b981' : '#ef4444'};">${fmt(p.amount_owed)}</span>
@@ -96,22 +92,12 @@ export function buildSplitReminderEmail(opts: {
         <!-- ══ LOGO ══ -->
         <tr>
           <td align="center" style="padding-bottom:24px;">
-            <table cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;border:1px solid #e2e8f0;border-radius:40px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
-              <tr>
-                <td style="padding:10px 22px;">
-                  <table cellpadding="0" cellspacing="0" border="0">
-                    <tr>
-                      <td style="vertical-align:middle;padding-right:10px;">
-                        <div style="width:34px;height:34px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:9px;text-align:center;line-height:34px;font-size:18px;">💹</div>
-                      </td>
-                      <td style="vertical-align:middle;">
-                        <span style="font-size:17px;font-weight:800;color:#0f172a;letter-spacing:-0.3px;">Finance<span style="color:#6366f1;">Tracker</span></span>
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
-            </table>
+            <div style="display:inline-flex;align-items:center;gap:10px;background:#ffffff;border:1px solid #e2e8f0;border-radius:40px;padding:10px 22px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+              <div style="width:34px;height:34px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:9px;display:inline-flex;align-items:center;justify-content:center;">
+                <span style="font-size:17px;line-height:1;">💹</span>
+              </div>
+              <span style="font-size:17px;font-weight:800;color:#0f172a;letter-spacing:-0.3px;">Finance<span style="color:#6366f1;">Tracker</span></span>
+            </div>
           </td>
         </tr>
 
@@ -126,14 +112,10 @@ export function buildSplitReminderEmail(opts: {
                   <div style="font-size:13px;color:rgba(255,255,255,0.75);margin-bottom:24px;">from <strong style="color:#ffffff;">${displayCreator}</strong></div>
 
                   <!-- Amount box -->
-                  <table cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;">
-                    <tr>
-                      <td align="center" style="background:rgba(255,255,255,0.18);border:1px solid rgba(255,255,255,0.3);border-radius:18px;padding:20px 40px;">
-                        <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.85);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:6px;">You Owe</div>
-                        <div style="font-size:40px;font-weight:900;color:#ffffff;line-height:1;">${fmt(amountOwed)}</div>
-                      </td>
-                    </tr>
-                  </table>
+                  <div style="display:inline-block;background:rgba(255,255,255,0.15);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.25);border-radius:18px;padding:20px 32px;">
+                    <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.8);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:6px;">You owe</div>
+                    <div style="font-size:40px;font-weight:900;color:#ffffff;line-height:1;">${fmt(amountOwed)}</div>
+                  </div>
                 </td>
               </tr>
             </table>
