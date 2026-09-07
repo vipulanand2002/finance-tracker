@@ -537,7 +537,9 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                                       <Label className="text-xs">
                                         Contact <span className="text-muted-foreground font-normal">(optional)</span>
                                       </Label>
+                                      {/* key forces re-mount when contacts load so display name resolves correctly */}
                                       <Select
+                                        key={`c-${contacts.length}-${tx.contact_id}`}
                                         value={tx.contact_id ?? 'none'}
                                         onValueChange={v => updateTx(absIdx, { contact_id: v === 'none' ? null : v })}
                                       >
@@ -558,7 +560,9 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                                       <Label className="text-xs">
                                         Trip <span className="text-muted-foreground font-normal">(optional)</span>
                                       </Label>
+                                      {/* key forces re-mount when trips load so display name resolves correctly */}
                                       <Select
+                                        key={`t-${trips.length}-${tx.trip_id}`}
                                         value={tx.trip_id ?? 'none'}
                                         onValueChange={v => updateTx(absIdx, { trip_id: v === 'none' ? null : v })}
                                       >
@@ -600,6 +604,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                                       <div className="pl-5 space-y-2">
                                         {contacts.length > 0 && (
                                           <Select
+                                            key={`sc-${contacts.length}-${tx.contact_id}`}
                                             value={tx.contact_id ?? 'none'}
                                             onValueChange={v => updateTx(absIdx, { contact_id: v === 'none' ? null : v })}
                                           >

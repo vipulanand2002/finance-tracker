@@ -46,7 +46,7 @@ function buildEmptyForm(tripId?: string | null, cardId?: string | null) {
     is_discrete: false,
     receipt_url: '',
     trip_id: tripId ?? null,
-    contact_id: null as string | null,
+    contact_ids: [] as string[],
     card_id: cardId ?? null,
   }
 }
@@ -62,10 +62,11 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
   const [splitOpen, setSplitOpen] = useState(false)
   const [cardStatements, setCardStatements] = useState<CardStatement[]>([])
   const [selectedCycleId, setSelectedCycleId] = useState<string>('none')
-  // API returns full list (seeded with defaults on first call); static arrays are loading fallbacks
   const [expenseCategories, setExpenseCategories] = useState<string[]>([...EXPENSE_CATEGORIES])
   const [incomeCategories, setIncomeCategories] = useState<string[]>([...INCOME_CATEGORIES])
   const [manageCatOpen, setManageCatOpen] = useState(false)
+  // Incremented to remount the "add contact" Select after each pick, resetting to placeholder
+  const [addContactKey, setAddContactKey] = useState(0)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const loadCategories = () => {
@@ -111,12 +112,16 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         is_discrete: transaction.is_discrete ?? false,
         receipt_url: transaction.receipt_url ?? '',
         trip_id: transaction.trip_id ?? null,
-        contact_id: transaction.contact_id ?? null,
+        // Prefer contact_ids array; fall back to single contact_id for old records
+        contact_ids: transaction.contact_ids?.length
+          ? transaction.contact_ids
+          : transaction.contact_id ? [transaction.contact_id] : [],
         card_id: transaction.card_id ?? null,
       })
     } else {
       setForm(buildEmptyForm(defaultTripId, defaultCardId))
     }
+    setAddContactKey(k => k + 1)
   }, [transaction, open, defaultTripId, defaultCardId])
 
   const categories = form.type === 'income'
@@ -169,7 +174,10 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         is_discrete: form.trip_id ? form.is_discrete : false,
         receipt_url: form.receipt_url || null,
         trip_id: form.trip_id || null,
-        contact_id: form.contact_id || null,
+        // Primary contact (FK for join in transaction list)
+        contact_id: form.contact_ids[0] ?? null,
+        // Full contact list (requires contact_ids uuid[] column in DB)
+        contact_ids: form.contact_ids,
         card_id: form.card_id || null,
       }
       const url = transaction ? `/api/transactions?id=${transaction.id}` : '/api/transactions'
@@ -186,6 +194,8 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       setSaving(false)
     }
   }
+
+  const availableContacts = contacts.filter(c => !form.contact_ids.includes(c.id))
 
   return (
     <>
@@ -315,24 +325,55 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
               />
             </div>
 
-            {/* Contact tag */}
+            {/* Multi-contact picker */}
             {contacts.length > 0 && (
-              <div className="space-y-1">
-                <Label>Contact <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
-                <Select
-                  value={form.contact_id ?? 'none'}
-                  onValueChange={v => set('contact_id', v === 'none' ? null : v)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Tag a contact" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No contact</SelectItem>
-                    {contacts.map(c => (
-                      <SelectItem key={c.id} value={c.id}>{c.name}{c.email ? ` (${c.email})` : ''}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="space-y-1.5">
+                <Label>Contacts <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
+
+                {/* Selected contact chips */}
+                {form.contact_ids.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {form.contact_ids.map(id => {
+                      const c = contacts.find(x => x.id === id)
+                      if (!c) return null
+                      return (
+                        <Badge key={id} variant="secondary" className="gap-1 pr-1.5 max-w-[200px]">
+                          <span className="truncate">{c.name}</span>
+                          <button
+                            type="button"
+                            className="shrink-0 hover:text-destructive transition-colors"
+                            onClick={() => set('contact_ids', form.contact_ids.filter(x => x !== id))}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </Badge>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {/* Add contact dropdown — hidden when all contacts are already selected */}
+                {availableContacts.length > 0 && (
+                  <Select
+                    key={addContactKey}
+                    onValueChange={v => {
+                      if (!v || form.contact_ids.includes(v)) return
+                      set('contact_ids', [...form.contact_ids, v])
+                      setAddContactKey(k => k + 1)
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={form.contact_ids.length === 0 ? 'Tag a contact…' : 'Add another contact…'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableContacts.map(c => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.name}{c.email ? ` (${c.email})` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
             )}
 
@@ -353,7 +394,9 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
             {trips.length > 0 && (
               <div className="space-y-1">
                 <Label>Trip <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
+                {/* key forces re-mount when trips load, so display name resolves correctly */}
                 <Select
+                  key={`trip-${trips.length}`}
                   value={form.trip_id ?? 'none'}
                   onValueChange={v => {
                     const tripSelected = v !== 'none'
@@ -459,7 +502,9 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       />
 
       {(() => {
-        const c = form.contact_id ? contacts.find(x => x.id === form.contact_id) : null
+        const selectedContacts = form.contact_ids
+          .map(id => contacts.find(c => c.id === id))
+          .filter((c): c is Contact => !!c)
         return (
           <SplitModal
             open={splitOpen}
@@ -467,8 +512,10 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
             onSaved={() => setSplitOpen(false)}
             defaultTitle={form.description || undefined}
             defaultAmount={form.amount || undefined}
-            contactId={form.contact_id ?? null}
-            defaultParticipants={c ? [{ name: c.name, email: c.email ?? '' }] : undefined}
+            contactId={form.contact_ids[0] ?? null}
+            defaultParticipants={selectedContacts.length > 0
+              ? selectedContacts.map(c => ({ name: c.name, email: c.email ?? '' }))
+              : undefined}
           />
         )
       })()}

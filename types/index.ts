@@ -13,6 +13,7 @@ export interface Transaction {
   split_id: string | null
   is_discrete: boolean
   contact_id: string | null
+  contact_ids?: string[] | null
   created_at: string
   contacts?: { name: string; email: string | null } | null
 }

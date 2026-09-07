@@ -257,7 +257,13 @@ export default function TransactionList() {
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm">{t.description ?? '—'}</span>
           {t.is_recurring && <Badge variant="secondary" className="text-xs">Recurring</Badge>}
-          {t.contacts && <Badge variant="outline" className="text-xs gap-1 text-muted-foreground"><BookUser className="w-3 h-3" />{t.contacts.name}</Badge>}
+          {t.contacts && (
+            <Badge variant="outline" className="text-xs gap-1 text-muted-foreground">
+              <BookUser className="w-3 h-3" />
+              {t.contacts.name}
+              {(t.contact_ids?.length ?? 0) > 1 && <span>+{(t.contact_ids?.length ?? 1) - 1}</span>}
+            </Badge>
+          )}
           {showCard && t.card_id && cardNameMap.get(t.card_id) && (
             <Badge variant="outline" className="text-xs gap-1 border-primary/30 text-primary shrink-0">
               <CreditCard className="w-3 h-3" />{cardNameMap.get(t.card_id)}
@@ -291,7 +297,12 @@ export default function TransactionList() {
               <CreditCard className="w-3 h-3" />{cardNameMap.get(t.card_id)}
             </span>
           )}
-          {t.contacts && <span className="text-xs text-muted-foreground">· <BookUser className="inline w-3 h-3 mb-0.5" /> {t.contacts.name}</span>}
+          {t.contacts && (
+            <span className="text-xs text-muted-foreground">
+              · <BookUser className="inline w-3 h-3 mb-0.5" /> {t.contacts.name}
+              {(t.contact_ids?.length ?? 0) > 1 && ` +${(t.contact_ids?.length ?? 1) - 1}`}
+            </span>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0 ml-2">
