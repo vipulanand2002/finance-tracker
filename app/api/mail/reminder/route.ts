@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 import nodemailer from 'nodemailer'
-import { buildSplitReminderEmail } from '@/lib/email-templates/split-reminder'
+import { buildConsolidatedReminderEmail } from '@/lib/email-templates/consolidated-reminder'
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://finance-tracker.vercel.app'
 
@@ -29,9 +29,33 @@ type Split = {
   split_participants: Participant[]
 }
 
+// Group splits by recipient email, collecting the split details + their share.
+// Returns a Map<email, { name, splits[] }> ready for one consolidated email per person.
+function groupByRecipient(
+  splits: Split[],
+  filterEmail: string | null
+): Map<string, { name: string; splits: { split: Split; amountOwed: number }[] }> {
+  const map = new Map<string, { name: string; splits: { split: Split; amountOwed: number }[] }>()
+
+  for (const split of splits) {
+    const unpaid = filterEmail
+      ? split.split_participants.filter(p => !p.is_paid && p.participant_email?.toLowerCase() === filterEmail)
+      : split.split_participants.filter(p => !p.is_paid && p.participant_email)
+
+    for (const p of unpaid) {
+      const email = p.participant_email!.toLowerCase()
+      if (!map.has(email)) map.set(email, { name: p.participant_name, splits: [] })
+      map.get(email)!.splits.push({ split, amountOwed: p.amount_owed })
+    }
+  }
+
+  return map
+}
+
 // POST /api/mail/reminder
 // Body: { type: 'contact', contact_id: string }
 //     | { type: 'trip', trip_id: string }
+// Sends ONE consolidated email per recipient listing ALL their pending splits.
 export async function POST(request: Request) {
   const gmailUser = process.env.GMAIL_USER
   const gmailPass = process.env.GMAIL_APP_PASSWORD
@@ -109,10 +133,7 @@ export async function POST(request: Request) {
       .eq('created_by', user.id)
 
     const all = (splitData ?? []) as Split[]
-    // Only keep splits that have at least one unpaid participant with an email
-    splits = all.filter(s =>
-      s.split_participants.some(p => !p.is_paid && p.participant_email)
-    )
+    splits = all.filter(s => s.split_participants.some(p => !p.is_paid && p.participant_email))
 
     if (splits.length === 0) {
       return NextResponse.json({ error: 'no_pending_splits' }, { status: 400 })
@@ -122,51 +143,50 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid type' }, { status: 400 })
   }
 
+  // Group splits by recipient so each person gets exactly one consolidated email
+  const recipients = groupByRecipient(splits, targetEmail)
+
+  if (recipients.size === 0) {
+    return NextResponse.json({ error: 'no_pending_splits' }, { status: 400 })
+  }
+
   const transporter = createTransporter()
   let sent = 0
   const errors: string[] = []
 
-  for (const split of splits) {
-    const toNotify = targetEmail
-      // contact mode: only remind this specific person
-      ? split.split_participants.filter(p => !p.is_paid && p.participant_email?.toLowerCase() === targetEmail)
-      // trip mode: remind all unpaid participants with emails
-      : split.split_participants.filter(p => !p.is_paid && p.participant_email)
-
-    for (const participant of toNotify) {
-      const { subject, html } = buildSplitReminderEmail({
-        recipientName: participant.participant_name,
-        creatorName,
-        split: {
-          title: split.title,
-          total_amount: split.total_amount,
-          category: split.category,
-          date: split.date,
-          description: split.description,
-        },
-        amountOwed: participant.amount_owed,
+  for (const [email, { name, splits: recipientSplits }] of recipients) {
+    const { subject, html } = buildConsolidatedReminderEmail({
+      recipientName: name,
+      creatorName,
+      splits: recipientSplits.map(({ split, amountOwed }) => ({
+        title: split.title,
+        total_amount: split.total_amount,
+        category: split.category,
+        date: split.date,
+        description: split.description,
+        amountOwed,
         allParticipants: split.split_participants.map(p => ({
           name: p.participant_name,
           email: p.participant_email ?? '',
           amount_owed: p.amount_owed,
           is_paid: p.is_paid,
         })),
-        appUrl: APP_URL,
-      })
+      })),
+      appUrl: APP_URL,
+    })
 
-      try {
-        await transporter.sendMail({
-          from: `"FinanceTracker via ${creatorName}" <${gmailUser}>`,
-          to: participant.participant_email!,
-          subject,
-          html,
-        })
-        sent++
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err)
-        console.error(`[mail/reminder] Failed to send to ${participant.participant_email}:`, msg)
-        errors.push(`${participant.participant_email}: ${msg}`)
-      }
+    try {
+      await transporter.sendMail({
+        from: `"FinanceTracker via ${creatorName}" <${gmailUser}>`,
+        to: email,
+        subject,
+        html,
+      })
+      sent++
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`[mail/reminder] Failed to send to ${email}:`, msg)
+      errors.push(`${email}: ${msg}`)
     }
   }
 
