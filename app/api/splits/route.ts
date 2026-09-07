@@ -40,7 +40,7 @@ export async function POST(request: Request) {
   const { supabase, user } = await getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { participants, ...splitData } = await request.json()
+  const { participants, card_id, ...splitData } = await request.json()
 
   const { data: split, error: splitError } = await supabase
     .from('expense_splits')
@@ -142,6 +142,7 @@ export async function POST(request: Request) {
     description: split.title,
     date: splitData.date,
     trip_id: splitData.trip_id ?? null,
+    card_id: card_id ?? null,
     split_id: split.id,
   }
 

@@ -13,9 +13,10 @@ import { createClient } from '@/lib/supabase/client'
 import { EXPENSE_CATEGORIES } from '@/lib/constants'
 import { formatCurrency } from '@/lib/utils'
 import { FriendPicker } from '@/components/friends/FriendPicker'
-import type { Friend } from '@/types'
+import type { Friend, Trip } from '@/types'
 
 interface Participant { name: string; email: string; amount: string }
+interface CardInfo { id: string; card_name: string }
 
 interface Props {
   open: boolean
@@ -41,10 +42,16 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
   const [friends, setFriends] = useState<Friend[]>([])
   const [myEmail, setMyEmail] = useState('')
   const [myName, setMyName] = useState('')
+  const [trips, setTrips] = useState<Trip[]>([])
+  const [cards, setCards] = useState<CardInfo[]>([])
+  const [selectedTripId, setSelectedTripId] = useState<string | null>(null)
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
 
   useEffect(() => {
     if (open) {
       fetch('/api/friends').then(r => r.json()).then(d => setFriends(Array.isArray(d) ? d : [])).catch(() => {})
+      fetch('/api/trips').then(r => r.json()).then(d => setTrips(Array.isArray(d) ? d : [])).catch(() => {})
+      fetch('/api/cards').then(r => r.json()).then(d => setCards(Array.isArray(d) ? d : [])).catch(() => {})
       createClient().auth.getUser().then(({ data: { user } }) => {
         if (user?.email) {
           setMyEmail(user.email.toLowerCase())
@@ -61,6 +68,8 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
       setDate(format(new Date(), 'yyyy-MM-dd'))
       setCategory('Food & Dining')
       setDescription('')
+      setSelectedTripId(tripId ?? null)
+      setSelectedCardId(null)
       if (defaultParticipants && defaultParticipants.length > 0) {
         const pre = defaultParticipants.map(p => ({ name: p.name || p.email.split('@')[0], email: p.email, amount: '' }))
         setParticipants(pre.length >= 2 ? pre : [...pre, emptyParticipant()])
@@ -68,12 +77,13 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         setParticipants([emptyParticipant(), emptyParticipant()])
       }
     }
-  }, [open, defaultTitle, defaultAmount, defaultParticipants])
+  }, [open, defaultTitle, defaultAmount, defaultParticipants, tripId])
 
   function reset() {
     setTitle(''); setTotalAmount(''); setCategory('Food & Dining')
     setDescription(''); setDate(format(new Date(), 'yyyy-MM-dd'))
     setParticipants([emptyParticipant(), emptyParticipant()])
+    setSelectedTripId(null); setSelectedCardId(null)
   }
 
   function splitEqually() {
@@ -91,7 +101,6 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
   function removeParticipant(i: number) { setParticipants(p => p.filter((_, idx) => idx !== i)) }
 
   function addFriendAsParticipant(friend: Friend) {
-    // If there's an empty slot, fill it; otherwise append
     const emptyIdx = participants.findIndex(p => !p.name && !p.email)
     const alreadyAdded = participants.some(p => p.email === friend.email)
     if (alreadyAdded) { toast.error(`${friend.email} is already added`); return }
@@ -121,7 +130,8 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: title.trim(), total_amount: total, category, description: description || null, date,
-          trip_id: tripId ?? null,
+          trip_id: selectedTripId ?? null,
+          card_id: selectedCardId ?? null,
           contact_id: contactId ?? null,
           participants: validParticipants.map(p => ({
             name: p.name.trim(),
@@ -181,6 +191,50 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
               <Label>Description</Label>
               <Input placeholder="Optional note" value={description} onChange={e => setDescription(e.target.value)} />
             </div>
+
+            {/* Trip association */}
+            {trips.length > 0 && (
+              <div className="col-span-2 space-y-1">
+                <Label>Trip <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
+                <Select
+                  key={`trip-${trips.length}`}
+                  value={selectedTripId ?? 'none'}
+                  onValueChange={v => setSelectedTripId(v === 'none' ? null : v)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Link to a trip" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No trip</SelectItem>
+                    {trips.filter(t => !t.is_closed).map(t => (
+                      <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Card association */}
+            {cards.length > 0 && (
+              <div className="col-span-2 space-y-1">
+                <Label>Card <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
+                <Select
+                  key={`card-${cards.length}`}
+                  value={selectedCardId ?? 'none'}
+                  onValueChange={v => setSelectedCardId(v === 'none' ? null : v)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Link to a card" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No card</SelectItem>
+                    {cards.map(c => (
+                      <SelectItem key={c.id} value={c.id}>{c.card_name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           {/* Participants */}
