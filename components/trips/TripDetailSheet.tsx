@@ -347,9 +347,11 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
             </div>
           </div>
 
-          <SheetHeader className="sr-only">
-            <SheetTitle>{trip.name}</SheetTitle>
-          </SheetHeader>
+          {!inline && (
+            <SheetHeader className="sr-only">
+              <SheetTitle>{trip.name}</SheetTitle>
+            </SheetHeader>
+          )}
 
           <Tabs defaultValue="overview">
             <TabsList className={`grid mx-4 mt-4 w-[calc(100%-2rem)] ${trip.is_closed ? 'grid-cols-4' : 'grid-cols-3'}`}>
