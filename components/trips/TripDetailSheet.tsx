@@ -687,10 +687,16 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
               <div className="rounded-lg border p-3 text-center">
                 <p className="text-xs text-muted-foreground">Total Spent</p>
                 <p className="font-bold text-sm text-red-600 mt-0.5">{formatCurrency(totalSpent)}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">{expenses.length} transactions</p>
               </div>
               <div className="rounded-lg border p-3 text-center">
-                <p className="text-xs text-muted-foreground">Transactions</p>
-                <p className="font-bold text-sm mt-0.5">{expenses.length}</p>
+                <p className="text-xs text-muted-foreground">Spent by Me</p>
+                <p className="font-bold text-sm text-red-600 mt-0.5">
+                  {currentUserId
+                    ? formatCurrency(computePersonalSpending(currentUserId, currentUserEmail))
+                    : '—'}
+                </p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">incl. splits &amp; contacts</p>
               </div>
             </div>
 
