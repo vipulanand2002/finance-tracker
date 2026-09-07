@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/sheet'
 import {
   UserPlus, Pencil, Trash2, Loader2, Search, Mail, StickyNote,
-  ArrowLeftRight, SplitSquareVertical, X,
+  ArrowLeftRight, SplitSquareVertical, X, BellRing,
 } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import SplitModal from '@/components/splits/SplitModal'
@@ -69,6 +69,9 @@ export default function ContactsPage() {
   // Split from contact
   const [splitOpen, setSplitOpen] = useState(false)
   const [splitContact, setSplitContact] = useState<Contact | null>(null)
+
+  // Reminder
+  const [sendingReminder, setSendingReminder] = useState(false)
 
   function loadContacts() {
     setLoading(true)
@@ -155,6 +158,37 @@ export default function ContactsPage() {
     e.stopPropagation()
     setSplitContact(c)
     setSplitOpen(true)
+  }
+
+  async function sendContactReminder(c: Contact) {
+    if (!c.email) {
+      toast.warning('No email address for this contact. Edit the contact to add one.')
+      return
+    }
+    setSendingReminder(true)
+    try {
+      const res = await fetch('/api/mail/reminder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'contact', contact_id: c.id }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        if (data.error === 'no_email') {
+          toast.warning('No email address for this contact. Edit the contact to add one.')
+        } else if (data.error === 'no_pending_splits') {
+          toast.info('No pending (unpaid) splits found for this contact.')
+        } else {
+          toast.error(data.error ?? 'Failed to send reminder')
+        }
+        return
+      }
+      toast.success(`Reminder sent! (${data.sent} email${data.sent !== 1 ? 's' : ''})`)
+    } catch {
+      toast.error('Failed to send reminder')
+    } finally {
+      setSendingReminder(false)
+    }
   }
 
   const filtered = contacts.filter(c =>
@@ -297,12 +331,24 @@ export default function ContactsPage() {
                     )}
                   </div>
                 </div>
-                <div className="flex gap-2 mt-3">
+                <div className="flex flex-wrap gap-2 mt-3">
                   <Button size="sm" variant="outline" onClick={e => openEdit(selected, e)}>
                     <Pencil className="w-3.5 h-3.5 mr-1.5" />Edit
                   </Button>
                   <Button size="sm" variant="outline" onClick={e => openSplit(selected, e)}>
                     <SplitSquareVertical className="w-3.5 h-3.5 mr-1.5" />Create Split
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => sendContactReminder(selected)}
+                    disabled={sendingReminder}
+                    title={selected.email ? 'Send payment reminder email' : 'No email — cannot send reminder'}
+                  >
+                    {sendingReminder
+                      ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                      : <BellRing className="w-3.5 h-3.5 mr-1.5" />}
+                    Remind
                   </Button>
                 </div>
               </SheetHeader>

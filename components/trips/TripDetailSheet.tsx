@@ -14,7 +14,7 @@ import { Separator } from '@/components/ui/separator'
 import {
   Calendar, MapPin, Receipt, Wallet, TrendingDown, Plus,
   Users, Link2, CheckSquare, Square, ArrowDownCircle, ChevronDown,
-  LockKeyhole, LockKeyholeOpen, Loader2, MessageSquare, User, Eye, EyeOff, BarChart2,
+  LockKeyhole, LockKeyholeOpen, Loader2, MessageSquare, User, Eye, EyeOff, BarChart2, BellRing,
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -105,6 +105,7 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
   const [tripSplits, setTripSplits] = useState<TripSplit[]>([])
   const [txExpanded, setTxExpanded] = useState(true)
   const [txViewMode, setTxViewMode] = useState<'all' | 'category' | 'member'>('all')
+  const [sendingReminders, setSendingReminders] = useState(false)
 
   const fetchTransactions = useCallback(async () => {
     if (!trip) return
@@ -276,6 +277,39 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
       toast.error('Failed to save budget')
     } finally {
       setSavingBudget(false)
+    }
+  }
+
+  async function sendTripReminders() {
+    if (!trip) return
+    const hasEmailParticipants = tripSplits.some(s =>
+      s.split_participants.some(p => !p.is_paid && p.participant_email)
+    )
+    if (!hasEmailParticipants) {
+      toast.warning('No unpaid participants with email addresses found in this trip\'s splits.')
+      return
+    }
+    setSendingReminders(true)
+    try {
+      const res = await fetch('/api/mail/reminder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'trip', trip_id: trip.id }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        if (data.error === 'no_pending_splits') {
+          toast.info('No pending splits with email addresses for this trip.')
+        } else {
+          toast.error(data.error ?? 'Failed to send reminders')
+        }
+        return
+      }
+      toast.success(`Reminders sent! (${data.sent} email${data.sent !== 1 ? 's' : ''})`)
+    } catch {
+      toast.error('Failed to send reminders')
+    } finally {
+      setSendingReminders(false)
     }
   }
 
@@ -594,11 +628,26 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
             )}
 
             <TabsContent value="splits" className="p-4 space-y-4 mt-0 focus-visible:outline-none">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <p className="text-sm font-medium">Trip Splits</p>
-                <Button size="sm" onClick={() => setSplitOpen(true)}>
-                  <Plus className="w-3.5 h-3.5 mr-1" /> New Split
-                </Button>
+                <div className="flex items-center gap-2">
+                  {tripSplits.length > 0 && trip.is_owner !== false && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={sendTripReminders}
+                      disabled={sendingReminders}
+                    >
+                      {sendingReminders
+                        ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                        : <BellRing className="w-3.5 h-3.5 mr-1" />}
+                      Remind All
+                    </Button>
+                  )}
+                  <Button size="sm" onClick={() => setSplitOpen(true)}>
+                    <Plus className="w-3.5 h-3.5 mr-1" /> New Split
+                  </Button>
+                </div>
               </div>
 
               {tripSplits.length === 0 ? (
