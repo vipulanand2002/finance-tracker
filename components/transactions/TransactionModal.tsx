@@ -356,7 +356,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                 {availableContacts.length > 0 && (
                   <Select
                     key={addContactKey}
-                    onValueChange={v => {
+                    onValueChange={(v: string) => {
                       if (!v || form.contact_ids.includes(v)) return
                       set('contact_ids', [...form.contact_ids, v])
                       setAddContactKey(k => k + 1)
