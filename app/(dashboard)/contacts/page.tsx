@@ -138,9 +138,10 @@ export default function ContactsPage() {
     setContactTxs([])
     setContactSplits([])
     setLoadingTxs(true)
+    const splitUrl = `/api/splits?contact_id=${c.id}${c.email ? `&contact_email=${encodeURIComponent(c.email.toLowerCase())}` : ''}`
     Promise.all([
       fetch(`/api/transactions?contact_id=${c.id}`).then(r => r.json()),
-      fetch(`/api/splits?contact_id=${c.id}`).then(r => r.json()),
+      fetch(splitUrl).then(r => r.json()),
     ])
       .then(([txs, splits]) => {
         setContactTxs(Array.isArray(txs) ? txs : [])
@@ -165,12 +166,14 @@ export default function ContactsPage() {
     .filter(t => t.type === 'expense')
     .reduce((s, t) => s + t.amount, 0)
 
-  // Sum of what contacts owe across all splits (unpaid participants)
+  // Sum of what this specific contact owes (filtered by their email when available)
+  const contactEmailLower = selected?.email?.toLowerCase()
   const totalSplitOwed = contactSplits.reduce((sum, split) => {
-    const unpaid = (split.split_participants ?? [])
-      .filter(p => !p.is_paid)
-      .reduce((s, p) => s + p.amount_owed, 0)
-    return sum + unpaid
+    const participants = split.split_participants ?? []
+    const relevant = contactEmailLower
+      ? participants.filter(p => !p.is_paid && p.participant_email?.toLowerCase() === contactEmailLower)
+      : participants.filter(p => !p.is_paid)
+    return sum + relevant.reduce((s, p) => s + p.amount_owed, 0)
   }, 0)
 
   return (
@@ -379,8 +382,11 @@ export default function ContactsPage() {
                       <div className="space-y-2">
                         {contactSplits.map(split => {
                           const participants = split.split_participants ?? []
-                          const owed = participants.filter(p => !p.is_paid).reduce((s, p) => s + p.amount_owed, 0)
-                          const settled = owed === 0
+                          const relevant = contactEmailLower
+                            ? participants.filter(p => !p.is_paid && p.participant_email?.toLowerCase() === contactEmailLower)
+                            : participants.filter(p => !p.is_paid)
+                          const owed = relevant.reduce((s, p) => s + p.amount_owed, 0)
+                          const settled = participants.length > 0 && participants.every(p => p.is_paid)
                           return (
                             <div key={split.id} className="p-3 rounded-lg border bg-card space-y-1">
                               <div className="flex items-center justify-between gap-2">

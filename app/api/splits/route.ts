@@ -19,6 +19,18 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams
   const tripId = params.get('trip_id')
   const contactId = params.get('contact_id')
+  const contactEmail = params.get('contact_email')
+
+  // If contact_email is supplied, find all split IDs where that email is a participant
+  // (splits may not have contact_id set even when the person participated via email)
+  let emailSplitIds: string[] = []
+  if (contactEmail) {
+    const { data: participantRows } = await supabase
+      .from('split_participants')
+      .select('split_id')
+      .eq('participant_email', contactEmail.toLowerCase())
+    emailSplitIds = (participantRows ?? []).map((r: { split_id: string }) => r.split_id)
+  }
 
   let query = supabase
     .from('expense_splits')
@@ -26,7 +38,15 @@ export async function GET(request: Request) {
     .order('date', { ascending: false })
 
   if (tripId) query = query.eq('trip_id', tripId)
-  if (contactId) query = query.eq('contact_id', contactId)
+
+  if (contactId && emailSplitIds.length > 0) {
+    // Union: splits explicitly linked via contact_id OR where the email is a participant
+    query = query.or(`contact_id.eq.${contactId},id.in.(${emailSplitIds.join(',')})`)
+  } else if (contactId) {
+    query = query.eq('contact_id', contactId)
+  } else if (emailSplitIds.length > 0) {
+    query = query.in('id', emailSplitIds)
+  }
 
   // RLS (split_creators_all + split_participants_view via is_split_participant)
   // now handles visibility by both user_id and email — single query suffices
