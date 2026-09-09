@@ -68,6 +68,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
   // Incremented to remount the "add contact" Select after each pick, resetting to placeholder
   const [addContactKey, setAddContactKey] = useState(0)
   const fileRef = useRef<HTMLInputElement>(null)
+  const originalFormRef = useRef<ReturnType<typeof buildEmptyForm> | null>(null)
 
   const loadCategories = () => {
     fetch('/api/categories')
@@ -102,7 +103,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
 
   useEffect(() => {
     if (transaction) {
-      setForm({
+      const populated = {
         amount: String(transaction.amount),
         type: transaction.type,
         category: transaction.category,
@@ -117,9 +118,13 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
           ? transaction.contact_ids
           : transaction.contact_id ? [transaction.contact_id] : [],
         card_id: transaction.card_id ?? null,
-      })
+      }
+      setForm(populated)
+      originalFormRef.current = populated
     } else {
-      setForm(buildEmptyForm(defaultTripId, defaultCardId))
+      const empty = buildEmptyForm(defaultTripId, defaultCardId)
+      setForm(empty)
+      originalFormRef.current = empty
     }
     setAddContactKey(k => k + 1)
   }, [transaction, open, defaultTripId, defaultCardId])
@@ -201,8 +206,24 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
 
   function handleCloseAttempt() {
     if (saving) return
-    const isDirty = !!transaction || !!form.amount || !!form.category || !!form.description
-    if (!isDirty) { onClose(); return }
+    const orig = originalFormRef.current
+    if (orig) {
+      const sortedCurrent = [...form.contact_ids].sort().join(',')
+      const sortedOrig = [...orig.contact_ids].sort().join(',')
+      const hasChanges =
+        form.amount !== orig.amount ||
+        form.type !== orig.type ||
+        form.category !== orig.category ||
+        form.description !== orig.description ||
+        form.date !== orig.date ||
+        form.is_recurring !== orig.is_recurring ||
+        form.is_discrete !== orig.is_discrete ||
+        form.receipt_url !== orig.receipt_url ||
+        form.trip_id !== orig.trip_id ||
+        form.card_id !== orig.card_id ||
+        sortedCurrent !== sortedOrig
+      if (!hasChanges) { onClose(); return }
+    }
     doSubmit()
   }
 

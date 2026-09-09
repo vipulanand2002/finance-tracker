@@ -64,6 +64,10 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
   const [selectedTripId, setSelectedTripId] = useState<string | null>(null)
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
   const discardRef = useRef(false)
+  const originalRef = useRef<{
+    title: string; totalAmount: string; category: string; description: string;
+    date: string; selectedTripId: string | null; receiptUrl: string; participants: string
+  } | null>(null)
 
   useEffect(() => {
     if (open) {
@@ -83,6 +87,12 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
     if (open) {
       if (editingSplit) {
         // Edit mode — populate from existing split
+        const editParticipants = editingSplit.split_participants.map(p => ({
+          name: p.participant_name,
+          email: p.participant_email ?? '',
+          amount: String(p.amount_owed),
+          isPaid: p.is_paid,
+        }))
         setTitle(editingSplit.title)
         setTotalAmount(String(editingSplit.total_amount))
         setCategory(editingSplit.category)
@@ -92,30 +102,50 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         setSelectedCardId(null)
         setReceiptUrl(editingSplit.receipt_url ?? '')
         setReceiptName(editingSplit.receipt_url ? decodeURIComponent(editingSplit.receipt_url.split('/').pop() ?? '') : '')
-        setParticipants(
-          editingSplit.split_participants.map(p => ({
-            name: p.participant_name,
-            email: p.participant_email ?? '',
-            amount: String(p.amount_owed),
-            isPaid: p.is_paid,
-          }))
-        )
+        setParticipants(editParticipants)
+        originalRef.current = {
+          title: editingSplit.title,
+          totalAmount: String(editingSplit.total_amount),
+          category: editingSplit.category,
+          description: editingSplit.description ?? '',
+          date: editingSplit.date,
+          selectedTripId: editingSplit.trip_id ?? null,
+          receiptUrl: editingSplit.receipt_url ?? '',
+          participants: JSON.stringify(editParticipants),
+        }
       } else {
         // Create mode
-        setTitle(defaultTitle ?? '')
-        setTotalAmount(defaultAmount != null ? String(defaultAmount) : '')
-        setDate(format(new Date(), 'yyyy-MM-dd'))
-        setCategory('Food & Dining')
+        const initTitle = defaultTitle ?? ''
+        const initAmount = defaultAmount != null ? String(defaultAmount) : ''
+        const initCategory = 'Food & Dining'
+        const initDate = format(new Date(), 'yyyy-MM-dd')
+        const initTripId = tripId ?? null
+        let initParticipants: Participant[]
+        if (defaultParticipants && defaultParticipants.length > 0) {
+          const pre = defaultParticipants.map(p => ({ name: p.name || p.email.split('@')[0], email: p.email, amount: '' }))
+          initParticipants = pre.length >= 2 ? pre : [...pre, emptyParticipant()]
+        } else {
+          initParticipants = [emptyParticipant(), emptyParticipant()]
+        }
+        setTitle(initTitle)
+        setTotalAmount(initAmount)
+        setDate(initDate)
+        setCategory(initCategory)
         setDescription('')
-        setSelectedTripId(tripId ?? null)
+        setSelectedTripId(initTripId)
         setSelectedCardId(null)
         setReceiptUrl('')
         setReceiptName('')
-        if (defaultParticipants && defaultParticipants.length > 0) {
-          const pre = defaultParticipants.map(p => ({ name: p.name || p.email.split('@')[0], email: p.email, amount: '' }))
-          setParticipants(pre.length >= 2 ? pre : [...pre, emptyParticipant()])
-        } else {
-          setParticipants([emptyParticipant(), emptyParticipant()])
+        setParticipants(initParticipants)
+        originalRef.current = {
+          title: initTitle,
+          totalAmount: initAmount,
+          category: initCategory,
+          description: '',
+          date: initDate,
+          selectedTripId: initTripId,
+          receiptUrl: '',
+          participants: JSON.stringify(initParticipants),
         }
       }
     }
@@ -232,8 +262,19 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
 
   function handleCloseAttempt() {
     if (saving) return
-    const isDirty = !!editingSplit || !!title.trim() || parseFloat(totalAmount) > 0 || participants.some(p => p.name.trim())
-    if (!isDirty) { reset(); onClose(); return }
+    const orig = originalRef.current
+    if (orig) {
+      const hasChanges =
+        title !== orig.title ||
+        totalAmount !== orig.totalAmount ||
+        category !== orig.category ||
+        description !== orig.description ||
+        date !== orig.date ||
+        selectedTripId !== orig.selectedTripId ||
+        receiptUrl !== orig.receiptUrl ||
+        JSON.stringify(participants) !== orig.participants
+      if (!hasChanges) { reset(); onClose(); return }
+    }
     doSubmit()
   }
 
