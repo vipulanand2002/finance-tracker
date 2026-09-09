@@ -297,6 +297,7 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
       if (!res.ok) throw new Error(data.error ?? 'Failed')
       const n = data.sent ?? count
       toast.success(`Reminder sent to ${n} participant${n !== 1 ? 's' : ''}!`)
+      fetchTripSplits()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to send reminder')
     } finally {
@@ -330,6 +331,7 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
         return
       }
       toast.success(`Reminders sent! (${data.sent} email${data.sent !== 1 ? 's' : ''})`)
+      fetchTripSplits()
     } catch {
       toast.error('Failed to send reminders')
     } finally {

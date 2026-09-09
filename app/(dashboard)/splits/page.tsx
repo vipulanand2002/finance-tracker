@@ -59,6 +59,7 @@ export default function SplitsPage() {
       if (!res.ok) throw new Error(data.error ?? 'Failed')
       const n = data.sent ?? participantCount
       toast.success(`Reminder sent to ${n} participant${n !== 1 ? 's' : ''}!`)
+      fetchSplits(true)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to send reminder')
     } finally {
@@ -66,14 +67,14 @@ export default function SplitsPage() {
     }
   }
 
-  const fetchSplits = useCallback(async () => {
-    setLoading(true)
+  const fetchSplits = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const res = await fetch('/api/splits')
       const data = await res.json()
       setSplits(Array.isArray(data) ? data : [])
     } catch {
-      toast.error('Failed to load splits')
+      if (!silent) toast.error('Failed to load splits')
     } finally {
       setLoading(false)
     }
