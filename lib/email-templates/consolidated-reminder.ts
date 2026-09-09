@@ -3,12 +3,26 @@ function fmt(n: number) {
 }
 
 function categoryIcon(cat: string): string {
-  const map: Record<string, string> = {
+  // Exact-match first (app's canonical categories)
+  const exact: Record<string, string> = {
     'Food & Dining': '🍽️', 'Travel': '✈️', 'Shopping': '🛍️',
     'Entertainment': '🎬', 'Utilities': '💡', 'Health': '🏥',
     'Education': '📚', 'Transport': '🚗', 'Other': '💰',
   }
-  return map[cat] ?? '💰'
+  if (exact[cat]) return exact[cat]
+
+  // Keyword fallback — covers CSV imports / Gemini-generated categories
+  const lower = (cat ?? '').toLowerCase()
+  if (/food|dining|restaurant|meal|lunch|dinner|breakfast|cafe|snack|bar|drink|beverage/.test(lower)) return '🍽️'
+  if (/hotel|hostel|accommodation|stay|lodg|resort|airbnb/.test(lower)) return '🏨'
+  if (/travel|trip|flight|air|train|bus|tour|holiday|vacation|ticket/.test(lower)) return '✈️'
+  if (/taxi|cab|uber|ola|transport|fuel|petrol|diesel|parking|toll/.test(lower)) return '🚗'
+  if (/shop|cloth|fashion|apparel|mall|market|grocery|supermarket/.test(lower)) return '🛍️'
+  if (/movie|cinema|show|concert|sport|game|fun|event|night/.test(lower)) return '🎬'
+  if (/util|electricity|water|gas|internet|phone|bill|rent/.test(lower)) return '💡'
+  if (/health|medical|doctor|hospital|pharma|medicine|clinic/.test(lower)) return '🏥'
+  if (/edu|school|college|course|book|tuition|class/.test(lower)) return '📚'
+  return '💰'
 }
 
 function capitalize(s: string) {
