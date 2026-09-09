@@ -210,6 +210,87 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ success: true })
   }
 
+  if (type === 'update') {
+    const { participants, ...splitFields } = body as {
+      participants: { name: string; email?: string; amount: number }[]
+      title: string
+      total_amount: number
+      category: string
+      description: string | null
+      date: string
+      trip_id: string | null
+      contact_id: string | null
+    }
+
+    // Update split metadata
+    const { error: splitError } = await supabase
+      .from('expense_splits')
+      .update({
+        title: splitFields.title,
+        total_amount: splitFields.total_amount,
+        category: splitFields.category,
+        description: splitFields.description,
+        date: splitFields.date,
+        trip_id: splitFields.trip_id,
+        contact_id: splitFields.contact_id,
+      })
+      .eq('id', id!)
+      .eq('created_by', user.id)
+
+    if (splitError) return NextResponse.json({ error: splitError.message }, { status: 500 })
+
+    if (participants?.length) {
+      const creatorEmail = (user.email ?? '').toLowerCase()
+
+      // Delete only unpaid participants — paid ones stay intact
+      await supabase
+        .from('split_participants')
+        .delete()
+        .eq('split_id', id!)
+        .eq('is_paid', false)
+
+      // Re-insert participants, skipping any whose email is already paid
+      const { data: paidRows } = await supabase
+        .from('split_participants')
+        .select('participant_email')
+        .eq('split_id', id!)
+        .eq('is_paid', true)
+
+      const paidEmails = new Set(
+        (paidRows ?? []).map((r: { participant_email: string | null }) => r.participant_email?.toLowerCase() ?? '')
+      )
+
+      const toInsert = participants
+        .filter(p => !p.email || !paidEmails.has(p.email.toLowerCase()))
+        .map(p => {
+          const isCreator = !!p.email && p.email.toLowerCase() === creatorEmail
+          return {
+            split_id: id!,
+            participant_name: p.name,
+            participant_email: p.email?.toLowerCase() ?? null,
+            participant_user_id: isCreator ? user.id : null,
+            amount_owed: p.amount,
+            is_paid: isCreator,
+            paid_at: isCreator ? new Date().toISOString() : null,
+          }
+        })
+
+      if (toInsert.length > 0) {
+        const { error: partError } = await supabase.from('split_participants').insert(toInsert)
+        if (partError) return NextResponse.json({ error: partError.message }, { status: 500 })
+      }
+    }
+
+    // Also update the linked transaction amount if it exists
+    await supabase
+      .from('transactions')
+      .update({ amount: splitFields.total_amount, description: splitFields.title, category: splitFields.category, date: splitFields.date, trip_id: splitFields.trip_id })
+      .eq('split_id', id!)
+      .eq('user_id', user.id)
+
+    return NextResponse.json({ success: true })
+  }
+
   return NextResponse.json({ error: 'Invalid type' }, { status: 400 })
 }
 

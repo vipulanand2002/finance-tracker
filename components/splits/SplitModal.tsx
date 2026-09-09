@@ -15,8 +15,20 @@ import { formatCurrency } from '@/lib/utils'
 import { FriendPicker } from '@/components/friends/FriendPicker'
 import type { Friend, Trip } from '@/types'
 
-interface Participant { name: string; email: string; amount: string }
+interface Participant { name: string; email: string; amount: string; isPaid?: boolean }
 interface CardInfo { id: string; card_name: string }
+
+export interface EditingSplit {
+  id: string
+  title: string
+  total_amount: number
+  category: string
+  description: string | null
+  date: string
+  trip_id?: string | null
+  contact_id?: string | null
+  split_participants: { participant_name: string; participant_email: string | null; amount_owed: number; is_paid: boolean }[]
+}
 
 interface Props {
   open: boolean
@@ -27,11 +39,12 @@ interface Props {
   tripId?: string | null
   contactId?: string | null
   defaultParticipants?: { name: string; email: string }[]
+  editingSplit?: EditingSplit | null
 }
 
 const emptyParticipant = (): Participant => ({ name: '', email: '', amount: '' })
 
-export default function SplitModal({ open, onClose, onSaved, defaultTitle, defaultAmount, tripId, contactId, defaultParticipants }: Props) {
+export default function SplitModal({ open, onClose, onSaved, defaultTitle, defaultAmount, tripId, contactId, defaultParticipants, editingSplit }: Props) {
   const [title, setTitle] = useState('')
   const [totalAmount, setTotalAmount] = useState('')
   const [category, setCategory] = useState('Food & Dining')
@@ -63,21 +76,41 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
 
   useEffect(() => {
     if (open) {
-      setTitle(defaultTitle ?? '')
-      setTotalAmount(defaultAmount != null ? String(defaultAmount) : '')
-      setDate(format(new Date(), 'yyyy-MM-dd'))
-      setCategory('Food & Dining')
-      setDescription('')
-      setSelectedTripId(tripId ?? null)
-      setSelectedCardId(null)
-      if (defaultParticipants && defaultParticipants.length > 0) {
-        const pre = defaultParticipants.map(p => ({ name: p.name || p.email.split('@')[0], email: p.email, amount: '' }))
-        setParticipants(pre.length >= 2 ? pre : [...pre, emptyParticipant()])
+      if (editingSplit) {
+        // Edit mode — populate from existing split
+        setTitle(editingSplit.title)
+        setTotalAmount(String(editingSplit.total_amount))
+        setCategory(editingSplit.category)
+        setDescription(editingSplit.description ?? '')
+        setDate(editingSplit.date)
+        setSelectedTripId(editingSplit.trip_id ?? null)
+        setSelectedCardId(null)
+        setParticipants(
+          editingSplit.split_participants.map(p => ({
+            name: p.participant_name,
+            email: p.participant_email ?? '',
+            amount: String(p.amount_owed),
+            isPaid: p.is_paid,
+          }))
+        )
       } else {
-        setParticipants([emptyParticipant(), emptyParticipant()])
+        // Create mode
+        setTitle(defaultTitle ?? '')
+        setTotalAmount(defaultAmount != null ? String(defaultAmount) : '')
+        setDate(format(new Date(), 'yyyy-MM-dd'))
+        setCategory('Food & Dining')
+        setDescription('')
+        setSelectedTripId(tripId ?? null)
+        setSelectedCardId(null)
+        if (defaultParticipants && defaultParticipants.length > 0) {
+          const pre = defaultParticipants.map(p => ({ name: p.name || p.email.split('@')[0], email: p.email, amount: '' }))
+          setParticipants(pre.length >= 2 ? pre : [...pre, emptyParticipant()])
+        } else {
+          setParticipants([emptyParticipant(), emptyParticipant()])
+        }
       }
     }
-  }, [open, defaultTitle, defaultAmount, defaultParticipants, tripId])
+  }, [open, editingSplit, defaultTitle, defaultAmount, defaultParticipants, tripId])
 
   function reset() {
     setTitle(''); setTotalAmount(''); setCategory('Food & Dining')
@@ -125,29 +158,37 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
 
     setSaving(true)
     try {
-      const res = await fetch('/api/splits', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: title.trim(), total_amount: total, category, description: description || null, date,
-          trip_id: selectedTripId ?? null,
-          card_id: selectedCardId ?? null,
-          contact_id: contactId ?? null,
-          participants: validParticipants.map(p => ({
-            name: p.name.trim(),
-            email: p.email.trim() || undefined,
-            amount: parseFloat(p.amount),
-          })),
-        }),
-      })
+      const payload = {
+        title: title.trim(), total_amount: total, category, description: description || null, date,
+        trip_id: selectedTripId ?? null,
+        contact_id: contactId ?? editingSplit?.contact_id ?? null,
+        participants: validParticipants.map(p => ({
+          name: p.name.trim(),
+          email: p.email.trim() || undefined,
+          amount: parseFloat(p.amount),
+        })),
+      }
+
+      const res = editingSplit
+        ? await fetch(`/api/splits?id=${editingSplit.id}&type=update`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          })
+        : await fetch('/api/splits', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...payload, card_id: selectedCardId ?? null }),
+          })
+
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Failed')
-      toast.success('Split created!')
+      toast.success(editingSplit ? 'Split updated!' : 'Split created!')
       reset()
       onSaved()
       onClose()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to create split')
+      toast.error(err instanceof Error ? err.message : (editingSplit ? 'Failed to update split' : 'Failed to create split'))
     } finally {
       setSaving(false)
     }
@@ -157,7 +198,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
     <Dialog open={open} onOpenChange={v => { if (!v) { reset(); onClose() } }}>
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Split an Expense</DialogTitle>
+          <DialogTitle>{editingSplit ? 'Edit Split' : 'Split an Expense'}</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
@@ -257,13 +298,18 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
             <div className="space-y-2">
               {participants.map((p, i) => (
                 <div key={i} className="rounded-lg border p-3 space-y-2 relative">
-                  <button
-                    type="button"
-                    onClick={() => removeParticipant(i)}
-                    className="absolute top-2.5 right-2.5 text-muted-foreground hover:text-destructive"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {!p.isPaid && (
+                    <button
+                      type="button"
+                      onClick={() => removeParticipant(i)}
+                      className="absolute top-2.5 right-2.5 text-muted-foreground hover:text-destructive"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  {p.isPaid && (
+                    <span className="absolute top-2.5 right-2.5 text-xs text-emerald-600 font-medium">Paid</span>
+                  )}
 
                   {/* Name + Amount side by side */}
                   <div className="grid grid-cols-[1fr_100px] gap-2 pr-7">
@@ -332,7 +378,9 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => { reset(); onClose() }}>Cancel</Button>
             <Button type="submit" disabled={saving}>
-              {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Creating…</> : 'Create Split'}
+              {saving
+                ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{editingSplit ? 'Saving…' : 'Creating…'}</>
+                : editingSplit ? 'Save Changes' : 'Create Split'}
             </Button>
           </DialogFooter>
         </form>

@@ -8,9 +8,9 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, CheckCircle2, Circle, Trash2, Users, UserPlus, Mail, Loader2 } from 'lucide-react'
+import { Plus, CheckCircle2, Circle, Trash2, Users, UserPlus, Mail, Loader2, Pencil } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
-import SplitModal from '@/components/splits/SplitModal'
+import SplitModal, { type EditingSplit } from '@/components/splits/SplitModal'
 import FriendsSheet from '@/components/friends/FriendsSheet'
 
 interface Participant {
@@ -32,6 +32,8 @@ interface Split {
   date: string
   is_settled: boolean
   created_at: string
+  trip_id?: string | null
+  contact_id?: string | null
   split_participants: Participant[]
 }
 
@@ -40,6 +42,7 @@ export default function SplitsPage() {
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [friendsOpen, setFriendsOpen] = useState(false)
+  const [editingSplit, setEditingSplit] = useState<EditingSplit | null>(null)
   const [sendingReminder, setSendingReminder] = useState<string | null>(null) // split id being emailed
 
   async function sendReminder(splitId: string, participantCount: number) {
@@ -139,9 +142,14 @@ export default function SplitsPage() {
           <div className="flex items-center gap-1 shrink-0">
             <span className="font-bold text-sm">{formatCurrency(split.total_amount)}</span>
             {!split.is_settled && (
-              <button onClick={() => deleteSplit(split.id)} className="text-muted-foreground hover:text-destructive ml-1">
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
+              <>
+                <button onClick={() => setEditingSplit(split as EditingSplit)} className="text-muted-foreground hover:text-foreground ml-1">
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+                <button onClick={() => deleteSplit(split.id)} className="text-muted-foreground hover:text-destructive">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </>
             )}
           </div>
         </CardHeader>
@@ -289,7 +297,12 @@ export default function SplitsPage() {
         </Tabs>
       )}
 
-      <SplitModal open={modalOpen} onClose={() => setModalOpen(false)} onSaved={fetchSplits} />
+      <SplitModal
+        open={modalOpen || !!editingSplit}
+        editingSplit={editingSplit}
+        onClose={() => { setModalOpen(false); setEditingSplit(null) }}
+        onSaved={fetchSplits}
+      />
       <FriendsSheet open={friendsOpen} onClose={() => setFriendsOpen(false)} />
     </div>
   )

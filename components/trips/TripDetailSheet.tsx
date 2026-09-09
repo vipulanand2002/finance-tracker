@@ -14,7 +14,7 @@ import { Separator } from '@/components/ui/separator'
 import {
   Calendar, MapPin, Receipt, Wallet, TrendingDown, Plus,
   Users, Link2, CheckSquare, Square, ArrowDownCircle, ChevronDown,
-  LockKeyhole, LockKeyholeOpen, Loader2, MessageSquare, User, Eye, EyeOff, BarChart2, BellRing,
+  LockKeyhole, LockKeyholeOpen, Loader2, MessageSquare, User, Eye, EyeOff, BarChart2, BellRing, Pencil,
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -27,7 +27,7 @@ import { formatCurrency } from '@/lib/utils'
 import { EXPENSE_CATEGORIES } from '@/lib/constants'
 import type { Trip, Transaction } from '@/types'
 import TransactionModal from '@/components/transactions/TransactionModal'
-import SplitModal from '@/components/splits/SplitModal'
+import SplitModal, { type EditingSplit } from '@/components/splits/SplitModal'
 
 interface Props {
   trip: Trip | null
@@ -80,6 +80,7 @@ interface TripSplit {
   title: string
   total_amount: number
   category: string
+  description: string | null
   date: string
   is_settled: boolean
   split_participants: TripSplitParticipant[]
@@ -103,6 +104,7 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
   const [savingBudget, setSavingBudget] = useState(false)
   const myBudgetRef = useRef<HTMLInputElement>(null)
   const [tripSplits, setTripSplits] = useState<TripSplit[]>([])
+  const [editingTripSplit, setEditingTripSplit] = useState<EditingSplit | null>(null)
   const [txExpanded, setTxExpanded] = useState(true)
   const [txViewMode, setTxViewMode] = useState<'all' | 'category' | 'member'>('all')
   const [sendingReminders, setSendingReminders] = useState(false)
@@ -671,8 +673,28 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                               {s.category} · {format(parseISO(s.date), 'd MMM yyyy')}
                             </p>
                           </div>
-                          <div className="text-right shrink-0">
-                            <p className="text-sm font-bold">{formatCurrency(s.total_amount)}</p>
+                          <div className="text-right shrink-0 flex flex-col items-end gap-1">
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-sm font-bold">{formatCurrency(s.total_amount)}</p>
+                              {!s.is_settled && (
+                                <button
+                                  onClick={() => setEditingTripSplit({
+                                    id: s.id,
+                                    title: s.title,
+                                    total_amount: s.total_amount,
+                                    category: s.category,
+                                    description: s.description,
+                                    date: s.date,
+                                    trip_id: trip.id,
+                                    contact_id: null,
+                                    split_participants: s.split_participants,
+                                  })}
+                                  className="text-muted-foreground hover:text-foreground"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
                             {s.is_settled ? (
                               <span className="text-[11px] text-emerald-600 font-medium">Settled</span>
                             ) : pendingAmount > 0 ? (
@@ -1197,9 +1219,10 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
       />
 
       <SplitModal
-        open={splitOpen}
-        onClose={() => setSplitOpen(false)}
-        onSaved={() => { fetchTripSplits(); fetchTransactions(); onUpdated(); toast.success('Split created!') }}
+        open={splitOpen || !!editingTripSplit}
+        editingSplit={editingTripSplit}
+        onClose={() => { setSplitOpen(false); setEditingTripSplit(null) }}
+        onSaved={() => { fetchTripSplits(); fetchTransactions(); onUpdated() }}
         defaultTitle={splitDefaultTitle}
         defaultAmount={totalSpent}
         tripId={trip.id}
