@@ -156,10 +156,9 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
     }
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  async function doSubmit() {
     if (!form.amount || !form.category || !form.date) {
-      toast.error('Please fill in all required fields')
+      toast.warning('Please fill in amount, category, and date to save')
       return
     }
     setSaving(true)
@@ -195,11 +194,23 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
     }
   }
 
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    await doSubmit()
+  }
+
+  function handleCloseAttempt() {
+    if (saving) return
+    const isDirty = !!transaction || !!form.amount || !!form.category || !!form.description
+    if (!isDirty) { onClose(); return }
+    doSubmit()
+  }
+
   const availableContacts = contacts.filter(c => !form.contact_ids.includes(c.id))
 
   return (
     <>
-      <Dialog open={open} onOpenChange={v => !v && onClose()}>
+      <Dialog open={open} onOpenChange={v => { if (!v) handleCloseAttempt() }}>
         <DialogContent className="sm:max-w-md max-h-[92vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{transaction ? 'Edit Transaction' : 'Add Transaction'}</DialogTitle>
@@ -485,10 +496,10 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
               </div>
             )}
 
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-              <Button type="submit" disabled={saving}>
-                {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Saving…</> : transaction ? 'Update' : 'Add'}
+            <DialogFooter className="flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-muted-foreground order-last sm:order-first">Closes and saves automatically</p>
+              <Button type="button" variant="outline" onClick={onClose}>
+                {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Saving…</> : 'Cancel'}
               </Button>
             </DialogFooter>
           </form>

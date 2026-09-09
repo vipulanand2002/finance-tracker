@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -63,6 +63,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
   const [cards, setCards] = useState<CardInfo[]>([])
   const [selectedTripId, setSelectedTripId] = useState<string | null>(null)
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
+  const discardRef = useRef(false)
 
   useEffect(() => {
     if (open) {
@@ -179,12 +180,11 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
   const total = parseFloat(totalAmount) || 0
   const diff = total - allocatedTotal
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  async function doSubmit() {
     const validParticipants = participants.filter(p => p.name.trim() && parseFloat(p.amount) > 0)
-    if (!title.trim()) { toast.error('Enter a title'); return }
-    if (total <= 0) { toast.error('Amount must be greater than 0'); return }
-    if (validParticipants.length === 0) { toast.error('Add at least one participant with an amount'); return }
+    if (!title.trim()) { toast.warning('Enter a title to save'); return }
+    if (total <= 0) { toast.warning('Enter a total amount to save'); return }
+    if (validParticipants.length === 0) { toast.warning('Add at least one participant with an amount to save'); return }
 
     setSaving(true)
     try {
@@ -225,8 +225,20 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
     }
   }
 
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    await doSubmit()
+  }
+
+  function handleCloseAttempt() {
+    if (saving) return
+    const isDirty = !!editingSplit || !!title.trim() || parseFloat(totalAmount) > 0 || participants.some(p => p.name.trim())
+    if (!isDirty) { reset(); onClose(); return }
+    doSubmit()
+  }
+
   return (
-    <Dialog open={open} onOpenChange={v => { if (!v) { reset(); onClose() } }}>
+    <Dialog open={open} onOpenChange={v => { if (!v) handleCloseAttempt() }}>
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{editingSplit ? 'Edit Split' : 'Split an Expense'}</DialogTitle>
@@ -429,12 +441,10 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
             )}
           </div>
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => { reset(); onClose() }}>Cancel</Button>
-            <Button type="submit" disabled={saving}>
-              {saving
-                ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{editingSplit ? 'Saving…' : 'Creating…'}</>
-                : editingSplit ? 'Save Changes' : 'Create Split'}
+          <DialogFooter className="flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-muted-foreground order-last sm:order-first">Closes and saves automatically</p>
+            <Button type="button" variant="outline" onClick={() => { reset(); onClose() }}>
+              {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{editingSplit ? 'Saving…' : 'Creating…'}</> : 'Cancel'}
             </Button>
           </DialogFooter>
         </form>
