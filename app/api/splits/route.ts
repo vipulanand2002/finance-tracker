@@ -211,8 +211,9 @@ export async function PATCH(request: Request) {
   }
 
   if (type === 'update') {
-    const { participants, ...splitFields } = body as {
+    const { participants, card_id, ...splitFields } = body as {
       participants: { name: string; email?: string; amount: number }[]
+      card_id: string | null
       title: string
       total_amount: number
       category: string
@@ -283,10 +284,10 @@ export async function PATCH(request: Request) {
       }
     }
 
-    // Also update the linked transaction amount if it exists
+    // Also update the linked transaction if it exists
     await supabase
       .from('transactions')
-      .update({ amount: splitFields.total_amount, description: splitFields.title, category: splitFields.category, date: splitFields.date, trip_id: splitFields.trip_id })
+      .update({ amount: splitFields.total_amount, description: splitFields.title, category: splitFields.category, date: splitFields.date, trip_id: splitFields.trip_id, card_id: card_id ?? null })
       .eq('split_id', id!)
       .eq('user_id', user.id)
 

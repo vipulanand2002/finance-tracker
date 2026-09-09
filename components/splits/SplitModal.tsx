@@ -236,7 +236,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         ? await fetch(`/api/splits?id=${editingSplit.id}&type=update`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
+            body: JSON.stringify({ ...payload, card_id: selectedCardId ?? null }),
           })
         : await fetch('/api/splits', {
             method: 'POST',
@@ -357,8 +357,8 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No trip</SelectItem>
-                    {trips.filter(t => !t.is_closed).map(t => (
-                      <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                    {trips.filter(t => !t.is_closed || t.id === selectedTripId).map(t => (
+                      <SelectItem key={t.id} value={t.id}>{t.name}{t.is_closed ? ' (closed)' : ''}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
