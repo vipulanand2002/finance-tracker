@@ -34,6 +34,8 @@ interface Split {
   created_at: string
   trip_id?: string | null
   contact_id?: string | null
+  reminder_count?: number | null
+  last_reminder_sent_at?: string | null
   split_participants: Participant[]
 }
 
@@ -118,6 +120,13 @@ export default function SplitsPage() {
     }
   }
 
+  function daysAgo(iso: string) {
+    const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000)
+    if (diff <= 0) return 'today'
+    if (diff === 1) return 'yesterday'
+    return `${diff}d ago`
+  }
+
   const active = splits.filter(s => !s.is_settled)
   const settled = splits.filter(s => s.is_settled)
 
@@ -186,7 +195,15 @@ export default function SplitsPage() {
           </div>
 
           <div className="mt-3 pt-3 border-t flex items-center justify-between gap-2 flex-wrap">
-            <span className="text-xs text-muted-foreground">{paid}/{total} paid</span>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-xs text-muted-foreground">{paid}/{total} paid</span>
+              {split.last_reminder_sent_at && (
+                <span className="text-[10px] text-muted-foreground/70">
+                  Reminded {daysAgo(split.last_reminder_sent_at)}
+                  {(split.reminder_count ?? 0) > 1 ? ` · ×${split.reminder_count}` : ''}
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-2">
               {/* Send reminder to unpaid participants who have emails */}
               {!split.is_settled && split.split_participants.some(p => !p.is_paid && p.participant_email) && (

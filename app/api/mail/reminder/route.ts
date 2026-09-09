@@ -26,6 +26,8 @@ type Split = {
   category: string
   date: string
   description: string | null
+  reminder_count: number | null
+  last_reminder_sent_at: string | null
   split_participants: Participant[]
 }
 
@@ -117,7 +119,7 @@ export async function POST(request: Request) {
 
     const { data: splitData } = await supabase
       .from('expense_splits')
-      .select('id, title, total_amount, category, date, description, split_participants(*)')
+      .select('id, title, total_amount, category, date, description, reminder_count, last_reminder_sent_at, split_participants(*)')
       .in('id', splitIds)
       .eq('created_by', user.id)
 
@@ -128,7 +130,7 @@ export async function POST(request: Request) {
 
     const { data: splitData } = await supabase
       .from('expense_splits')
-      .select('id, title, total_amount, category, date, description, split_participants(*)')
+      .select('id, title, total_amount, category, date, description, reminder_count, last_reminder_sent_at, split_participants(*)')
       .eq('trip_id', trip_id)
       .eq('created_by', user.id)
 
@@ -153,6 +155,8 @@ export async function POST(request: Request) {
   const transporter = createTransporter()
   let sent = 0
   const errors: string[] = []
+  // Track which split ids successfully had an email sent so we can update their counters
+  const sentSplitIds = new Set<string>()
 
   for (const [email, { name, splits: recipientSplits }] of recipients) {
     const { subject, html } = buildConsolidatedReminderEmail({
@@ -171,6 +175,8 @@ export async function POST(request: Request) {
           amount_owed: p.amount_owed,
           is_paid: p.is_paid,
         })),
+        reminderCount: (split.reminder_count ?? 0) + 1,
+        lastSentAt: split.last_reminder_sent_at ?? null,
       })),
       appUrl: APP_URL,
     })
@@ -183,10 +189,25 @@ export async function POST(request: Request) {
         html,
       })
       sent++
+      for (const { split } of recipientSplits) sentSplitIds.add(split.id)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       console.error(`[mail/reminder] Failed to send to ${email}:`, msg)
       errors.push(`${email}: ${msg}`)
+    }
+  }
+
+  // Update reminder counters for all splits that had at least one email sent
+  if (sentSplitIds.size > 0) {
+    const now = new Date().toISOString()
+    for (const splitId of sentSplitIds) {
+      const split = splits.find(s => s.id === splitId)
+      const newCount = (split?.reminder_count ?? 0) + 1
+      supabase
+        .from('expense_splits')
+        .update({ reminder_count: newCount, last_reminder_sent_at: now })
+        .eq('id', splitId)
+        .then(() => {})
     }
   }
 

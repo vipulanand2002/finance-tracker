@@ -6,6 +6,19 @@ function capitalize(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
+function ordinal(n: number) {
+  const s = ['th', 'st', 'nd', 'rd']
+  const v = n % 100
+  return n + (s[(v - 20) % 10] || s[v] || s[0])
+}
+
+function daysAgoStr(iso: string) {
+  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000)
+  if (diff <= 0) return 'today'
+  if (diff === 1) return 'yesterday'
+  return `${diff} days ago`
+}
+
 export interface ConsolidatedSplitItem {
   title: string
   total_amount: number
@@ -14,6 +27,8 @@ export interface ConsolidatedSplitItem {
   description: string | null
   amountOwed: number
   allParticipants: { name: string; email: string; amount_owed: number; is_paid: boolean }[]
+  reminderCount?: number
+  lastSentAt?: string | null
 }
 
 export function buildConsolidatedReminderEmail(opts: {
@@ -29,9 +44,13 @@ export function buildConsolidatedReminderEmail(opts: {
   const totalOwed = splits.reduce((s, sp) => s + sp.amountOwed, 0)
   const splitCount = splits.length
 
+  // Determine highest reminder count across all splits to label the email
+  const maxReminder = splits.reduce((m, sp) => Math.max(m, sp.reminderCount ?? 1), 1)
+  const reminderLabel = maxReminder > 1 ? `[${ordinal(maxReminder)} Reminder] ` : ''
+
   const subject = splitCount === 1
-    ? `Payment Reminder: ${splits[0].title} — ${fmt(splits[0].amountOwed)} due`
-    : `Payment Reminder: ${fmt(totalOwed)} due across ${splitCount} expenses`
+    ? `${reminderLabel}Payment Reminder: ${splits[0].title} — ${fmt(splits[0].amountOwed)} due`
+    : `${reminderLabel}Payment Reminder: ${fmt(totalOwed)} due across ${splitCount} expenses`
 
   const splitCards = splits.map((sp, idx) => {
     const dateStr = new Date(sp.date + 'T00:00:00').toLocaleDateString('en-IN', {
@@ -51,6 +70,9 @@ export function buildConsolidatedReminderEmail(opts: {
       </tr>
     `).join('')
 
+    const spReminderLabel = sp.reminderCount && sp.reminderCount > 0 ? `${ordinal(sp.reminderCount)} reminder` : '1st reminder'
+    const spLastSentStr = sp.lastSentAt ? `· last sent ${daysAgoStr(sp.lastSentAt)}` : ''
+
     return `
       <!-- Expense ${idx + 1} -->
       <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f8fafc;border:1px solid #e9edf2;border-radius:6px;margin-bottom:12px;">
@@ -61,6 +83,10 @@ export function buildConsolidatedReminderEmail(opts: {
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:10px;">
               <tr>
                 <td style="vertical-align:top;">
+                  <div style="margin-bottom:6px;">
+                    <span style="display:inline-block;font-size:10px;font-weight:600;color:#1a2744;background:#e8ecf5;border-radius:20px;padding:2px 10px;">${spReminderLabel}</span>
+                    ${spLastSentStr ? `<span style="font-size:10px;color:#94a3b8;margin-left:6px;">${spLastSentStr}</span>` : ''}
+                  </div>
                   <div style="font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">${idx + 1} of ${splitCount}</div>
                   <div style="font-size:14px;font-weight:700;color:#1e293b;margin-bottom:3px;">${sp.title}</div>
                   <div style="font-size:11px;color:#64748b;">${sp.category}&nbsp;·&nbsp;${dateStr}</div>

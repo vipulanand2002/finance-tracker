@@ -37,7 +37,7 @@ export async function POST(request: Request) {
   // Fetch the split + participants (must belong to this user)
   const { data: split, error } = await supabase
     .from('expense_splits')
-    .select('*, split_participants(*)')
+    .select('*, split_participants(*), reminder_count, last_reminder_sent_at')
     .eq('id', split_id)
     .eq('created_by', user.id)
     .single()
@@ -64,6 +64,10 @@ export async function POST(request: Request) {
       { status: 400 }
     )
   }
+
+  const prevReminderCount: number = split.reminder_count ?? 0
+  const prevLastSentAt: string | null = split.last_reminder_sent_at ?? null
+  const newReminderCount = prevReminderCount + 1
 
   const transporter = createTransporter()
   let sent = 0
@@ -93,6 +97,8 @@ export async function POST(request: Request) {
         is_paid: p.is_paid,
       })),
       appUrl: APP_URL,
+      reminderCount: newReminderCount,
+      lastSentAt: prevLastSentAt,
     })
 
     try {
@@ -114,10 +120,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: `All emails failed: ${errors.join(' | ')}` }, { status: 500 })
   }
 
+  // Record the send — fire and forget
+  supabase
+    .from('expense_splits')
+    .update({ reminder_count: newReminderCount, last_reminder_sent_at: new Date().toISOString() })
+    .eq('id', split_id)
+    .then(() => {})
+
   return NextResponse.json({
     success: true,
     sent,
     failed: errors.length,
+    reminderCount: newReminderCount,
     ...(errors.length > 0 ? { failedEmails: errors } : {}),
   })
 }

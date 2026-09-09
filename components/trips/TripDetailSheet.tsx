@@ -83,6 +83,8 @@ interface TripSplit {
   description: string | null
   date: string
   is_settled: boolean
+  reminder_count?: number | null
+  last_reminder_sent_at?: string | null
   split_participants: TripSplitParticipant[]
 }
 
@@ -692,6 +694,15 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                             <p className="text-xs text-muted-foreground mt-0.5">
                               {s.category} · {format(parseISO(s.date), 'd MMM yyyy')}
                             </p>
+                            {s.last_reminder_sent_at && (() => {
+                              const diff = Math.floor((Date.now() - new Date(s.last_reminder_sent_at).getTime()) / 86_400_000)
+                              const label = diff <= 0 ? 'today' : diff === 1 ? 'yesterday' : `${diff}d ago`
+                              return (
+                                <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                                  Reminded {label}{(s.reminder_count ?? 0) > 1 ? ` · ×${s.reminder_count}` : ''}
+                                </p>
+                              )
+                            })()}
                           </div>
                           <div className="text-right shrink-0 flex flex-col items-end gap-1">
                             <div className="flex items-center gap-1.5">

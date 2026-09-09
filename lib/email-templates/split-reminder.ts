@@ -6,6 +6,19 @@ function capitalize(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
+function ordinal(n: number) {
+  const s = ['th', 'st', 'nd', 'rd']
+  const v = n % 100
+  return n + (s[(v - 20) % 10] || s[v] || s[0])
+}
+
+function daysAgoStr(iso: string) {
+  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000)
+  if (diff <= 0) return 'today'
+  if (diff === 1) return 'yesterday'
+  return `${diff} days ago`
+}
+
 export interface ReminderParticipant {
   name: string
   email: string
@@ -28,13 +41,22 @@ export function buildSplitReminderEmail(opts: {
   amountOwed: number
   allParticipants: ReminderParticipant[]
   appUrl: string
+  reminderCount?: number
+  lastSentAt?: string | null
 }): { subject: string; html: string } {
-  const { recipientName, creatorName, split, amountOwed, allParticipants, appUrl } = opts
+  const { recipientName, creatorName, split, amountOwed, allParticipants, appUrl, reminderCount, lastSentAt } = opts
 
   const displayCreator = capitalize(creatorName)
   const displayRecipient = capitalize(recipientName.split(' ')[0])
 
-  const subject = `Payment Reminder: ${split.title} — ${fmt(amountOwed)} due`
+  const reminderLabel = reminderCount && reminderCount > 0
+    ? `${ordinal(reminderCount)} Reminder`
+    : '1st Reminder'
+  const lastSentLabel = lastSentAt ? `· Previous reminder sent ${daysAgoStr(lastSentAt)}` : ''
+
+  const subject = reminderCount && reminderCount > 1
+    ? `[${ordinal(reminderCount)} Reminder] Payment due: ${split.title} — ${fmt(amountOwed)}`
+    : `Payment Reminder: ${split.title} — ${fmt(amountOwed)} due`
 
   const dateStr = new Date(split.date + 'T00:00:00').toLocaleDateString('en-IN', {
     day: 'numeric', month: 'long', year: 'numeric',
@@ -93,6 +115,12 @@ export function buildSplitReminderEmail(opts: {
             <table width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
                 <td style="padding:36px 36px 0;">
+
+                  <!-- Reminder badge -->
+                  <p style="margin:0 0 20px;">
+                    <span style="display:inline-block;font-size:11px;font-weight:600;color:#1a2744;background:#e8ecf5;border-radius:20px;padding:4px 12px;letter-spacing:0.02em;">${reminderLabel}</span>
+                    ${lastSentLabel ? `<span style="font-size:11px;color:#94a3b8;margin-left:8px;">${lastSentLabel}</span>` : ''}
+                  </p>
 
                   <!-- Amount due -->
                   <p style="margin:0 0 4px;font-size:12px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;">Amount Due</p>
