@@ -66,7 +66,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
   const discardRef = useRef(false)
   const originalRef = useRef<{
     title: string; totalAmount: string; category: string; description: string;
-    date: string; selectedTripId: string | null; receiptUrl: string; participants: string
+    date: string; selectedTripId: string | null; selectedCardId: string | null; receiptUrl: string; participants: string
   } | null>(null)
 
   useEffect(() => {
@@ -110,6 +110,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
           description: editingSplit.description ?? '',
           date: editingSplit.date,
           selectedTripId: editingSplit.trip_id ?? null,
+          selectedCardId: null,
           receiptUrl: editingSplit.receipt_url ?? '',
           participants: JSON.stringify(editParticipants),
         }
@@ -144,6 +145,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
           description: '',
           date: initDate,
           selectedTripId: initTripId,
+          selectedCardId: null,
           receiptUrl: '',
           participants: JSON.stringify(initParticipants),
         }
@@ -271,6 +273,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         description !== orig.description ||
         date !== orig.date ||
         selectedTripId !== orig.selectedTripId ||
+        selectedCardId !== orig.selectedCardId ||
         receiptUrl !== orig.receiptUrl ||
         JSON.stringify(participants) !== orig.participants
       if (!hasChanges) { reset(); onClose(); return }
