@@ -69,6 +69,25 @@ export async function POST(request: Request) {
   const prevLastSentAt: string | null = split.last_reminder_sent_at ?? null
   const newReminderCount = prevReminderCount + 1
 
+  // Fetch receipt attachment if present
+  type Attachment = { filename: string; content: Buffer; contentType: string }
+  const attachments: Attachment[] = []
+  if (split.receipt_url) {
+    try {
+      const fileRes = await fetch(split.receipt_url)
+      if (fileRes.ok) {
+        const content = Buffer.from(await fileRes.arrayBuffer())
+        const contentType = fileRes.headers.get('content-type') || 'application/octet-stream'
+        const rawName = decodeURIComponent(split.receipt_url.split('/').pop() ?? 'attachment')
+        // Strip the timestamp prefix added during upload (e.g. "1234567890-receipt.pdf" → "receipt.pdf")
+        const filename = rawName.replace(/^\d+-/, '')
+        attachments.push({ filename, content, contentType })
+      }
+    } catch {
+      // Continue without attachment if fetch fails
+    }
+  }
+
   const transporter = createTransporter()
   let sent = 0
   const errors: string[] = []
@@ -107,6 +126,7 @@ export async function POST(request: Request) {
         to: participant.participant_email,
         subject,
         html,
+        ...(attachments.length > 0 ? { attachments } : {}),
       })
       sent++
     } catch (err: unknown) {

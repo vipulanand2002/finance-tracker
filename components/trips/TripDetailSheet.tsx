@@ -14,7 +14,7 @@ import { Separator } from '@/components/ui/separator'
 import {
   Calendar, MapPin, Receipt, Wallet, TrendingDown, Plus,
   Users, Link2, CheckSquare, Square, ArrowDownCircle, ChevronDown,
-  LockKeyhole, LockKeyholeOpen, Loader2, MessageSquare, User, Eye, EyeOff, BarChart2, BellRing, Pencil,
+  LockKeyhole, LockKeyholeOpen, Loader2, MessageSquare, User, Eye, EyeOff, BarChart2, BellRing, Pencil, Paperclip,
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -83,6 +83,7 @@ interface TripSplit {
   description: string | null
   date: string
   is_settled: boolean
+  receipt_url?: string | null
   reminder_count?: number | null
   last_reminder_sent_at?: string | null
   split_participants: TripSplitParticipant[]
@@ -708,6 +709,11 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                           </div>
                           <div className="text-right shrink-0 flex flex-col items-end gap-1">
                             <div className="flex items-center gap-1.5">
+                              {s.receipt_url && (
+                                <a href={s.receipt_url} target="_blank" rel="noopener noreferrer" title="View attachment" className="text-muted-foreground hover:text-primary">
+                                  <Paperclip className="w-3 h-3" />
+                                </a>
+                              )}
                               <p className="text-sm font-bold">{formatCurrency(s.total_amount)}</p>
                               {!s.is_settled && (
                                 <button

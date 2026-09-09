@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, CheckCircle2, Circle, Trash2, Users, UserPlus, Mail, Loader2, Pencil } from 'lucide-react'
+import { Plus, CheckCircle2, Circle, Trash2, Users, UserPlus, Mail, Loader2, Pencil, Paperclip } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import SplitModal, { type EditingSplit } from '@/components/splits/SplitModal'
 import FriendsSheet from '@/components/friends/FriendsSheet'
@@ -34,6 +34,7 @@ interface Split {
   created_at: string
   trip_id?: string | null
   contact_id?: string | null
+  receipt_url?: string | null
   reminder_count?: number | null
   last_reminder_sent_at?: string | null
   split_participants: Participant[]
@@ -150,6 +151,11 @@ export default function SplitsPage() {
             </p>
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            {split.receipt_url && (
+              <a href={split.receipt_url} target="_blank" rel="noopener noreferrer" title="View attachment" className="text-muted-foreground hover:text-primary">
+                <Paperclip className="w-3.5 h-3.5" />
+              </a>
+            )}
             <span className="font-bold text-sm">{formatCurrency(split.total_amount)}</span>
             {!split.is_settled && (
               <>

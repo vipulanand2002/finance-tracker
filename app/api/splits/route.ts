@@ -64,7 +64,7 @@ export async function POST(request: Request) {
 
   const { data: split, error: splitError } = await supabase
     .from('expense_splits')
-    .insert({ ...splitData, created_by: user.id })
+    .insert({ ...splitData, created_by: user.id, receipt_url: splitData.receipt_url ?? null })
     .select()
     .single()
 
@@ -220,6 +220,7 @@ export async function PATCH(request: Request) {
       date: string
       trip_id: string | null
       contact_id: string | null
+      receipt_url: string | null
     }
 
     // Update split metadata
@@ -233,6 +234,7 @@ export async function PATCH(request: Request) {
         date: splitFields.date,
         trip_id: splitFields.trip_id,
         contact_id: splitFields.contact_id,
+        receipt_url: splitFields.receipt_url ?? null,
       })
       .eq('id', id!)
       .eq('created_by', user.id)

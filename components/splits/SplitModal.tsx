@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Loader2, Plus, Trash2, UserPlus } from 'lucide-react'
+import { Loader2, Plus, Trash2, UserPlus, Paperclip, Upload, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { EXPENSE_CATEGORIES } from '@/lib/constants'
 import { formatCurrency } from '@/lib/utils'
@@ -27,6 +27,7 @@ export interface EditingSplit {
   date: string
   trip_id?: string | null
   contact_id?: string | null
+  receipt_url?: string | null
   split_participants: { participant_name: string; participant_email: string | null; amount_owed: number; is_paid: boolean }[]
 }
 
@@ -52,6 +53,9 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [participants, setParticipants] = useState<Participant[]>([emptyParticipant(), emptyParticipant()])
   const [saving, setSaving] = useState(false)
+  const [receiptUrl, setReceiptUrl] = useState('')
+  const [receiptName, setReceiptName] = useState('')
+  const [uploadingFile, setUploadingFile] = useState(false)
   const [friends, setFriends] = useState<Friend[]>([])
   const [myEmail, setMyEmail] = useState('')
   const [myName, setMyName] = useState('')
@@ -85,6 +89,8 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         setDate(editingSplit.date)
         setSelectedTripId(editingSplit.trip_id ?? null)
         setSelectedCardId(null)
+        setReceiptUrl(editingSplit.receipt_url ?? '')
+        setReceiptName(editingSplit.receipt_url ? decodeURIComponent(editingSplit.receipt_url.split('/').pop() ?? '') : '')
         setParticipants(
           editingSplit.split_participants.map(p => ({
             name: p.participant_name,
@@ -102,6 +108,8 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         setDescription('')
         setSelectedTripId(tripId ?? null)
         setSelectedCardId(null)
+        setReceiptUrl('')
+        setReceiptName('')
         if (defaultParticipants && defaultParticipants.length > 0) {
           const pre = defaultParticipants.map(p => ({ name: p.name || p.email.split('@')[0], email: p.email, amount: '' }))
           setParticipants(pre.length >= 2 ? pre : [...pre, emptyParticipant()])
@@ -117,6 +125,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
     setDescription(''); setDate(format(new Date(), 'yyyy-MM-dd'))
     setParticipants([emptyParticipant(), emptyParticipant()])
     setSelectedTripId(null); setSelectedCardId(null)
+    setReceiptUrl(''); setReceiptName('')
   }
 
   function splitEqually() {
@@ -128,6 +137,27 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
 
   function updateParticipant(i: number, key: keyof Participant, val: string) {
     setParticipants(prev => prev.map((p, idx) => idx === i ? { ...p, [key]: val } : p))
+  }
+
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingFile(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/splits/upload', { method: 'POST', body: fd })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Upload failed')
+      setReceiptUrl(data.url)
+      setReceiptName(data.name)
+      toast.success('File attached!')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setUploadingFile(false)
+      e.target.value = ''
+    }
   }
 
   function addParticipant() { setParticipants(p => [...p, emptyParticipant()]) }
@@ -162,6 +192,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         title: title.trim(), total_amount: total, category, description: description || null, date,
         trip_id: selectedTripId ?? null,
         contact_id: contactId ?? editingSplit?.contact_id ?? null,
+        receipt_url: receiptUrl || null,
         participants: validParticipants.map(p => ({
           name: p.name.trim(),
           email: p.email.trim() || undefined,
@@ -231,6 +262,29 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
             <div className="col-span-2 space-y-1">
               <Label>Description</Label>
               <Input placeholder="Optional note" value={description} onChange={e => setDescription(e.target.value)} />
+            </div>
+
+            {/* Attachment */}
+            <div className="col-span-2 space-y-1">
+              <Label>Attachment <span className="text-muted-foreground font-normal text-xs">(PDF or image · attached to reminder emails)</span></Label>
+              {receiptUrl ? (
+                <div className="flex items-center gap-2 rounded-md border px-3 py-2">
+                  <Paperclip className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                  <a href={receiptUrl} target="_blank" rel="noopener noreferrer" className="flex-1 truncate text-xs text-primary hover:underline">
+                    {receiptName || 'Attachment'}
+                  </a>
+                  <button type="button" onClick={() => { setReceiptUrl(''); setReceiptName('') }} className="text-muted-foreground hover:text-destructive shrink-0">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <label className={`flex items-center gap-2 cursor-pointer rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:border-foreground transition-colors ${uploadingFile ? 'pointer-events-none opacity-60' : ''}`}>
+                  {uploadingFile
+                    ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Uploading…</>
+                    : <><Upload className="w-3.5 h-3.5" />Attach PDF or image</>}
+                  <input type="file" accept=".pdf,image/*" className="hidden" onChange={handleFileUpload} disabled={uploadingFile} />
+                </label>
+              )}
             </div>
 
             {/* Trip association */}

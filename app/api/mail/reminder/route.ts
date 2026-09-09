@@ -28,6 +28,7 @@ type Split = {
   description: string | null
   reminder_count: number | null
   last_reminder_sent_at: string | null
+  receipt_url: string | null
   split_participants: Participant[]
 }
 
@@ -119,7 +120,7 @@ export async function POST(request: Request) {
 
     const { data: splitData } = await supabase
       .from('expense_splits')
-      .select('id, title, total_amount, category, date, description, reminder_count, last_reminder_sent_at, split_participants(*)')
+      .select('id, title, total_amount, category, date, description, reminder_count, last_reminder_sent_at, receipt_url, split_participants(*)')
       .in('id', splitIds)
       .eq('created_by', user.id)
 
@@ -130,7 +131,7 @@ export async function POST(request: Request) {
 
     const { data: splitData } = await supabase
       .from('expense_splits')
-      .select('id, title, total_amount, category, date, description, reminder_count, last_reminder_sent_at, split_participants(*)')
+      .select('id, title, total_amount, category, date, description, reminder_count, last_reminder_sent_at, receipt_url, split_participants(*)')
       .eq('trip_id', trip_id)
       .eq('created_by', user.id)
 
@@ -158,7 +159,37 @@ export async function POST(request: Request) {
   // Track which split ids successfully had an email sent so we can update their counters
   const sentSplitIds = new Set<string>()
 
+  type Attachment = { filename: string; content: Buffer; contentType: string }
+
+  // Pre-fetch all unique receipts across splits so we don't re-download per recipient
+  const receiptCache = new Map<string, Attachment>()
+  for (const split of splits) {
+    if (split.receipt_url && !receiptCache.has(split.receipt_url)) {
+      try {
+        const fileRes = await fetch(split.receipt_url)
+        if (fileRes.ok) {
+          const content = Buffer.from(await fileRes.arrayBuffer())
+          const contentType = fileRes.headers.get('content-type') || 'application/octet-stream'
+          const rawName = decodeURIComponent(split.receipt_url.split('/').pop() ?? 'attachment')
+          const filename = rawName.replace(/^\d+-/, '')
+          receiptCache.set(split.receipt_url, { filename, content, contentType })
+        }
+      } catch { /* continue without this attachment */ }
+    }
+  }
+
   for (const [email, { name, splits: recipientSplits }] of recipients) {
+    // Collect attachments for this recipient's splits (deduplicated by URL)
+    const attachments: Attachment[] = []
+    const seenUrls = new Set<string>()
+    for (const { split } of recipientSplits) {
+      if (split.receipt_url && !seenUrls.has(split.receipt_url)) {
+        seenUrls.add(split.receipt_url)
+        const att = receiptCache.get(split.receipt_url)
+        if (att) attachments.push(att)
+      }
+    }
+
     const { subject, html } = buildConsolidatedReminderEmail({
       recipientName: name,
       creatorName,
@@ -187,6 +218,7 @@ export async function POST(request: Request) {
         to: email,
         subject,
         html,
+        ...(attachments.length > 0 ? { attachments } : {}),
       })
       sent++
       for (const { split } of recipientSplits) sentSplitIds.add(split.id)
