@@ -105,6 +105,7 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
   const myBudgetRef = useRef<HTMLInputElement>(null)
   const [tripSplits, setTripSplits] = useState<TripSplit[]>([])
   const [editingTripSplit, setEditingTripSplit] = useState<EditingSplit | null>(null)
+  const [sendingSplitReminder, setSendingSplitReminder] = useState<string | null>(null)
   const [txExpanded, setTxExpanded] = useState(true)
   const [txViewMode, setTxViewMode] = useState<'all' | 'category' | 'member'>('all')
   const [sendingReminders, setSendingReminders] = useState(false)
@@ -279,6 +280,25 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
       toast.error('Failed to save budget')
     } finally {
       setSavingBudget(false)
+    }
+  }
+
+  async function sendSplitReminder(splitId: string, count: number) {
+    setSendingSplitReminder(splitId)
+    try {
+      const res = await fetch('/api/mail/split-summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ split_id: splitId }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Failed')
+      const n = data.sent ?? count
+      toast.success(`Reminder sent to ${n} participant${n !== 1 ? 's' : ''}!`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to send reminder')
+    } finally {
+      setSendingSplitReminder(null)
     }
   }
 
@@ -732,6 +752,24 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                             </div>
                           ))}
                         </div>
+                        {!s.is_settled && s.split_participants.some(p => !p.is_paid && p.participant_email) && (
+                          <div className="border-t pt-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs w-full"
+                              disabled={sendingSplitReminder === s.id}
+                              onClick={() => sendSplitReminder(
+                                s.id,
+                                s.split_participants.filter(p => !p.is_paid && p.participant_email).length
+                              )}
+                            >
+                              {sendingSplitReminder === s.id
+                                ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Sending…</>
+                                : <><BellRing className="w-3 h-3 mr-1" />Send Reminder</>}
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     )
                   })}
