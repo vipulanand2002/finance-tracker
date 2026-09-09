@@ -14,11 +14,11 @@ export async function POST(request: Request) {
   if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 })
 
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-  const storagePath = `${user.id}/splits/${Date.now()}-${safeName}`
+  const storagePath = `${user.id}/${Date.now()}-${safeName}`
   const buffer = await file.arrayBuffer()
 
   const { data, error } = await supabase.storage
-    .from('receipts')
+    .from('split-docs')
     .upload(storagePath, buffer, {
       contentType: file.type || 'application/octet-stream',
       upsert: false,
@@ -26,6 +26,6 @@ export async function POST(request: Request) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(data.path)
+  const { data: urlData } = supabase.storage.from('split-docs').getPublicUrl(data.path)
   return NextResponse.json({ url: urlData.publicUrl, name: file.name })
 }
