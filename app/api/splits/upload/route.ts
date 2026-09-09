@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 })
 
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-  const storagePath = `splits/${user.id}/${Date.now()}-${safeName}`
+  const storagePath = `${user.id}/splits/${Date.now()}-${safeName}`
   const buffer = await file.arrayBuffer()
 
   const { data, error } = await supabase.storage
