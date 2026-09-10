@@ -426,9 +426,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
             {trips.length > 0 && (
               <div className="space-y-1">
                 <Label>Trip <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
-                {/* key forces re-mount when trips load, so display name resolves correctly */}
                 <Select
-                  key={`trip-${trips.length}`}
                   value={form.trip_id ?? 'none'}
                   onValueChange={v => {
                     const tripSelected = v !== 'none'
@@ -441,12 +439,16 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                   }}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Link to a trip" />
+                    <span className="truncate text-sm">
+                      {form.trip_id
+                        ? (trips.find(t => t.id === form.trip_id)?.name ?? '…')
+                        : <span className="text-muted-foreground">No trip</span>}
+                    </span>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No trip</SelectItem>
-                    {trips.filter(t => !t.is_closed).map(t => (
-                      <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                    {trips.filter(t => !t.is_closed || t.id === form.trip_id).map(t => (
+                      <SelectItem key={t.id} value={t.id}>{t.name}{t.is_closed ? ' (closed)' : ''}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

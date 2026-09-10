@@ -349,12 +349,15 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
               <div className="col-span-2 space-y-1">
                 <Label>Trip <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
                 <Select
-                  key={`trip-${trips.length}`}
                   value={selectedTripId ?? 'none'}
                   onValueChange={v => setSelectedTripId(v === 'none' ? null : v)}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Link to a trip" />
+                    <span className="truncate text-sm">
+                      {selectedTripId
+                        ? (trips.find(t => t.id === selectedTripId)?.name ?? '…')
+                        : <span className="text-muted-foreground">No trip</span>}
+                    </span>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No trip</SelectItem>
@@ -371,12 +374,15 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
               <div className="col-span-2 space-y-1">
                 <Label>Card <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
                 <Select
-                  key={`card-${cards.length}`}
                   value={selectedCardId ?? 'none'}
                   onValueChange={v => setSelectedCardId(v === 'none' ? null : v)}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Link to a card" />
+                    <span className="truncate text-sm">
+                      {selectedCardId
+                        ? (cards.find(c => c.id === selectedCardId)?.card_name ?? '…')
+                        : <span className="text-muted-foreground">No card</span>}
+                    </span>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No card</SelectItem>
