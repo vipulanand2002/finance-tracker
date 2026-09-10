@@ -35,6 +35,7 @@ interface Split {
   trip_id?: string | null
   contact_id?: string | null
   receipt_url?: string | null
+  card_id?: string | null
   reminder_count?: number | null
   last_reminder_sent_at?: string | null
   split_participants: Participant[]

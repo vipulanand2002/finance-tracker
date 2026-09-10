@@ -28,6 +28,7 @@ export interface EditingSplit {
   trip_id?: string | null
   contact_id?: string | null
   receipt_url?: string | null
+  card_id?: string | null
   split_participants: { participant_name: string; participant_email: string | null; amount_owed: number; is_paid: boolean }[]
 }
 
@@ -99,7 +100,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         setDescription(editingSplit.description ?? '')
         setDate(editingSplit.date)
         setSelectedTripId(editingSplit.trip_id ?? null)
-        setSelectedCardId(null)
+        setSelectedCardId(editingSplit.card_id ?? null)
         setReceiptUrl(editingSplit.receipt_url ?? '')
         setReceiptName(editingSplit.receipt_url ? decodeURIComponent(editingSplit.receipt_url.split('/').pop() ?? '') : '')
         setParticipants(editParticipants)
@@ -110,7 +111,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
           description: editingSplit.description ?? '',
           date: editingSplit.date,
           selectedTripId: editingSplit.trip_id ?? null,
-          selectedCardId: null,
+          selectedCardId: editingSplit.card_id ?? null,
           receiptUrl: editingSplit.receipt_url ?? '',
           participants: JSON.stringify(editParticipants),
         }

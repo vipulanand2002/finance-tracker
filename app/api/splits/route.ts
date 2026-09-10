@@ -64,7 +64,7 @@ export async function POST(request: Request) {
 
   const { data: split, error: splitError } = await supabase
     .from('expense_splits')
-    .insert({ ...splitData, created_by: user.id, receipt_url: splitData.receipt_url ?? null })
+    .insert({ ...splitData, card_id: card_id ?? null, created_by: user.id, receipt_url: splitData.receipt_url ?? null })
     .select()
     .single()
 
@@ -236,6 +236,7 @@ export async function PATCH(request: Request) {
         trip_id: splitFields.trip_id,
         contact_id: splitFields.contact_id,
         receipt_url: splitFields.receipt_url ?? null,
+        card_id: card_id ?? null,
       })
       .eq('id', id!)
       .eq('created_by', user.id)
