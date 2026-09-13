@@ -11,7 +11,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import {
   Send, Smile, Loader2, UserPlus, ArrowLeft, Pencil, Trash2, Search,
-  SplitSquareVertical, MessageCircle, BellRing, Mail, BadgeCheck,
+  SplitSquareVertical, MessageCircle, BellRing, Mail, BadgeCheck, Check, X, Clock,
 } from 'lucide-react'
 import { cn, formatCurrency } from '@/lib/utils'
 import SplitModal from '@/components/splits/SplitModal'
@@ -25,11 +25,20 @@ interface Friend {
   email: string | null
   notes: string | null
   created_at: string
-  connected: boolean       // true if email matches a profiles row
+  connected: boolean       // true if friendship established
   friend_user_id: string | null
   friendship_id: string | null
   display_name?: string
   avatar_url?: string | null
+  request_status?: 'pending' | 'accepted' | 'rejected' | null
+}
+
+interface IncomingRequest {
+  id: string
+  from_user_id: string
+  from_name: string
+  from_email: string
+  created_at: string
 }
 
 interface SplitRow {
@@ -68,6 +77,8 @@ function avatarColor(name: string) {
 export default function FriendsPage() {
   const [myId, setMyId] = useState('')
   const [friends, setFriends] = useState<Friend[]>([])
+  const [incomingRequests, setIncomingRequests] = useState<IncomingRequest[]>([])
+  const [processingReq, setProcessingReq] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Friend | null>(null)
@@ -106,6 +117,7 @@ export default function FriendsPage() {
   useEffect(() => {
     createClient().auth.getUser().then(({ data: { user } }) => { if (user) setMyId(user.id) })
     loadFriends()
+    loadIncomingRequests()
   }, [])
 
   const loadFriends = useCallback(async (silent = false) => {
@@ -118,6 +130,32 @@ export default function FriendsPage() {
       setLoading(false)
     }
   }, [])
+
+  const loadIncomingRequests = useCallback(async () => {
+    try {
+      const res = await fetch('/api/friend-requests')
+      const data = await res.json()
+      setIncomingRequests(Array.isArray(data) ? data : [])
+    } catch { /* non-critical */ }
+  }, [])
+
+  async function handleRequestAction(requestId: string, action: 'accept' | 'reject') {
+    setProcessingReq(requestId)
+    try {
+      const res = await fetch('/api/friend-requests', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: requestId, action }),
+      })
+      if (!res.ok) throw new Error()
+      toast.success(action === 'accept' ? 'Friend request accepted!' : 'Friend request declined')
+      await Promise.all([loadFriends(true), loadIncomingRequests()])
+    } catch {
+      toast.error('Action failed, please try again')
+    } finally {
+      setProcessingReq(null)
+    }
+  }
 
   // Keep selected friend in sync after reload
   useEffect(() => {
@@ -341,6 +379,56 @@ export default function FriendsPage() {
 
         {/* List */}
         <div className="flex-1 overflow-y-auto">
+          {/* ── Incoming friend requests section ── */}
+          {incomingRequests.length > 0 && (
+            <div className="border-b">
+              <p className="px-3 py-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide bg-muted/40">
+                Requests ({incomingRequests.length})
+              </p>
+              {incomingRequests.map(req => (
+                <div key={req.id} className="px-3 py-2.5 flex items-center gap-2.5">
+                  <Avatar className="w-8 h-8 shrink-0">
+                    <AvatarFallback className="text-xs font-semibold bg-primary/10 text-primary">
+                      {initials(req.from_name || req.from_email)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium truncate leading-tight">{req.from_name || req.from_email}</p>
+                    {req.from_email && (
+                      <p className="text-xs text-muted-foreground truncate leading-tight">{req.from_email}</p>
+                    )}
+                  </div>
+                  <div className="flex gap-1 shrink-0">
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                      disabled={!!processingReq}
+                      onClick={() => handleRequestAction(req.id, 'reject')}
+                      title="Decline"
+                    >
+                      {processingReq === req.id
+                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        : <X className="w-3.5 h-3.5" />}
+                    </Button>
+                    <Button
+                      size="icon"
+                      className="h-7 w-7"
+                      disabled={!!processingReq}
+                      onClick={() => handleRequestAction(req.id, 'accept')}
+                      title="Accept"
+                    >
+                      {processingReq === req.id
+                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        : <Check className="w-3.5 h-3.5" />}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── Regular contacts list ── */}
           {loading ? (
             <div className="flex items-center justify-center py-10">
               <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
@@ -370,9 +458,16 @@ export default function FriendsPage() {
                   <div className="flex items-center gap-1">
                     <p className="text-sm font-medium truncate leading-tight">{f.name}</p>
                     {f.connected && <BadgeCheck className="w-3.5 h-3.5 shrink-0 text-blue-500" />}
+                    {f.request_status === 'pending' && (
+                      <Clock className="w-3 h-3 shrink-0 text-amber-500" />
+                    )}
                   </div>
                   <p className="text-xs text-muted-foreground truncate leading-tight">
-                    {f.email ?? 'No email'}
+                    {f.request_status === 'pending'
+                      ? <span className="text-amber-600 dark:text-amber-400">Request sent</span>
+                      : f.request_status === 'rejected'
+                        ? <span className="text-destructive/70">Request declined</span>
+                        : (f.email ?? 'No email')}
                   </p>
                 </div>
               </button>

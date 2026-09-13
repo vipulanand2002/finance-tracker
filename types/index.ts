@@ -73,6 +73,27 @@ export interface Friend {
   friendship_id: string | null
   display_name?: string      // friend's own registered name if available, else saved name
   avatar_url?: string | null // only set when friend has avatar_public: true
+  request_status?: 'pending' | 'accepted' | 'rejected' | null
+}
+
+export interface FriendRequest {
+  id: string
+  from_user_id: string
+  to_user_id: string
+  from_name: string
+  from_email: string
+  status: 'pending' | 'accepted' | 'rejected'
+  created_at: string
+  responded_at: string | null
+}
+
+export interface AppNotification {
+  id: string
+  user_id: string
+  type: string
+  data: Record<string, string>
+  read: boolean
+  created_at: string
 }
 
 export interface SplitParticipantSummary {
