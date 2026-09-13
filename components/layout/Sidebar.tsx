@@ -44,18 +44,24 @@ export default function Sidebar({ email, onClose }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+  const [displayName, setDisplayName] = useState<string>('')
 
   useEffect(() => {
     const supabase = createClient()
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return
-      // profiles.avatar_url is the authoritative source; user_metadata can be overwritten by OAuth
       const { data: profile } = await supabase
         .from('profiles')
-        .select('avatar_url')
+        .select('avatar_url, full_name')
         .eq('id', user.id)
         .single()
       setAvatarUrl(profile?.avatar_url ?? user.user_metadata?.avatar_url ?? null)
+      setDisplayName(
+        profile?.full_name ||
+        user.user_metadata?.full_name ||
+        user.user_metadata?.name ||
+        ''
+      )
     })
   }, [])
 
@@ -101,10 +107,13 @@ export default function Sidebar({ email, onClose }: SidebarProps) {
           <Avatar className="w-7 h-7">
             {avatarUrl && <AvatarImage src={avatarUrl} alt="Profile" className="object-cover" />}
             <AvatarFallback className="text-xs">
-              {email.charAt(0).toUpperCase()}
+              {(displayName || email).charAt(0).toUpperCase()}
             </AvatarFallback>
           </Avatar>
-          <span className="text-xs text-muted-foreground truncate flex-1">{email}</span>
+          <div className="min-w-0 flex-1">
+            {displayName && <p className="text-xs font-medium truncate leading-tight">{displayName}</p>}
+            <p className="text-xs text-muted-foreground truncate leading-tight">{email}</p>
+          </div>
           <ThemeToggle />
         </div>
         <Button
