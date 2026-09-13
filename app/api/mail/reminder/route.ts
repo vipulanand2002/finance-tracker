@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import nodemailer from 'nodemailer'
 import { buildConsolidatedReminderEmail } from '@/lib/email-templates/consolidated-reminder'
@@ -86,7 +87,7 @@ export async function POST(request: Request) {
     .select('full_name')
     .eq('id', user.id)
     .single()
-  const creatorName = profile?.full_name || user.email?.split('@')[0] || 'Someone'
+  const creatorName = user.user_metadata?.full_name || user.user_metadata?.name || profile?.full_name || user.email?.split('@')[0] || 'Someone'
 
   let splits: Split[] = []
   let targetEmail: string | null = null
@@ -153,6 +154,38 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'no_pending_splits' }, { status: 400 })
   }
 
+  // Look up registered names for ALL participants across all splits
+  // (recipients + everyone else in the participant list shown in the mail)
+  const allParticipantEmails = Array.from(new Set([
+    ...Array.from(recipients.keys()),
+    ...splits.flatMap(s =>
+      s.split_participants
+        .map(p => p.participant_email?.toLowerCase())
+        .filter(Boolean) as string[]
+    ),
+  ]))
+
+  const allRegisteredNames = new Map<string, string>()
+  if (allParticipantEmails.length > 0) {
+    const serviceClientNames = createServiceClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+    const { data: regProfiles } = await serviceClientNames
+      .from('profiles')
+      .select('email, full_name')
+      .in('email', allParticipantEmails)
+    for (const rp of regProfiles ?? []) {
+      if (rp.full_name) allRegisteredNames.set(rp.email.toLowerCase(), rp.full_name)
+    }
+  }
+
+  // Override each recipient's display name with their own registered name
+  for (const [email, entry] of recipients) {
+    const registered = allRegisteredNames.get(email)
+    if (registered) entry.name = registered
+  }
+
   const transporter = createTransporter()
   let sent = 0
   const errors: string[] = []
@@ -201,7 +234,7 @@ export async function POST(request: Request) {
         description: split.description,
         amountOwed,
         allParticipants: split.split_participants.map(p => ({
-          name: p.participant_name,
+          name: (p.participant_email && allRegisteredNames.get(p.participant_email.toLowerCase())) || p.participant_name,
           email: p.participant_email ?? '',
           amount_owed: p.amount_owed,
           is_paid: p.is_paid,

@@ -233,6 +233,12 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
     <>
       <Dialog open={open} onOpenChange={v => { if (!v) handleCloseAttempt() }}>
         <DialogContent className="sm:max-w-md max-h-[92vh] overflow-y-auto">
+          {saving && (
+            <div className="flex items-center gap-2.5 rounded-lg bg-primary/8 border border-primary/20 px-3.5 py-2.5 text-sm text-primary mb-1">
+              <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+              <span className="font-medium">Saving your changes…</span>
+            </div>
+          )}
           <DialogHeader>
             <DialogTitle>{transaction ? 'Edit Transaction' : 'Add Transaction'}</DialogTitle>
           </DialogHeader>

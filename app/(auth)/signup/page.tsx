@@ -13,6 +13,7 @@ import { Separator } from '@/components/ui/separator'
 import { TrendingUp, Eye, EyeOff } from 'lucide-react'
 
 export default function SignupPage() {
+  const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -32,7 +33,11 @@ export default function SignupPage() {
     if (password.length < 8) { toast.error('Password must be at least 8 characters'); return }
     setLoading(true)
     const supabase = createClient()
-    const { data, error } = await supabase.auth.signUp({ email, password })
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: name.trim() || undefined } },
+    })
     if (error) {
       toast.error(error.message || error.name || 'Signup failed. Please try again.')
       setLoading(false)
@@ -73,6 +78,10 @@ export default function SignupPage() {
         </div>
 
         <form onSubmit={handleSignup} className="space-y-4">
+          <div className="space-y-1">
+            <Label htmlFor="name">Full name</Label>
+            <Input id="name" type="text" placeholder="Your name" value={name} onChange={e => setName(e.target.value)} />
+          </div>
           <div className="space-y-1">
             <Label htmlFor="email">Email</Label>
             <Input id="email" type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} required />

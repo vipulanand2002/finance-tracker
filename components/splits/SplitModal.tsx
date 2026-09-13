@@ -78,7 +78,11 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
       createClient().auth.getUser().then(({ data: { user } }) => {
         if (user?.email) {
           setMyEmail(user.email.toLowerCase())
-          setMyName(user.email.split('@')[0])
+          setMyName(
+            user.user_metadata?.full_name ||
+            user.user_metadata?.name ||
+            user.email.split('@')[0]
+          )
         }
       })
     }
@@ -199,9 +203,12 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
 
   function addFriendAsParticipant(friend: Friend) {
     const emptyIdx = participants.findIndex(p => !p.name && !p.email)
-    const alreadyAdded = participants.some(p => p.email === friend.email)
-    if (alreadyAdded) { toast.error(`${friend.email} is already added`); return }
-    const newRow: Participant = { name: friend.email.split('@')[0], email: friend.email, amount: '' }
+    const alreadyAdded = participants.some(p =>
+      (friend.email && p.email === friend.email) ||
+      p.name.toLowerCase() === friend.name.toLowerCase()
+    )
+    if (alreadyAdded) { toast.error(`${friend.name} is already added`); return }
+    const newRow: Participant = { name: friend.name, email: friend.email ?? '', amount: '' }
     if (emptyIdx !== -1) {
       setParticipants(prev => prev.map((p, i) => i === emptyIdx ? newRow : p))
     } else {
@@ -285,6 +292,12 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) handleCloseAttempt() }}>
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+        {saving && (
+          <div className="flex items-center gap-2.5 rounded-lg bg-primary/8 border border-primary/20 px-3.5 py-2.5 text-sm text-primary mb-1">
+            <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+            <span className="font-medium">Saving your changes…</span>
+          </div>
+        )}
         <DialogHeader>
           <DialogTitle>{editingSplit ? 'Edit Split' : 'Split an Expense'}</DialogTitle>
         </DialogHeader>
@@ -407,7 +420,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
             {/* Quick-add from friends */}
             <FriendPicker
               friends={friends}
-              isSelected={email => participants.some(p => p.email === email)}
+              isSelected={f => participants.some(p => (f.email && p.email === f.email) || p.name.toLowerCase() === f.name.toLowerCase())}
               onSelect={addFriendAsParticipant}
               placeholder="Search friends to add as participant…"
             />

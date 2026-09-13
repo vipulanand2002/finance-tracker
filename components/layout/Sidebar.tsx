@@ -2,11 +2,12 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
   LayoutDashboard,
   ArrowLeftRight,
@@ -18,7 +19,7 @@ import {
   TrendingUp,
   Plane,
   MessageCircle,
-  BookUser,
+  Settings,
 } from 'lucide-react'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 
@@ -28,10 +29,10 @@ const navItems = [
   { label: 'Cards', href: '/cards', icon: CreditCard },
   { label: 'Trips', href: '/trips', icon: Plane },
   { label: 'Budgets', href: '/budgets', icon: Target },
-  { label: 'Contacts', href: '/contacts', icon: BookUser },
   { label: 'Splits', href: '/splits', icon: Users },
   { label: 'Friends', href: '/friends', icon: MessageCircle },
   { label: 'AI Assistant', href: '/ai', icon: BrainCircuit },
+  { label: 'Settings', href: '/settings', icon: Settings },
 ]
 
 interface SidebarProps {
@@ -42,6 +43,21 @@ interface SidebarProps {
 export default function Sidebar({ email, onClose }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    const supabase = createClient()
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user) return
+      // profiles.avatar_url is the authoritative source; user_metadata can be overwritten by OAuth
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('avatar_url')
+        .eq('id', user.id)
+        .single()
+      setAvatarUrl(profile?.avatar_url ?? user.user_metadata?.avatar_url ?? null)
+    })
+  }, [])
 
   async function handleSignOut() {
     const supabase = createClient()
@@ -83,6 +99,7 @@ export default function Sidebar({ email, onClose }: SidebarProps) {
       <div className="p-3 border-t space-y-1">
         <div className="flex items-center gap-3 px-3 py-2">
           <Avatar className="w-7 h-7">
+            {avatarUrl && <AvatarImage src={avatarUrl} alt="Profile" className="object-cover" />}
             <AvatarFallback className="text-xs">
               {email.charAt(0).toUpperCase()}
             </AvatarFallback>

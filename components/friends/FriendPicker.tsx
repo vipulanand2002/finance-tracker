@@ -3,12 +3,13 @@
 import { useState, useRef, useEffect } from 'react'
 import { Search, Check, UserPlus } from 'lucide-react'
 import { Input } from '@/components/ui/input'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import type { Friend } from '@/types'
 
 interface Props {
   friends: Friend[]
   onSelect: (friend: Friend) => void
-  isSelected: (email: string) => boolean
+  isSelected: (friend: Friend) => boolean
   placeholder?: string
 }
 
@@ -18,7 +19,10 @@ export function FriendPicker({ friends, onSelect, isSelected, placeholder = 'Sea
   const ref = useRef<HTMLDivElement>(null)
 
   const filtered = query.trim()
-    ? friends.filter(f => f.email.toLowerCase().includes(query.toLowerCase()))
+    ? friends.filter(f =>
+        f.name.toLowerCase().includes(query.toLowerCase()) ||
+        (f.email ?? '').toLowerCase().includes(query.toLowerCase())
+      )
     : friends
 
   useEffect(() => {
@@ -47,7 +51,7 @@ export function FriendPicker({ friends, onSelect, isSelected, placeholder = 'Sea
       {open && filtered.length > 0 && (
         <div className="absolute z-50 top-full mt-1 w-full rounded-md border bg-popover shadow-md max-h-52 overflow-y-auto">
           {filtered.map(f => {
-            const selected = isSelected(f.email)
+            const selected = isSelected(f)
             return (
               <button
                 key={f.id}
@@ -62,10 +66,16 @@ export function FriendPicker({ friends, onSelect, isSelected, placeholder = 'Sea
                     : 'hover:bg-accent hover:text-accent-foreground cursor-pointer'
                 }`}
               >
-                <span className="w-6 h-6 rounded-full bg-primary/20 text-primary flex items-center justify-center font-semibold text-[10px] shrink-0">
-                  {f.email.charAt(0).toUpperCase()}
-                </span>
-                <span className="flex-1 truncate">{f.email}</span>
+                <Avatar className="w-6 h-6 shrink-0">
+                  {f.avatar_url && <AvatarImage src={f.avatar_url} alt={f.name} className="object-cover" />}
+                  <AvatarFallback className="bg-primary/20 text-primary font-semibold text-[10px]">
+                    {f.name.charAt(0).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex-1 min-w-0">
+                  <p className="truncate">{f.name}</p>
+                  {f.email && <p className="text-xs text-muted-foreground truncate">{f.email}</p>}
+                </div>
                 {selected
                   ? <Check className="w-3.5 h-3.5 text-primary shrink-0" />
                   : <UserPlus className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}

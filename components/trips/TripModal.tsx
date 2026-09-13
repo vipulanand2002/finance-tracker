@@ -361,8 +361,8 @@ export default function TripModal({ open, onClose, onSaved, trip }: Props) {
             {/* Quick-add from friends */}
             <FriendPicker
               friends={friends}
-              isSelected={email => members.some(m => m.email.toLowerCase() === email.toLowerCase())}
-              onSelect={f => setMembers(prev => [...prev, { email: f.email, name: f.email.split('@')[0] }])}
+              isSelected={f => members.some(m => (f.email && m.email.toLowerCase() === f.email.toLowerCase()) || m.name.toLowerCase() === f.name.toLowerCase())}
+              onSelect={f => setMembers(prev => [...prev, { email: f.email ?? '', name: f.name }])}
               placeholder="Search friends to add as member…"
             />
 

@@ -73,15 +73,36 @@ export async function POST(request: Request) {
   const creatorEmail = (user.email ?? '').toLowerCase()
 
   if (participants?.length) {
+    // Resolve user IDs for participants who have emails but no userId yet
+    const serviceClientForIds = createServiceClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+    const emailsToResolve = participants
+      .filter((p: { email?: string; userId?: string }) => p.email && !p.userId && p.email.toLowerCase() !== creatorEmail)
+      .map((p: { email?: string }) => p.email!.toLowerCase())
+
+    const resolvedIds = new Map<string, string>()
+    if (emailsToResolve.length > 0) {
+      const { data: profileRows } = await serviceClientForIds
+        .from('profiles')
+        .select('id, email')
+        .in('email', emailsToResolve)
+      for (const row of profileRows ?? []) {
+        resolvedIds.set(row.email.toLowerCase(), row.id)
+      }
+    }
+
     const { error: partError } = await supabase
       .from('split_participants')
       .insert(participants.map((p: { name: string; email?: string; amount: number; userId?: string }) => {
         const isCreator = !!p.email && p.email.toLowerCase() === creatorEmail
+        const resolvedId = p.email ? resolvedIds.get(p.email.toLowerCase()) ?? null : null
         return {
           split_id: split.id,
           participant_name: p.name,
           participant_email: p.email?.toLowerCase() ?? null,
-          participant_user_id: p.userId ?? (isCreator ? user.id : null),
+          participant_user_id: p.userId ?? (isCreator ? user.id : resolvedId),
           amount_owed: p.amount,
           // Creator already paid their share when they paid the whole bill
           is_paid: isCreator,

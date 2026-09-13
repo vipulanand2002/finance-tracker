@@ -77,6 +77,7 @@ interface TripSplitParticipant {
 
 interface TripSplit {
   id: string
+  created_by: string
   title: string
   total_amount: number
   category: string
@@ -101,6 +102,7 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
   const [togglingClose, setTogglingClose] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [currentUserEmail, setCurrentUserEmail] = useState<string>('')
+  const [currentUserName, setCurrentUserName] = useState<string>('')
   const [personalBudgets, setPersonalBudgets] = useState<PersonalBudget[]>([])
   const [myBudgetInput, setMyBudgetInput] = useState('')
   const [isPrivateBudget, setIsPrivateBudget] = useState(false)
@@ -132,6 +134,12 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
       if (user) {
         setCurrentUserId(user.id)
         setCurrentUserEmail((user.email ?? '').toLowerCase())
+        setCurrentUserName(
+          user.user_metadata?.full_name ||
+          user.user_metadata?.name ||
+          user.email?.split('@')[0] ||
+          ''
+        )
       }
     })
   }, [])
@@ -715,7 +723,7 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                                 </a>
                               )}
                               <p className="text-sm font-bold">{formatCurrency(s.total_amount)}</p>
-                              {!s.is_settled && (
+                              {!s.is_settled && s.created_by === currentUserId && (
                                 <button
                                   onClick={() => setEditingTripSplit({
                                     id: s.id,
@@ -771,7 +779,7 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                             </div>
                           ))}
                         </div>
-                        {!s.is_settled && s.split_participants.some(p => !p.is_paid && p.participant_email) && (
+                        {s.created_by === currentUserId && !s.is_settled && s.split_participants.some(p => !p.is_paid && p.participant_email) && (
                           <div className="border-t pt-2">
                             <Button
                               size="sm"
@@ -1285,7 +1293,7 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
         tripId={trip.id}
         defaultParticipants={[
           // Current user first (owner or member — they paid the bill)
-          ...(currentUserEmail ? [{ name: currentUserEmail.split('@')[0], email: currentUserEmail }] : []),
+          ...(currentUserEmail ? [{ name: currentUserName || currentUserEmail.split('@')[0], email: currentUserEmail }] : []),
           // Other trip members (skip current user if they're also in trip_members)
           ...(trip.trip_members ?? [])
             .filter(m => m.email.toLowerCase() !== currentUserEmail)

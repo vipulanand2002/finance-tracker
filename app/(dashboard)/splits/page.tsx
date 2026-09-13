@@ -8,10 +8,11 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, CheckCircle2, Circle, Trash2, Users, UserPlus, Mail, Loader2, Pencil, Paperclip } from 'lucide-react'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Plus, CheckCircle2, Circle, Trash2, Users, Mail, Loader2, Pencil, Paperclip } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import SplitModal, { type EditingSplit } from '@/components/splits/SplitModal'
-import FriendsSheet from '@/components/friends/FriendsSheet'
+import type { Friend } from '@/types'
 
 interface Participant {
   id: string
@@ -45,9 +46,35 @@ export default function SplitsPage() {
   const [splits, setSplits] = useState<Split[]>([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
-  const [friendsOpen, setFriendsOpen] = useState(false)
   const [editingSplit, setEditingSplit] = useState<EditingSplit | null>(null)
-  const [sendingReminder, setSendingReminder] = useState<string | null>(null) // split id being emailed
+  const [sendingReminder, setSendingReminder] = useState<string | null>(null)
+  const [myId, setMyId] = useState<string>('')
+  const [myEmail, setMyEmail] = useState<string>('')
+  const [myDisplayName, setMyDisplayName] = useState<string>('')
+  const [friends, setFriends] = useState<Friend[]>([])
+
+  useEffect(() => {
+    import('@/lib/supabase/client').then(({ createClient }) => {
+      const supabase = createClient()
+      supabase.auth.getUser().then(async ({ data: { user } }) => {
+        if (!user) return
+        setMyId(user.id)
+        setMyEmail((user.email ?? '').toLowerCase())
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name')
+          .eq('id', user.id)
+          .single()
+        setMyDisplayName(
+          profile?.full_name ||
+          user.user_metadata?.full_name ||
+          user.user_metadata?.name ||
+          user.email?.split('@')[0] || ''
+        )
+      })
+    })
+    fetch('/api/friends').then(r => r.json()).then(d => setFriends(Array.isArray(d) ? d : []))
+  }, [])
 
   async function sendReminder(splitId: string, participantCount: number) {
     setSendingReminder(splitId)
@@ -137,9 +164,15 @@ export default function SplitsPage() {
   const totalOwedByOthers = active.reduce((sum, s) =>
     sum + s.split_participants.filter(p => !p.is_paid).reduce((s2, p) => s2 + p.amount_owed, 0), 0)
 
+  // Build email → friend map once, outside the card render
+  const friendByEmail = new Map<string, Friend>(
+    friends.filter(f => f.email).map(f => [f.email!.toLowerCase(), f])
+  )
+
   const SplitCard = ({ split }: { split: Split }) => {
     const paid = split.split_participants.filter(p => p.is_paid).length
     const total = split.split_participants.length
+    const isCreator = myId && split.created_by === myId
 
     return (
       <Card>
@@ -158,7 +191,7 @@ export default function SplitsPage() {
               </a>
             )}
             <span className="font-bold text-sm">{formatCurrency(split.total_amount)}</span>
-            {!split.is_settled && (
+            {isCreator && !split.is_settled && (
               <>
                 <button onClick={() => setEditingSplit(split as EditingSplit)} className="text-muted-foreground hover:text-foreground ml-1">
                   <Pencil className="w-3.5 h-3.5" />
@@ -173,21 +206,53 @@ export default function SplitsPage() {
 
         <CardContent>
           <div className="space-y-2">
-            {split.split_participants.map(p => (
+            {split.split_participants.map(p => {
+              const emailLower = p.participant_email?.toLowerCase() ?? ''
+              const isMe = !!emailLower && emailLower === myEmail
+              const friend = emailLower ? friendByEmail.get(emailLower) : undefined
+
+              // Name: own registered name → friend's contact name → participant_name
+              const displayName = isMe
+                ? (myDisplayName || p.participant_name)
+                : friend
+                  ? friend.name
+                  : p.participant_name
+
+              // Email: creator sees all; participant sees friend emails only (not strangers')
+              const showEmail = isCreator
+                ? !!p.participant_email
+                : !!friend?.email
+
+              const displayEmail = friend?.email ?? p.participant_email
+
+              // Avatar: only if they're a friend with avatar_public enabled
+              const avatarUrl = friend?.avatar_url ?? null
+              const initial = displayName.charAt(0).toUpperCase()
+
+              return (
               <div key={p.id} className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <button
-                    onClick={() => !split.is_settled && togglePaid(split.id, p.id, p.is_paid)}
-                    disabled={split.is_settled}
+                    onClick={() => isCreator && !split.is_settled && togglePaid(split.id, p.id, p.is_paid)}
+                    disabled={!isCreator || split.is_settled}
                     className="text-muted-foreground shrink-0"
                   >
                     {p.is_paid
                       ? <CheckCircle2 className="w-4 h-4 text-emerald-500" />
                       : <Circle className="w-4 h-4" />}
                   </button>
+                  {/* Avatar (shown when friend has shared their picture) */}
+                  {avatarUrl ? (
+                    <Avatar className="w-6 h-6 shrink-0">
+                      <AvatarImage src={avatarUrl} alt={displayName} className="object-cover" />
+                      <AvatarFallback className="text-[10px] font-semibold">{initial}</AvatarFallback>
+                    </Avatar>
+                  ) : null}
                   <div className="min-w-0">
-                    <p className="text-sm truncate">{p.participant_name}</p>
-                    {p.participant_email && <p className="text-xs text-muted-foreground truncate">{p.participant_email}</p>}
+                    <p className="text-sm truncate">{displayName}</p>
+                    {showEmail && displayEmail && (
+                      <p className="text-xs text-muted-foreground truncate">{displayEmail}</p>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -199,7 +264,8 @@ export default function SplitsPage() {
                   </Badge>
                 </div>
               </div>
-            ))}
+              )
+            })}
           </div>
 
           <div className="mt-3 pt-3 border-t flex items-center justify-between gap-2 flex-wrap">
@@ -213,8 +279,8 @@ export default function SplitsPage() {
               )}
             </div>
             <div className="flex items-center gap-2">
-              {/* Send reminder to unpaid participants who have emails */}
-              {!split.is_settled && split.split_participants.some(p => !p.is_paid && p.participant_email) && (
+              {/* Creator-only actions */}
+              {isCreator && !split.is_settled && split.split_participants.some(p => !p.is_paid && p.participant_email) && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -231,7 +297,7 @@ export default function SplitsPage() {
                   }
                 </Button>
               )}
-              {!split.is_settled && paid === total && (
+              {isCreator && !split.is_settled && paid === total && (
                 <Button size="sm" variant="outline" onClick={() => settle(split.id)} className="h-7 text-xs">
                   Mark as settled
                 </Button>
@@ -251,14 +317,9 @@ export default function SplitsPage() {
           <h1 className="text-2xl font-bold">Splits</h1>
           <p className="text-muted-foreground text-sm">Split expenses with friends and family</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setFriendsOpen(true)}>
-            <UserPlus className="w-4 h-4 mr-1" /> Friends
-          </Button>
-          <Button onClick={() => setModalOpen(true)}>
-            <Plus className="w-4 h-4 mr-1" /> New Split
-          </Button>
-        </div>
+        <Button onClick={() => setModalOpen(true)}>
+          <Plus className="w-4 h-4 mr-1" /> New Split
+        </Button>
       </div>
 
       {/* Summary */}
@@ -328,7 +389,6 @@ export default function SplitsPage() {
         onClose={() => { setModalOpen(false); setEditingSplit(null) }}
         onSaved={fetchSplits}
       />
-      <FriendsSheet open={friendsOpen} onClose={() => setFriendsOpen(false)} />
     </div>
   )
 }

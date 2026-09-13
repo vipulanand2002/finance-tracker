@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 
 async function getUser() {
@@ -7,90 +8,217 @@ async function getUser() {
   return { supabase, user }
 }
 
-// GET /api/friends — list my friends with their email
+// ─── GET /api/friends ─────────────────────────────────────────────────────────
+// Returns all contacts, enriched with connected status and friend_user_id
 export async function GET() {
   const { supabase, user } = await getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { data: rows, error } = await supabase
-    .from('friendships')
-    .select('id, friend_id, created_at')
+  const { data: contacts, error } = await supabase
+    .from('contacts')
+    .select('*')
     .eq('user_id', user.id)
-    .neq('friend_id', user.id) // exclude any accidental self-rows
-    .order('created_at', { ascending: false })
+    .order('name', { ascending: true })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  if (!rows || rows.length === 0) return NextResponse.json([])
+  if (!contacts || contacts.length === 0) return NextResponse.json([])
 
-  const friendIds = rows.map(r => r.friend_id)
-  const { data: profiles } = await supabase
-    .from('profiles')
-    .select('id, email')
-    .in('id', friendIds)
+  // Batch-lookup profiles for contacts that have emails
+  const emails = contacts
+    .map((c: { email: string | null }) => c.email?.toLowerCase())
+    .filter(Boolean) as string[]
 
-  const emailMap = new Map((profiles ?? []).map((p: any) => [p.id, p.email]))
+  type ProfileRow = { id: string; email: string; full_name: string | null; avatar_url: string | null; avatar_public: boolean }
+  let profilesByEmail: Map<string, ProfileRow> = new Map()
+  if (emails.length > 0) {
+    const serviceClient = createServiceClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+    const { data: profiles } = await serviceClient
+      .from('profiles')
+      .select('id, email, full_name, avatar_url, avatar_public')
+      .in('email', emails)
+
+    profilesByEmail = new Map(
+      (profiles ?? []).map((p: ProfileRow) => [p.email.toLowerCase(), p])
+    )
+  }
+
+  // Fetch existing friendship rows so we know friendship_id for deletion
+  const { data: friendships } = await supabase
+    .from('friendships')
+    .select('id, friend_id')
+    .eq('user_id', user.id)
+
+  const friendshipByUserId = new Map(
+    (friendships ?? []).map((f: { id: string; friend_id: string }) => [f.friend_id, f.id])
+  )
 
   return NextResponse.json(
-    rows.map(r => ({
-      id: r.id,
-      friend_id: r.friend_id,
-      email: emailMap.get(r.friend_id) ?? '',
-      created_at: r.created_at,
-    }))
+    contacts.map((c: { id: string; name: string; email: string | null; notes: string | null; created_at: string }) => {
+      const profile = c.email ? (profilesByEmail.get(c.email.toLowerCase()) ?? null) : null
+      const friendUserId = profile?.id ?? null
+      return {
+        id: c.id,
+        name: c.name,
+        email: c.email,
+        notes: c.notes,
+        created_at: c.created_at,
+        connected: !!friendUserId,
+        friend_user_id: friendUserId,
+        friendship_id: friendUserId ? (friendshipByUserId.get(friendUserId) ?? null) : null,
+        // Use friend's own registered name if available, else keep what the user saved
+        display_name: profile?.full_name || c.name,
+        // Only expose avatar if the friend has opted in
+        avatar_url: (profile?.avatar_public && profile?.avatar_url) ? profile.avatar_url : null,
+      }
+    })
   )
 }
 
-// POST /api/friends — add friend by email
+// ─── POST /api/friends ────────────────────────────────────────────────────────
+// Body: { name, email?, notes? }
+// Saves to contacts. If email matches a profile → also creates friendship for chat.
 export async function POST(request: Request) {
   const { supabase, user } = await getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { email } = await request.json()
-  if (!email) return NextResponse.json({ error: 'Email required' }, { status: 400 })
+  const body = await request.json()
+  const name = body.name?.trim()
+  if (!name) return NextResponse.json({ error: 'Name is required' }, { status: 400 })
 
-  const normalized = email.trim().toLowerCase()
+  const email = body.email?.trim().toLowerCase() || null
+  const notes = body.notes?.trim() || null
 
-  // Look up the user in profiles
-  const { data: profile, error: profileError } = await supabase
-    .from('profiles')
-    .select('id, email')
-    .eq('email', normalized)
+  // Insert into contacts
+  const { data: contact, error: contactError } = await supabase
+    .from('contacts')
+    .insert({ user_id: user.id, name, email, notes })
+    .select()
     .single()
 
-  if (profileError || !profile) {
-    return NextResponse.json({ error: 'No account found with that email address' }, { status: 404 })
+  if (contactError) return NextResponse.json({ error: contactError.message }, { status: 500 })
+
+  let friendUserId: string | null = null
+  let friendshipId: string | null = null
+
+  if (email) {
+    const serviceClient = createServiceClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+    const { data: profile } = await serviceClient
+      .from('profiles')
+      .select('id')
+      .eq('email', email)
+      .single()
+
+    if (profile?.id && profile.id !== user.id) {
+      friendUserId = profile.id
+
+      // Check not already friends
+      const { data: existing } = await supabase
+        .from('friendships')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('friend_id', profile.id)
+        .maybeSingle()
+
+      if (!existing) {
+        const { data: fs } = await supabase
+          .from('friendships')
+          .insert({ user_id: user.id, friend_id: profile.id })
+          .select('id')
+          .single()
+        friendshipId = fs?.id ?? null
+      } else {
+        friendshipId = existing.id
+      }
+    }
   }
 
-  // Self-check by ID (more reliable than comparing emails)
-  if (profile.id === user.id) {
-    return NextResponse.json({ error: 'You cannot add yourself as a friend' }, { status: 400 })
-  }
+  return NextResponse.json({
+    ...contact,
+    connected: !!friendUserId,
+    friend_user_id: friendUserId,
+    friendship_id: friendshipId,
+  }, { status: 201 })
+}
 
-  // Check already friends
-  const { data: existing } = await supabase
-    .from('friendships')
-    .select('id')
+// ─── PUT /api/friends?id= ─────────────────────────────────────────────────────
+export async function PUT(request: Request) {
+  const { supabase, user } = await getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { searchParams } = new URL(request.url)
+  const id = searchParams.get('id')
+  if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+
+  const body = await request.json()
+  const name = body.name?.trim()
+  if (!name) return NextResponse.json({ error: 'Name is required' }, { status: 400 })
+
+  const email = body.email?.trim().toLowerCase() || null
+  const notes = body.notes?.trim() || null
+
+  const { data: contact, error } = await supabase
+    .from('contacts')
+    .update({ name, email, notes })
+    .eq('id', id)
     .eq('user_id', user.id)
-    .eq('friend_id', profile.id)
-    .maybeSingle()
-
-  if (existing) {
-    return NextResponse.json({ error: 'Already in your friends list' }, { status: 409 })
-  }
-
-  // Insert A→B only; the DB trigger auto-inserts B→A with SECURITY DEFINER
-  const { data, error } = await supabase
-    .from('friendships')
-    .insert({ user_id: user.id, friend_id: profile.id })
-    .select('id, friend_id, created_at')
+    .select()
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  return NextResponse.json({ id: data.id, friend_id: data.friend_id, email: profile.email, created_at: data.created_at }, { status: 201 })
+  // Re-evaluate connected status
+  let friendUserId: string | null = null
+  let friendshipId: string | null = null
+
+  if (email) {
+    const serviceClient = createServiceClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+    const { data: profile } = await serviceClient
+      .from('profiles')
+      .select('id')
+      .eq('email', email)
+      .single()
+
+    if (profile?.id && profile.id !== user.id) {
+      friendUserId = profile.id
+
+      const { data: existing } = await supabase
+        .from('friendships')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('friend_id', profile.id)
+        .maybeSingle()
+
+      if (!existing) {
+        const { data: fs } = await supabase
+          .from('friendships')
+          .insert({ user_id: user.id, friend_id: profile.id })
+          .select('id')
+          .single()
+        friendshipId = fs?.id ?? null
+      } else {
+        friendshipId = existing.id
+      }
+    }
+  }
+
+  return NextResponse.json({
+    ...contact,
+    connected: !!friendUserId,
+    friend_user_id: friendUserId,
+    friendship_id: friendshipId,
+  })
 }
 
-// DELETE /api/friends?id= — remove a friendship row
+// ─── DELETE /api/friends?id= ──────────────────────────────────────────────────
 export async function DELETE(request: Request) {
   const { supabase, user } = await getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -99,22 +227,43 @@ export async function DELETE(request: Request) {
   const id = searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-  // Get the friend_id so we can delete both directions
-  const { data: row } = await supabase
-    .from('friendships')
-    .select('friend_id')
+  // Get the contact first to find email
+  const { data: contact } = await supabase
+    .from('contacts')
+    .select('email')
     .eq('id', id)
     .eq('user_id', user.id)
     .single()
 
-  // Delete A→B only; the DB trigger auto-deletes B→A with SECURITY DEFINER
+  // Delete contact
   const { error } = await supabase
-    .from('friendships')
+    .from('contacts')
     .delete()
     .eq('id', id)
     .eq('user_id', user.id)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // If there's a friendship row, remove it too
+  if (contact?.email) {
+    const serviceClient = createServiceClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+    const { data: profile } = await serviceClient
+      .from('profiles')
+      .select('id')
+      .eq('email', contact.email.toLowerCase())
+      .single()
+
+    if (profile?.id) {
+      await supabase
+        .from('friendships')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('friend_id', profile.id)
+    }
+  }
 
   return NextResponse.json({ success: true })
 }

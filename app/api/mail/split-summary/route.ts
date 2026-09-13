@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import nodemailer from 'nodemailer'
 import { buildSplitReminderEmail } from '@/lib/email-templates/split-reminder'
@@ -51,7 +52,7 @@ export async function POST(request: Request) {
     .eq('id', user.id)
     .single()
 
-  const creatorName = profile?.full_name || user.email?.split('@')[0] || 'Someone'
+  const creatorName = user.user_metadata?.full_name || user.user_metadata?.name || profile?.full_name || user.email?.split('@')[0] || 'Someone'
 
   // Send to each unpaid participant that has an email
   const toNotify = (split.split_participants ?? []).filter(
@@ -64,6 +65,23 @@ export async function POST(request: Request) {
       { status: 400 }
     )
   }
+
+  // Look up registered names for ALL participants (not just recipients)
+  // so the full participant list in the mail uses each person's own name
+  const serviceClient = createServiceClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+  const allEmails = (split.split_participants ?? [])
+    .map((p: { participant_email: string | null }) => p.participant_email?.toLowerCase())
+    .filter(Boolean) as string[]
+  const { data: participantProfiles } = await serviceClient
+    .from('profiles')
+    .select('email, full_name')
+    .in('email', allEmails)
+  const registeredNames = new Map(
+    (participantProfiles ?? []).map((p: { email: string; full_name: string | null }) => [p.email.toLowerCase(), p.full_name])
+  )
 
   const prevReminderCount: number = split.reminder_count ?? 0
   const prevLastSentAt: string | null = split.last_reminder_sent_at ?? null
@@ -93,8 +111,12 @@ export async function POST(request: Request) {
   const errors: string[] = []
 
   for (const participant of toNotify) {
+    // Use recipient's own registered name if they have an account; fall back to what the creator saved
+    const recipientEmail = participant.participant_email.toLowerCase()
+    const recipientName = registeredNames.get(recipientEmail) || participant.participant_name
+
     const { subject, html } = buildSplitReminderEmail({
-      recipientName: participant.participant_name,
+      recipientName,
       creatorName,
       split: {
         title: split.title,
@@ -110,7 +132,7 @@ export async function POST(request: Request) {
         amount_owed: number
         is_paid: boolean
       }) => ({
-        name: p.participant_name,
+        name: (p.participant_email && registeredNames.get(p.participant_email.toLowerCase())) || p.participant_name,
         email: p.participant_email ?? '',
         amount_owed: p.amount_owed,
         is_paid: p.is_paid,

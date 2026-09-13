@@ -64,9 +64,15 @@ export interface MonthlyData {
 
 export interface Friend {
   id: string
-  friend_id: string
-  email: string
+  name: string
+  email: string | null
+  notes: string | null
   created_at: string
+  connected: boolean
+  friend_user_id: string | null
+  friendship_id: string | null
+  display_name?: string      // friend's own registered name if available, else saved name
+  avatar_url?: string | null // only set when friend has avatar_public: true
 }
 
 export interface SplitParticipantSummary {
