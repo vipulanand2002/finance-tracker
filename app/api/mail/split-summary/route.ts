@@ -97,8 +97,9 @@ export async function POST(request: Request) {
         const content = Buffer.from(await fileRes.arrayBuffer())
         const contentType = fileRes.headers.get('content-type') || 'application/octet-stream'
         const rawName = decodeURIComponent(split.receipt_url.split('/').pop() ?? 'attachment')
-        // Strip the timestamp prefix added during upload (e.g. "1234567890-receipt.pdf" → "receipt.pdf")
-        const filename = rawName.replace(/^\d+-/, '')
+        const ext = rawName.includes('.') ? rawName.split('.').pop() : ''
+        const safeTitle = split.title.replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_').slice(0, 80)
+        const filename = safeTitle ? (ext ? `${safeTitle}.${ext}` : safeTitle) : rawName.replace(/^\d+-/, '')
         attachments.push({ filename, content, contentType })
       }
     } catch {

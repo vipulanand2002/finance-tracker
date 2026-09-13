@@ -204,7 +204,9 @@ export async function POST(request: Request) {
           const content = Buffer.from(await fileRes.arrayBuffer())
           const contentType = fileRes.headers.get('content-type') || 'application/octet-stream'
           const rawName = decodeURIComponent(split.receipt_url.split('/').pop() ?? 'attachment')
-          const filename = rawName.replace(/^\d+-/, '')
+          const ext = rawName.includes('.') ? rawName.split('.').pop() : ''
+          const safeTitle = split.title.replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_').slice(0, 80)
+          const filename = safeTitle ? (ext ? `${safeTitle}.${ext}` : safeTitle) : rawName.replace(/^\d+-/, '')
           receiptCache.set(split.receipt_url, { filename, content, contentType })
         }
       } catch { /* continue without this attachment */ }

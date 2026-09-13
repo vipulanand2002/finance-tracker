@@ -106,7 +106,9 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         setSelectedTripId(editingSplit.trip_id ?? null)
         setSelectedCardId(editingSplit.card_id ?? null)
         setReceiptUrl(editingSplit.receipt_url ?? '')
-        setReceiptName(editingSplit.receipt_url ? decodeURIComponent(editingSplit.receipt_url.split('/').pop() ?? '') : '')
+        setReceiptName(editingSplit.receipt_url
+          ? decodeURIComponent(editingSplit.receipt_url.split('/').pop() ?? '').replace(/^\d+-/, '')
+          : '')
         setParticipants(editParticipants)
         originalRef.current = {
           title: editingSplit.title,
@@ -184,6 +186,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
     try {
       const fd = new FormData()
       fd.append('file', file)
+      if (title.trim()) fd.append('title', title.trim())
       const res = await fetch('/api/splits/upload', { method: 'POST', body: fd })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Upload failed')

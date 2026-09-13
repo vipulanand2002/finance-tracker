@@ -13,8 +13,17 @@ export async function POST(request: Request) {
   const file = formData.get('file') as File | null
   if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 })
 
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-  const storagePath = `${user.id}/${Date.now()}-${safeName}`
+  const title = (formData.get('title') as string | null)?.trim() || ''
+  const originalExt = file.name.includes('.') ? file.name.split('.').pop()! : ''
+
+  // Build a human-readable filename from the split title; fall back to original filename
+  const baseName = title
+    ? title.replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_').slice(0, 80)
+    : file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9._-]/g, '_')
+  const friendlyName = originalExt ? `${baseName}.${originalExt}` : baseName
+
+  // Timestamp prefix keeps the path unique even if the same title is reused
+  const storagePath = `${user.id}/${Date.now()}-${friendlyName}`
   const buffer = await file.arrayBuffer()
 
   const { data, error } = await supabase.storage
@@ -27,5 +36,5 @@ export async function POST(request: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   const { data: urlData } = supabase.storage.from('split-docs').getPublicUrl(data.path)
-  return NextResponse.json({ url: urlData.publicUrl, name: file.name })
+  return NextResponse.json({ url: urlData.publicUrl, name: friendlyName })
 }
