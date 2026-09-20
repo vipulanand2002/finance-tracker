@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import { toast } from 'sonner'
 import { format, parseISO, isValid } from 'date-fns'
 import { Card, CardContent } from '@/components/ui/card'
@@ -10,9 +11,10 @@ import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Plus, MapPin, Calendar, Pencil, Trash2, Plane, Receipt, LockKeyhole, Users, ArrowLeft } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
-import TripModal from '@/components/trips/TripModal'
-import TripDetailSheet from '@/components/trips/TripDetailSheet'
 import type { Trip } from '@/types'
+
+const TripModal = dynamic(() => import('@/components/trips/TripModal'), { ssr: false })
+const TripDetailSheet = dynamic(() => import('@/components/trips/TripDetailSheet'), { ssr: false })
 
 const TRIP_COLORS = [
   'from-violet-500 to-purple-700',

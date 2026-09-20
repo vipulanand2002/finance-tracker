@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
@@ -14,7 +15,7 @@ import {
   SplitSquareVertical, MessageCircle, BellRing, Mail, BadgeCheck, Check, X, Clock,
 } from 'lucide-react'
 import { cn, formatCurrency } from '@/lib/utils'
-import SplitModal from '@/components/splits/SplitModal'
+const SplitModal = dynamic(() => import('@/components/splits/SplitModal'), { ssr: false })
 import type { Message } from '@/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────

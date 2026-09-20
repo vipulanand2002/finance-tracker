@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useCallback, memo } from 'react'
+import dynamic from 'next/dynamic'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -11,7 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Plus, CheckCircle2, Circle, Trash2, Users, Mail, Loader2, Pencil, Paperclip } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
-import SplitModal, { type EditingSplit } from '@/components/splits/SplitModal'
+import { type EditingSplit } from '@/components/splits/SplitModal'
+const SplitModal = dynamic(() => import('@/components/splits/SplitModal'), { ssr: false })
 import type { Friend } from '@/types'
 
 interface Participant {
