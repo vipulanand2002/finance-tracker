@@ -87,23 +87,24 @@ export async function POST(request: Request) {
   const prevLastSentAt: string | null = split.last_reminder_sent_at ?? null
   const newReminderCount = prevReminderCount + 1
 
-  // Fetch receipt attachment if present
+  // Fetch receipt attachments (up to 2)
   type Attachment = { filename: string; content: Buffer; contentType: string }
   const attachments: Attachment[] = []
-  if (split.receipt_url) {
+  const receiptUrls = [split.receipt_url, split.receipt_url_2].filter(Boolean) as string[]
+  for (const url of receiptUrls) {
     try {
-      const fileRes = await fetch(split.receipt_url)
+      const fileRes = await fetch(url)
       if (fileRes.ok) {
         const content = Buffer.from(await fileRes.arrayBuffer())
         const contentType = fileRes.headers.get('content-type') || 'application/octet-stream'
-        const rawName = decodeURIComponent(split.receipt_url.split('/').pop() ?? 'attachment')
+        const rawName = decodeURIComponent(url.split('/').pop() ?? 'attachment')
         const ext = rawName.includes('.') ? rawName.split('.').pop() : ''
         const safeTitle = split.title.replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_').slice(0, 80)
         const filename = safeTitle ? (ext ? `${safeTitle}.${ext}` : safeTitle) : rawName.replace(/^\d+-/, '')
         attachments.push({ filename, content, contentType })
       }
     } catch {
-      // Continue without attachment if fetch fails
+      // Continue without this attachment if fetch fails
     }
   }
 

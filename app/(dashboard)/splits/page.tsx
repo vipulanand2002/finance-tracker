@@ -36,6 +36,7 @@ interface Split {
   trip_id?: string | null
   contact_id?: string | null
   receipt_url?: string | null
+  receipt_url_2?: string | null
   card_id?: string | null
   reminder_count?: number | null
   last_reminder_sent_at?: string | null
@@ -186,7 +187,12 @@ export default function SplitsPage() {
           </div>
           <div className="flex items-center gap-1 shrink-0">
             {split.receipt_url && (
-              <a href={split.receipt_url} target="_blank" rel="noopener noreferrer" title="View attachment" className="text-muted-foreground hover:text-primary">
+              <a href={split.receipt_url} target="_blank" rel="noopener noreferrer" title="View attachment 1" className="text-muted-foreground hover:text-primary">
+                <Paperclip className="w-3.5 h-3.5" />
+              </a>
+            )}
+            {split.receipt_url_2 && (
+              <a href={split.receipt_url_2} target="_blank" rel="noopener noreferrer" title="View attachment 2" className="text-muted-foreground hover:text-primary">
                 <Paperclip className="w-3.5 h-3.5" />
               </a>
             )}

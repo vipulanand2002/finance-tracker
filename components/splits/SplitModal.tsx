@@ -28,6 +28,7 @@ export interface EditingSplit {
   trip_id?: string | null
   contact_id?: string | null
   receipt_url?: string | null
+  receipt_url_2?: string | null
   card_id?: string | null
   split_participants: { participant_name: string; participant_email: string | null; amount_owed: number; is_paid: boolean }[]
 }
@@ -57,6 +58,9 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
   const [receiptUrl, setReceiptUrl] = useState('')
   const [receiptName, setReceiptName] = useState('')
   const [uploadingFile, setUploadingFile] = useState(false)
+  const [receiptUrl2, setReceiptUrl2] = useState('')
+  const [receiptName2, setReceiptName2] = useState('')
+  const [uploadingFile2, setUploadingFile2] = useState(false)
   const [friends, setFriends] = useState<Friend[]>([])
   const [myEmail, setMyEmail] = useState('')
   const [myName, setMyName] = useState('')
@@ -67,7 +71,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
   const discardRef = useRef(false)
   const originalRef = useRef<{
     title: string; totalAmount: string; category: string; description: string;
-    date: string; selectedTripId: string | null; selectedCardId: string | null; receiptUrl: string; participants: string
+    date: string; selectedTripId: string | null; selectedCardId: string | null; receiptUrl: string; receiptUrl2: string; participants: string
   } | null>(null)
 
   useEffect(() => {
@@ -109,6 +113,10 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         setReceiptName(editingSplit.receipt_url
           ? decodeURIComponent(editingSplit.receipt_url.split('/').pop() ?? '').replace(/^\d+-/, '')
           : '')
+        setReceiptUrl2(editingSplit.receipt_url_2 ?? '')
+        setReceiptName2(editingSplit.receipt_url_2
+          ? decodeURIComponent(editingSplit.receipt_url_2.split('/').pop() ?? '').replace(/^\d+-/, '')
+          : '')
         setParticipants(editParticipants)
         originalRef.current = {
           title: editingSplit.title,
@@ -119,6 +127,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
           selectedTripId: editingSplit.trip_id ?? null,
           selectedCardId: editingSplit.card_id ?? null,
           receiptUrl: editingSplit.receipt_url ?? '',
+          receiptUrl2: editingSplit.receipt_url_2 ?? '',
           participants: JSON.stringify(editParticipants),
         }
       } else {
@@ -144,6 +153,8 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         setSelectedCardId(null)
         setReceiptUrl('')
         setReceiptName('')
+        setReceiptUrl2('')
+        setReceiptName2('')
         setParticipants(initParticipants)
         originalRef.current = {
           title: initTitle,
@@ -154,6 +165,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
           selectedTripId: initTripId,
           selectedCardId: null,
           receiptUrl: '',
+          receiptUrl2: '',
           participants: JSON.stringify(initParticipants),
         }
       }
@@ -166,6 +178,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
     setParticipants([emptyParticipant(), emptyParticipant()])
     setSelectedTripId(null); setSelectedCardId(null)
     setReceiptUrl(''); setReceiptName('')
+    setReceiptUrl2(''); setReceiptName2('')
   }
 
   function splitEqually() {
@@ -197,6 +210,28 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
       toast.error(err instanceof Error ? err.message : 'Upload failed')
     } finally {
       setUploadingFile(false)
+      e.target.value = ''
+    }
+  }
+
+  async function handleFileUpload2(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingFile2(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      if (title.trim()) fd.append('title', title.trim())
+      const res = await fetch('/api/splits/upload', { method: 'POST', body: fd })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Upload failed')
+      setReceiptUrl2(data.url)
+      setReceiptName2(data.name)
+      toast.success('Second file attached!')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setUploadingFile2(false)
       e.target.value = ''
     }
   }
@@ -236,6 +271,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         trip_id: selectedTripId ?? null,
         contact_id: contactId ?? editingSplit?.contact_id ?? null,
         receipt_url: receiptUrl || null,
+        receipt_url_2: receiptUrl2 || null,
         participants: validParticipants.map(p => ({
           name: p.name.trim(),
           email: p.email.trim() || undefined,
@@ -286,6 +322,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         selectedTripId !== orig.selectedTripId ||
         selectedCardId !== orig.selectedCardId ||
         receiptUrl !== orig.receiptUrl ||
+        receiptUrl2 !== orig.receiptUrl2 ||
         JSON.stringify(participants) !== orig.participants
       if (!hasChanges) { reset(); onClose(); return }
     }
@@ -337,14 +374,15 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
               <Input placeholder="Optional note" value={description} onChange={e => setDescription(e.target.value)} />
             </div>
 
-            {/* Attachment */}
-            <div className="col-span-2 space-y-1">
-              <Label>Attachment <span className="text-muted-foreground font-normal text-xs">(PDF or image · attached to reminder emails)</span></Label>
+            {/* Attachments (up to 2) */}
+            <div className="col-span-2 space-y-2">
+              <Label>Attachments <span className="text-muted-foreground font-normal text-xs">(up to 2 PDFs or images · sent with reminder emails)</span></Label>
+              {/* Slot 1 */}
               {receiptUrl ? (
                 <div className="flex items-center gap-2 rounded-md border px-3 py-2">
                   <Paperclip className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                   <a href={receiptUrl} target="_blank" rel="noopener noreferrer" className="flex-1 truncate text-xs text-primary hover:underline">
-                    {receiptName || 'Attachment'}
+                    {receiptName || 'Attachment 1'}
                   </a>
                   <button type="button" onClick={() => { setReceiptUrl(''); setReceiptName('') }} className="text-muted-foreground hover:text-destructive shrink-0">
                     <X className="w-3.5 h-3.5" />
@@ -357,6 +395,27 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
                     : <><Upload className="w-3.5 h-3.5" />Attach PDF or image</>}
                   <input type="file" accept=".pdf,image/*" className="hidden" onChange={handleFileUpload} disabled={uploadingFile} />
                 </label>
+              )}
+              {/* Slot 2 — only show once slot 1 is filled */}
+              {receiptUrl && (
+                receiptUrl2 ? (
+                  <div className="flex items-center gap-2 rounded-md border px-3 py-2">
+                    <Paperclip className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <a href={receiptUrl2} target="_blank" rel="noopener noreferrer" className="flex-1 truncate text-xs text-primary hover:underline">
+                      {receiptName2 || 'Attachment 2'}
+                    </a>
+                    <button type="button" onClick={() => { setReceiptUrl2(''); setReceiptName2('') }} className="text-muted-foreground hover:text-destructive shrink-0">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <label className={`flex items-center gap-2 cursor-pointer rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:border-foreground transition-colors ${uploadingFile2 ? 'pointer-events-none opacity-60' : ''}`}>
+                    {uploadingFile2
+                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Uploading…</>
+                      : <><Upload className="w-3.5 h-3.5" />Attach second PDF or image</>}
+                    <input type="file" accept=".pdf,image/*" className="hidden" onChange={handleFileUpload2} disabled={uploadingFile2} />
+                  </label>
+                )
               )}
             </div>
 

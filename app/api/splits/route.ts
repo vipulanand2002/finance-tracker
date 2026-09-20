@@ -243,6 +243,7 @@ export async function PATCH(request: Request) {
       trip_id: string | null
       contact_id: string | null
       receipt_url: string | null
+      receipt_url_2: string | null
     }
 
     // Update split metadata
@@ -257,6 +258,7 @@ export async function PATCH(request: Request) {
         trip_id: splitFields.trip_id,
         contact_id: splitFields.contact_id,
         receipt_url: splitFields.receipt_url ?? null,
+        receipt_url_2: splitFields.receipt_url_2 ?? null,
         card_id: card_id ?? null,
       })
       .eq('id', id!)

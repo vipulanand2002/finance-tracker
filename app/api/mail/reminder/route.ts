@@ -30,6 +30,7 @@ type Split = {
   reminder_count: number | null
   last_reminder_sent_at: string | null
   receipt_url: string | null
+  receipt_url_2: string | null
   split_participants: Participant[]
 }
 
@@ -121,7 +122,7 @@ export async function POST(request: Request) {
 
     const { data: splitData } = await supabase
       .from('expense_splits')
-      .select('id, title, total_amount, category, date, description, reminder_count, last_reminder_sent_at, receipt_url, split_participants(*)')
+      .select('id, title, total_amount, category, date, description, reminder_count, last_reminder_sent_at, receipt_url, receipt_url_2, split_participants(*)')
       .in('id', splitIds)
       .eq('created_by', user.id)
 
@@ -132,7 +133,7 @@ export async function POST(request: Request) {
 
     const { data: splitData } = await supabase
       .from('expense_splits')
-      .select('id, title, total_amount, category, date, description, reminder_count, last_reminder_sent_at, receipt_url, split_participants(*)')
+      .select('id, title, total_amount, category, date, description, reminder_count, last_reminder_sent_at, receipt_url, receipt_url_2, split_participants(*)')
       .eq('trip_id', trip_id)
       .eq('created_by', user.id)
 
@@ -197,19 +198,22 @@ export async function POST(request: Request) {
   // Pre-fetch all unique receipts across splits so we don't re-download per recipient
   const receiptCache = new Map<string, Attachment>()
   for (const split of splits) {
-    if (split.receipt_url && !receiptCache.has(split.receipt_url)) {
-      try {
-        const fileRes = await fetch(split.receipt_url)
-        if (fileRes.ok) {
-          const content = Buffer.from(await fileRes.arrayBuffer())
-          const contentType = fileRes.headers.get('content-type') || 'application/octet-stream'
-          const rawName = decodeURIComponent(split.receipt_url.split('/').pop() ?? 'attachment')
-          const ext = rawName.includes('.') ? rawName.split('.').pop() : ''
-          const safeTitle = split.title.replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_').slice(0, 80)
-          const filename = safeTitle ? (ext ? `${safeTitle}.${ext}` : safeTitle) : rawName.replace(/^\d+-/, '')
-          receiptCache.set(split.receipt_url, { filename, content, contentType })
-        }
-      } catch { /* continue without this attachment */ }
+    const urls = [split.receipt_url, split.receipt_url_2].filter(Boolean) as string[]
+    for (const url of urls) {
+      if (!receiptCache.has(url)) {
+        try {
+          const fileRes = await fetch(url)
+          if (fileRes.ok) {
+            const content = Buffer.from(await fileRes.arrayBuffer())
+            const contentType = fileRes.headers.get('content-type') || 'application/octet-stream'
+            const rawName = decodeURIComponent(url.split('/').pop() ?? 'attachment')
+            const ext = rawName.includes('.') ? rawName.split('.').pop() : ''
+            const safeTitle = split.title.replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_').slice(0, 80)
+            const filename = safeTitle ? (ext ? `${safeTitle}.${ext}` : safeTitle) : rawName.replace(/^\d+-/, '')
+            receiptCache.set(url, { filename, content, contentType })
+          }
+        } catch { /* continue without this attachment */ }
+      }
     }
   }
 
@@ -218,10 +222,13 @@ export async function POST(request: Request) {
     const attachments: Attachment[] = []
     const seenUrls = new Set<string>()
     for (const { split } of recipientSplits) {
-      if (split.receipt_url && !seenUrls.has(split.receipt_url)) {
-        seenUrls.add(split.receipt_url)
-        const att = receiptCache.get(split.receipt_url)
-        if (att) attachments.push(att)
+      const urls = [split.receipt_url, split.receipt_url_2].filter(Boolean) as string[]
+      for (const url of urls) {
+        if (!seenUrls.has(url)) {
+          seenUrls.add(url)
+          const att = receiptCache.get(url)
+          if (att) attachments.push(att)
+        }
       }
     }
 

@@ -85,6 +85,7 @@ interface TripSplit {
   date: string
   is_settled: boolean
   receipt_url?: string | null
+  receipt_url_2?: string | null
   reminder_count?: number | null
   last_reminder_sent_at?: string | null
   split_participants: TripSplitParticipant[]
@@ -718,7 +719,12 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                           <div className="text-right shrink-0 flex flex-col items-end gap-1">
                             <div className="flex items-center gap-1.5">
                               {s.receipt_url && (
-                                <a href={s.receipt_url} target="_blank" rel="noopener noreferrer" title="View attachment" className="text-muted-foreground hover:text-primary">
+                                <a href={s.receipt_url} target="_blank" rel="noopener noreferrer" title="View attachment 1" className="text-muted-foreground hover:text-primary">
+                                  <Paperclip className="w-3 h-3" />
+                                </a>
+                              )}
+                              {s.receipt_url_2 && (
+                                <a href={s.receipt_url_2} target="_blank" rel="noopener noreferrer" title="View attachment 2" className="text-muted-foreground hover:text-primary">
                                   <Paperclip className="w-3 h-3" />
                                 </a>
                               )}
