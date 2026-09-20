@@ -90,8 +90,13 @@ export async function POST(request: Request) {
   // Fetch receipt attachments (up to 2)
   type Attachment = { filename: string; content: Buffer; contentType: string }
   const attachments: Attachment[] = []
-  const receiptUrls = [split.receipt_url, split.receipt_url_2].filter(Boolean) as string[]
-  for (const url of receiptUrls) {
+  const receiptSlots = [
+    { url: split.receipt_url, customName: split.receipt_name },
+    { url: split.receipt_url_2, customName: split.receipt_name_2 },
+  ].filter(s => s.url) as { url: string; customName: string | null }[]
+  const hasBoth = receiptSlots.length === 2
+  for (let i = 0; i < receiptSlots.length; i++) {
+    const { url, customName } = receiptSlots[i]
     try {
       const fileRes = await fetch(url)
       if (fileRes.ok) {
@@ -100,7 +105,10 @@ export async function POST(request: Request) {
         const rawName = decodeURIComponent(url.split('/').pop() ?? 'attachment')
         const ext = rawName.includes('.') ? rawName.split('.').pop() : ''
         const safeTitle = split.title.replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_').slice(0, 80)
-        const filename = safeTitle ? (ext ? `${safeTitle}.${ext}` : safeTitle) : rawName.replace(/^\d+-/, '')
+        const baseName = customName
+          ? customName.replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_').slice(0, 80)
+          : hasBoth ? `${safeTitle}_${i + 1}` : safeTitle
+        const filename = ext ? `${baseName}.${ext}` : baseName
         attachments.push({ filename, content, contentType })
       }
     } catch {

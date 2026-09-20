@@ -31,6 +31,8 @@ type Split = {
   last_reminder_sent_at: string | null
   receipt_url: string | null
   receipt_url_2: string | null
+  receipt_name: string | null
+  receipt_name_2: string | null
   split_participants: Participant[]
 }
 
@@ -122,7 +124,7 @@ export async function POST(request: Request) {
 
     const { data: splitData } = await supabase
       .from('expense_splits')
-      .select('id, title, total_amount, category, date, description, reminder_count, last_reminder_sent_at, receipt_url, receipt_url_2, split_participants(*)')
+      .select('id, title, total_amount, category, date, description, reminder_count, last_reminder_sent_at, receipt_url, receipt_url_2, receipt_name, receipt_name_2, split_participants(*)')
       .in('id', splitIds)
       .eq('created_by', user.id)
 
@@ -133,7 +135,7 @@ export async function POST(request: Request) {
 
     const { data: splitData } = await supabase
       .from('expense_splits')
-      .select('id, title, total_amount, category, date, description, reminder_count, last_reminder_sent_at, receipt_url, receipt_url_2, split_participants(*)')
+      .select('id, title, total_amount, category, date, description, reminder_count, last_reminder_sent_at, receipt_url, receipt_url_2, receipt_name, receipt_name_2, split_participants(*)')
       .eq('trip_id', trip_id)
       .eq('created_by', user.id)
 
@@ -198,8 +200,13 @@ export async function POST(request: Request) {
   // Pre-fetch all unique receipts across splits so we don't re-download per recipient
   const receiptCache = new Map<string, Attachment>()
   for (const split of splits) {
-    const urls = [split.receipt_url, split.receipt_url_2].filter(Boolean) as string[]
-    for (const url of urls) {
+    const slots = [
+      { url: split.receipt_url, customName: split.receipt_name },
+      { url: split.receipt_url_2, customName: split.receipt_name_2 },
+    ].filter(s => s.url) as { url: string; customName: string | null }[]
+    const hasBoth = slots.length === 2
+    for (let i = 0; i < slots.length; i++) {
+      const { url, customName } = slots[i]
       if (!receiptCache.has(url)) {
         try {
           const fileRes = await fetch(url)
@@ -209,7 +216,10 @@ export async function POST(request: Request) {
             const rawName = decodeURIComponent(url.split('/').pop() ?? 'attachment')
             const ext = rawName.includes('.') ? rawName.split('.').pop() : ''
             const safeTitle = split.title.replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_').slice(0, 80)
-            const filename = safeTitle ? (ext ? `${safeTitle}.${ext}` : safeTitle) : rawName.replace(/^\d+-/, '')
+            const baseName = customName
+              ? customName.replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '_').slice(0, 80)
+              : hasBoth ? `${safeTitle}_${i + 1}` : safeTitle
+            const filename = ext ? `${baseName}.${ext}` : baseName
             receiptCache.set(url, { filename, content, contentType })
           }
         } catch { /* continue without this attachment */ }

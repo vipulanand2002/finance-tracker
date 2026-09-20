@@ -6,9 +6,10 @@ import { format } from 'date-fns'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Loader2, Plus, Trash2, UserPlus, Paperclip, Upload, X } from 'lucide-react'
+import { Loader2, Plus, Trash2, UserPlus, Paperclip, Upload, X, Bold, List } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { EXPENSE_CATEGORIES } from '@/lib/constants'
 import { formatCurrency } from '@/lib/utils'
@@ -29,6 +30,8 @@ export interface EditingSplit {
   contact_id?: string | null
   receipt_url?: string | null
   receipt_url_2?: string | null
+  receipt_name?: string | null
+  receipt_name_2?: string | null
   card_id?: string | null
   split_participants: { participant_name: string; participant_email: string | null; amount_owed: number; is_paid: boolean }[]
 }
@@ -61,6 +64,9 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
   const [receiptUrl2, setReceiptUrl2] = useState('')
   const [receiptName2, setReceiptName2] = useState('')
   const [uploadingFile2, setUploadingFile2] = useState(false)
+  const [receiptCustomName, setReceiptCustomName] = useState('')
+  const [receiptCustomName2, setReceiptCustomName2] = useState('')
+  const descriptionRef = useRef<HTMLTextAreaElement>(null)
   const [friends, setFriends] = useState<Friend[]>([])
   const [myEmail, setMyEmail] = useState('')
   const [myName, setMyName] = useState('')
@@ -71,7 +77,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
   const discardRef = useRef(false)
   const originalRef = useRef<{
     title: string; totalAmount: string; category: string; description: string;
-    date: string; selectedTripId: string | null; selectedCardId: string | null; receiptUrl: string; receiptUrl2: string; participants: string
+    date: string; selectedTripId: string | null; selectedCardId: string | null; receiptUrl: string; receiptUrl2: string; receiptCustomName: string; receiptCustomName2: string; participants: string
   } | null>(null)
 
   useEffect(() => {
@@ -117,6 +123,8 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         setReceiptName2(editingSplit.receipt_url_2
           ? decodeURIComponent(editingSplit.receipt_url_2.split('/').pop() ?? '').replace(/^\d+-/, '')
           : '')
+        setReceiptCustomName(editingSplit.receipt_name ?? '')
+        setReceiptCustomName2(editingSplit.receipt_name_2 ?? '')
         setParticipants(editParticipants)
         originalRef.current = {
           title: editingSplit.title,
@@ -128,6 +136,8 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
           selectedCardId: editingSplit.card_id ?? null,
           receiptUrl: editingSplit.receipt_url ?? '',
           receiptUrl2: editingSplit.receipt_url_2 ?? '',
+          receiptCustomName: editingSplit.receipt_name ?? '',
+          receiptCustomName2: editingSplit.receipt_name_2 ?? '',
           participants: JSON.stringify(editParticipants),
         }
       } else {
@@ -155,6 +165,8 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         setReceiptName('')
         setReceiptUrl2('')
         setReceiptName2('')
+        setReceiptCustomName('')
+        setReceiptCustomName2('')
         setParticipants(initParticipants)
         originalRef.current = {
           title: initTitle,
@@ -166,6 +178,8 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
           selectedCardId: null,
           receiptUrl: '',
           receiptUrl2: '',
+          receiptCustomName: '',
+          receiptCustomName2: '',
           participants: JSON.stringify(initParticipants),
         }
       }
@@ -177,8 +191,8 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
     setDescription(''); setDate(format(new Date(), 'yyyy-MM-dd'))
     setParticipants([emptyParticipant(), emptyParticipant()])
     setSelectedTripId(null); setSelectedCardId(null)
-    setReceiptUrl(''); setReceiptName('')
-    setReceiptUrl2(''); setReceiptName2('')
+    setReceiptUrl(''); setReceiptName(''); setReceiptCustomName('')
+    setReceiptUrl2(''); setReceiptName2(''); setReceiptCustomName2('')
   }
 
   function splitEqually() {
@@ -212,6 +226,36 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
       setUploadingFile(false)
       e.target.value = ''
     }
+  }
+
+  function insertBold() {
+    const el = descriptionRef.current
+    if (!el) return
+    const { selectionStart: s, selectionEnd: e, value } = el
+    const selected = value.slice(s, e) || 'bold text'
+    const before = value.slice(0, s)
+    const after = value.slice(e)
+    const next = `${before}**${selected}**${after}`
+    setDescription(next)
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(s + 2, s + 2 + selected.length)
+    })
+  }
+
+  function insertBullet() {
+    const el = descriptionRef.current
+    if (!el) return
+    const { selectionStart: s, value } = el
+    const lineStart = value.lastIndexOf('\n', s - 1) + 1
+    const before = value.slice(0, lineStart)
+    const after = value.slice(lineStart)
+    const next = `${before}- ${after}`
+    setDescription(next)
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(s + 2, s + 2)
+    })
   }
 
   async function handleFileUpload2(e: React.ChangeEvent<HTMLInputElement>) {
@@ -272,6 +316,8 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         contact_id: contactId ?? editingSplit?.contact_id ?? null,
         receipt_url: receiptUrl || null,
         receipt_url_2: receiptUrl2 || null,
+        receipt_name: receiptCustomName.trim() || null,
+        receipt_name_2: receiptCustomName2.trim() || null,
         participants: validParticipants.map(p => ({
           name: p.name.trim(),
           email: p.email.trim() || undefined,
@@ -323,6 +369,8 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         selectedCardId !== orig.selectedCardId ||
         receiptUrl !== orig.receiptUrl ||
         receiptUrl2 !== orig.receiptUrl2 ||
+        receiptCustomName !== orig.receiptCustomName ||
+        receiptCustomName2 !== orig.receiptCustomName2 ||
         JSON.stringify(participants) !== orig.participants
       if (!hasChanges) { reset(); onClose(); return }
     }
@@ -371,7 +419,21 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
 
             <div className="col-span-2 space-y-1">
               <Label>Description</Label>
-              <Input placeholder="Optional note" value={description} onChange={e => setDescription(e.target.value)} />
+              <div className="rounded-lg border border-input focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 overflow-hidden">
+                <div className="flex items-center gap-0.5 border-b border-input px-2 py-1 bg-muted/40">
+                  <button type="button" onClick={insertBold} className="rounded px-1.5 py-0.5 text-xs font-bold text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">B</button>
+                  <button type="button" onClick={insertBullet} className="rounded px-1.5 py-0.5 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
+                    <List className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <Textarea
+                  ref={descriptionRef}
+                  placeholder="Optional note — supports **bold** and - bullet lists"
+                  value={description}
+                  onChange={e => setDescription(e.target.value)}
+                  className="min-h-[60px] resize-none border-0 rounded-none focus-visible:ring-0 focus-visible:border-0 bg-transparent"
+                />
+              </div>
             </div>
 
             {/* Attachments (up to 2) */}
@@ -379,14 +441,22 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
               <Label>Attachments <span className="text-muted-foreground font-normal text-xs">(up to 2 PDFs or images · sent with reminder emails)</span></Label>
               {/* Slot 1 */}
               {receiptUrl ? (
-                <div className="flex items-center gap-2 rounded-md border px-3 py-2">
-                  <Paperclip className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                  <a href={receiptUrl} target="_blank" rel="noopener noreferrer" className="flex-1 truncate text-xs text-primary hover:underline">
-                    {receiptName || 'Attachment 1'}
-                  </a>
-                  <button type="button" onClick={() => { setReceiptUrl(''); setReceiptName('') }} className="text-muted-foreground hover:text-destructive shrink-0">
-                    <X className="w-3.5 h-3.5" />
-                  </button>
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2 rounded-md border px-3 py-2">
+                    <Paperclip className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <a href={receiptUrl} target="_blank" rel="noopener noreferrer" className="flex-1 truncate text-xs text-primary hover:underline">
+                      {receiptCustomName.trim() || receiptName || 'Attachment 1'}
+                    </a>
+                    <button type="button" onClick={() => { setReceiptUrl(''); setReceiptName(''); setReceiptCustomName('') }} className="text-muted-foreground hover:text-destructive shrink-0">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <Input
+                    placeholder="Name this attachment (optional, e.g. Receipt)"
+                    value={receiptCustomName}
+                    onChange={e => setReceiptCustomName(e.target.value)}
+                    className="h-7 text-xs"
+                  />
                 </div>
               ) : (
                 <label className={`flex items-center gap-2 cursor-pointer rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:border-foreground transition-colors ${uploadingFile ? 'pointer-events-none opacity-60' : ''}`}>
@@ -399,14 +469,22 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
               {/* Slot 2 — only show once slot 1 is filled */}
               {receiptUrl && (
                 receiptUrl2 ? (
-                  <div className="flex items-center gap-2 rounded-md border px-3 py-2">
-                    <Paperclip className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                    <a href={receiptUrl2} target="_blank" rel="noopener noreferrer" className="flex-1 truncate text-xs text-primary hover:underline">
-                      {receiptName2 || 'Attachment 2'}
-                    </a>
-                    <button type="button" onClick={() => { setReceiptUrl2(''); setReceiptName2('') }} className="text-muted-foreground hover:text-destructive shrink-0">
-                      <X className="w-3.5 h-3.5" />
-                    </button>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2 rounded-md border px-3 py-2">
+                      <Paperclip className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                      <a href={receiptUrl2} target="_blank" rel="noopener noreferrer" className="flex-1 truncate text-xs text-primary hover:underline">
+                        {receiptCustomName2.trim() || receiptName2 || 'Attachment 2'}
+                      </a>
+                      <button type="button" onClick={() => { setReceiptUrl2(''); setReceiptName2(''); setReceiptCustomName2('') }} className="text-muted-foreground hover:text-destructive shrink-0">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <Input
+                      placeholder="Name this attachment (optional, e.g. Invoice)"
+                      value={receiptCustomName2}
+                      onChange={e => setReceiptCustomName2(e.target.value)}
+                      className="h-7 text-xs"
+                    />
                   </div>
                 ) : (
                   <label className={`flex items-center gap-2 cursor-pointer rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:border-foreground transition-colors ${uploadingFile2 ? 'pointer-events-none opacity-60' : ''}`}>

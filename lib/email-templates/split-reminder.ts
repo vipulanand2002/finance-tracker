@@ -2,6 +2,16 @@ function fmt(n: number) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
 }
 
+function mdToHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .split('\n')
+    .map(line => line.startsWith('- ') ? `<li style="margin:2px 0;">${line.slice(2)}</li>` : line)
+    .join('<br>')
+    .replace(/(<li[^>]*>.*?<\/li><br>)+/g, m => `<ul style="margin:4px 0;padding-left:16px;">${m.replace(/<br>/g, '')}</ul>`)
+}
+
 function capitalize(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
@@ -145,7 +155,7 @@ export function buildSplitReminderEmail(opts: {
                             <td style="vertical-align:top;">
                               <div style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:5px;">${split.title}</div>
                               <div style="font-size:12px;color:#64748b;margin-bottom:${split.description ? '3px' : '0'};">${split.category}&nbsp;&nbsp;·&nbsp;&nbsp;${dateStr}</div>
-                              ${split.description ? `<div style="font-size:12px;color:#94a3b8;">${split.description}</div>` : ''}
+                              ${split.description ? `<div style="font-size:12px;color:#94a3b8;">${mdToHtml(split.description)}</div>` : ''}
                             </td>
                             <td style="vertical-align:top;text-align:right;padding-left:16px;white-space:nowrap;">
                               <div style="font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Total Bill</div>

@@ -244,6 +244,8 @@ export async function PATCH(request: Request) {
       contact_id: string | null
       receipt_url: string | null
       receipt_url_2: string | null
+      receipt_name: string | null
+      receipt_name_2: string | null
     }
 
     // Update split metadata
@@ -259,6 +261,8 @@ export async function PATCH(request: Request) {
         contact_id: splitFields.contact_id,
         receipt_url: splitFields.receipt_url ?? null,
         receipt_url_2: splitFields.receipt_url_2 ?? null,
+        receipt_name: splitFields.receipt_name ?? null,
+        receipt_name_2: splitFields.receipt_name_2 ?? null,
         card_id: card_id ?? null,
       })
       .eq('id', id!)
