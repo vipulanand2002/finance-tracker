@@ -187,13 +187,16 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       const url = transaction ? `/api/transactions?id=${transaction.id}` : '/api/transactions'
       const method = transaction ? 'PUT' : 'POST'
       const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      if (!res.ok) throw new Error('Failed to save')
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error ?? 'Failed to save')
+      }
       localStorage.setItem(DATE_KEY, form.date)
       toast.success(transaction ? 'Transaction updated' : 'Transaction added')
       onSaved()
       onClose()
-    } catch {
-      toast.error('Failed to save transaction')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save transaction')
     } finally {
       setSaving(false)
     }
