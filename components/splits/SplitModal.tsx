@@ -39,7 +39,7 @@ export interface EditingSplit {
 interface Props {
   open: boolean
   onClose: () => void
-  onSaved: () => void
+  onSaved: (splitId?: string) => void
   defaultTitle?: string
   defaultAmount?: string | number
   tripId?: string | null
@@ -341,7 +341,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
       if (!res.ok) throw new Error(data.error ?? 'Failed')
       toast.success(editingSplit ? 'Split updated!' : 'Split created!')
       reset()
-      onSaved()
+      onSaved(editingSplit ? undefined : data.id)
       onClose()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : (editingSplit ? 'Failed to update split' : 'Failed to create split'))

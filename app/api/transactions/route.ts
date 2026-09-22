@@ -109,6 +109,7 @@ export async function PUT(request: Request) {
     receipt_url: body.receipt_url ?? null,
     trip_id: body.trip_id ?? null,
     card_id: body.card_id ?? null,
+    split_id: body.split_id ?? null,
   }
   if (body.contact_id !== undefined) patch.contact_id = body.contact_id ?? null
   if (body.contact_ids !== undefined) patch.contact_ids = body.contact_ids ?? []
@@ -120,6 +121,25 @@ export async function PUT(request: Request) {
     ;({ data, error } = await supabase.from('transactions').update(patch).eq('id', id).eq('user_id', user.id).select().single())
   }
 
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json(data)
+}
+
+export async function PATCH(request: Request) {
+  const { supabase, user } = await getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { searchParams } = new URL(request.url)
+  const id = searchParams.get('id')
+  if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+
+  const body = await request.json()
+  const patch: Record<string, unknown> = {}
+  if (body.split_id !== undefined) patch.split_id = body.split_id ?? null
+
+  if (Object.keys(patch).length === 0) return NextResponse.json({ error: 'Nothing to patch' }, { status: 400 })
+
+  const { data, error } = await supabase.from('transactions').update(patch).eq('id', id).eq('user_id', user.id).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(data)
 }

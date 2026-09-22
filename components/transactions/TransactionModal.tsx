@@ -60,6 +60,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
   const [trips, setTrips] = useState<Trip[]>([])
   const [contacts, setContacts] = useState<Contact[]>([])
   const [splitOpen, setSplitOpen] = useState(false)
+  const [linkedSplitId, setLinkedSplitId] = useState<string | null>(null)
   const [cardStatements, setCardStatements] = useState<CardStatement[]>([])
   const [selectedCycleId, setSelectedCycleId] = useState<string>('none')
   const [expenseCategories, setExpenseCategories] = useState<string[]>([...EXPENSE_CATEGORIES])
@@ -127,6 +128,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       originalFormRef.current = empty
     }
     setAddContactKey(k => k + 1)
+    setLinkedSplitId(transaction?.split_id ?? null)
   }, [transaction, open, defaultTripId, defaultCardId])
 
   const categories = form.type === 'income'
@@ -183,6 +185,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         // Full contact list (requires contact_ids uuid[] column in DB)
         contact_ids: form.contact_ids,
         card_id: form.card_id || null,
+        split_id: linkedSplitId || null,
       }
       const url = transaction ? `/api/transactions?id=${transaction.id}` : '/api/transactions'
       const method = transaction ? 'PUT' : 'POST'
@@ -420,16 +423,34 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
 
             {/* Split — always visible for expense transactions */}
             {form.type === 'expense' && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="w-full text-xs"
-                onClick={() => setSplitOpen(true)}
-              >
-                <SplitSquareVertical className="w-3.5 h-3.5 mr-1.5" />
-                Split this expense
-              </Button>
+              linkedSplitId ? (
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 flex items-center gap-1.5 text-xs text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-md px-3 py-2">
+                    <SplitSquareVertical className="w-3.5 h-3.5 shrink-0" />
+                    Split linked
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="text-xs text-muted-foreground h-8 px-2"
+                    onClick={() => setSplitOpen(true)}
+                  >
+                    Edit
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full text-xs"
+                  onClick={() => setSplitOpen(true)}
+                >
+                  <SplitSquareVertical className="w-3.5 h-3.5 mr-1.5" />
+                  Split this expense
+                </Button>
+              )
             )}
 
             {trips.length > 0 && (
@@ -552,7 +573,20 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
           <SplitModal
             open={splitOpen}
             onClose={() => setSplitOpen(false)}
-            onSaved={() => setSplitOpen(false)}
+            onSaved={async (splitId) => {
+              setSplitOpen(false)
+              if (!splitId) return
+              setLinkedSplitId(splitId)
+              // If editing an existing transaction, immediately persist the link
+              if (transaction?.id) {
+                await fetch(`/api/transactions?id=${transaction.id}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ split_id: splitId }),
+                })
+                onSaved()
+              }
+            }}
             defaultTitle={form.description || undefined}
             defaultAmount={form.amount || undefined}
             contactId={form.contact_ids[0] ?? null}

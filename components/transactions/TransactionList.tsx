@@ -19,7 +19,7 @@ import {
 import {
   Plus, Search, MoreHorizontal, Pencil, Trash2, FileUp, AlertTriangle,
   ChevronDown, ChevronRight, CreditCard, Smartphone, Loader2, BookUser,
-  Building2, ArrowUpDown,
+  Building2, ArrowUpDown, SplitSquareVertical,
 } from 'lucide-react'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
 import { formatCurrency } from '@/lib/utils'
@@ -257,6 +257,14 @@ export default function TransactionList() {
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm">{t.description ?? '—'}</span>
           {t.is_recurring && <Badge variant="secondary" className="text-xs">Recurring</Badge>}
+          {t.split_id && (
+            <a href="/splits">
+              <Badge variant="secondary" className="text-xs gap-1 cursor-pointer hover:bg-primary/10 transition-colors">
+                <SplitSquareVertical className="w-3 h-3" />
+                Split
+              </Badge>
+            </a>
+          )}
           {t.contacts && (
             <Badge variant="outline" className="text-xs gap-1 text-muted-foreground">
               <BookUser className="w-3 h-3" />
@@ -296,6 +304,11 @@ export default function TransactionList() {
             <span className="inline-flex items-center gap-1 text-xs text-primary">
               <CreditCard className="w-3 h-3" />{cardNameMap.get(t.card_id)}
             </span>
+          )}
+          {t.split_id && (
+            <a href="/splits" className="inline-flex items-center gap-0.5 text-xs text-muted-foreground">
+              · <SplitSquareVertical className="inline w-3 h-3 mx-0.5" /> Split
+            </a>
           )}
           {t.contacts && (
             <span className="text-xs text-muted-foreground">
