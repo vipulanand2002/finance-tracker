@@ -354,7 +354,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
             {/* Multi-contact picker */}
             {contacts.length > 0 && (
               <div className="space-y-1.5">
-                <Label>Contacts <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
+                <Label>Friends <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
 
                 {/* Selected contact chips */}
                 {form.contact_ids.length > 0 && (
@@ -389,7 +389,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                     }}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder={form.contact_ids.length === 0 ? 'Tag a contact…' : 'Add another contact…'} />
+                      <SelectValue placeholder={form.contact_ids.length === 0 ? 'Tag a friend…' : 'Add another friend…'} />
                     </SelectTrigger>
                     <SelectContent>
                       {availableContacts.map(c => (

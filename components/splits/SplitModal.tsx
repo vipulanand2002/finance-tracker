@@ -341,6 +341,26 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Failed')
       toast.success(editingSplit ? 'Split updated!' : 'Split created!')
+
+      // Silently add new participants as friends (fire-and-forget)
+      if (!editingSplit) {
+        const knownEmails = new Set(friends.map(f => f.email?.toLowerCase()).filter(Boolean))
+        const knownNames = new Set(friends.map(f => f.name.toLowerCase()))
+        const newPeople = validParticipants.filter(p => {
+          if (p.email && p.email.toLowerCase() === myEmail.toLowerCase()) return false
+          if (p.email && knownEmails.has(p.email.toLowerCase())) return false
+          if (!p.email && knownNames.has(p.name.toLowerCase())) return false
+          return true
+        })
+        newPeople.forEach(p => {
+          fetch('/api/friends', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: p.name, email: p.email || undefined }),
+          }).catch(() => {})
+        })
+      }
+
       reset()
       onSaved(editingSplit ? undefined : data.id)
       onClose()
@@ -358,24 +378,8 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
 
   function handleCloseAttempt() {
     if (saving) return
-    const orig = originalRef.current
-    if (orig) {
-      const hasChanges =
-        title !== orig.title ||
-        totalAmount !== orig.totalAmount ||
-        category !== orig.category ||
-        description !== orig.description ||
-        date !== orig.date ||
-        selectedTripId !== orig.selectedTripId ||
-        selectedCardId !== orig.selectedCardId ||
-        receiptUrl !== orig.receiptUrl ||
-        receiptUrl2 !== orig.receiptUrl2 ||
-        receiptCustomName !== orig.receiptCustomName ||
-        receiptCustomName2 !== orig.receiptCustomName2 ||
-        JSON.stringify(participants) !== orig.participants
-      if (!hasChanges) { reset(); onClose(); return }
-    }
-    doSubmit()
+    reset()
+    onClose()
   }
 
   return (
@@ -646,10 +650,14 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
             )}
           </div>
 
-          <DialogFooter className="flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-xs text-muted-foreground order-last sm:order-first">Closes and saves automatically</p>
-            <Button type="button" variant="outline" onClick={() => { reset(); onClose() }}>
-              {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{editingSplit ? 'Saving…' : 'Creating…'}</> : 'Cancel'}
+          <DialogFooter className="flex-row gap-2 sm:justify-end">
+            <Button type="button" variant="outline" onClick={() => { reset(); onClose() }} disabled={saving}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={saving}>
+              {saving
+                ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{editingSplit ? 'Saving…' : 'Creating…'}</>
+                : editingSplit ? 'Save changes' : 'Create split'}
             </Button>
           </DialogFooter>
         </form>
