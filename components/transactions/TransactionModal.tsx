@@ -212,25 +212,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
 
   function handleCloseAttempt() {
     if (saving) return
-    const orig = originalFormRef.current
-    if (orig) {
-      const sortedCurrent = [...form.contact_ids].sort().join(',')
-      const sortedOrig = [...orig.contact_ids].sort().join(',')
-      const hasChanges =
-        form.amount !== orig.amount ||
-        form.type !== orig.type ||
-        form.category !== orig.category ||
-        form.description !== orig.description ||
-        form.date !== orig.date ||
-        form.is_recurring !== orig.is_recurring ||
-        form.is_discrete !== orig.is_discrete ||
-        form.receipt_url !== orig.receipt_url ||
-        form.trip_id !== orig.trip_id ||
-        form.card_id !== orig.card_id ||
-        sortedCurrent !== sortedOrig
-      if (!hasChanges) { onClose(); return }
-    }
-    doSubmit()
+    onClose()
   }
 
   const availableContacts = contacts.filter(c => !form.contact_ids.includes(c.id))
@@ -549,10 +531,12 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
               </div>
             )}
 
-            <DialogFooter className="flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs text-muted-foreground order-last sm:order-first">Closes and saves automatically</p>
-              <Button type="button" variant="outline" onClick={onClose}>
-                {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Saving…</> : 'Cancel'}
+            <DialogFooter className="flex-row gap-2 sm:justify-end">
+              <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saving}>
+                {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Saving…</> : transaction ? 'Save changes' : 'Add transaction'}
               </Button>
             </DialogFooter>
           </form>
@@ -577,18 +561,21 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
               setSplitOpen(false)
               if (!splitId) return
               setLinkedSplitId(splitId)
-              // If editing an existing transaction, immediately persist the link
               if (transaction?.id) {
+                // Existing transaction — patch split_id then close
                 await fetch(`/api/transactions?id=${transaction.id}`, {
                   method: 'PATCH',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ split_id: splitId }),
                 })
-                onSaved()
               }
+              // Split API already created a transaction for the creator; close without duplication
+              onSaved()
+              onClose()
             }}
             defaultTitle={form.description || undefined}
             defaultAmount={form.amount || undefined}
+            defaultDate={form.date}
             contactId={form.contact_ids[0] ?? null}
             defaultParticipants={selectedContacts.length > 0
               ? selectedContacts.map(c => ({ name: c.name, email: c.email ?? '' }))

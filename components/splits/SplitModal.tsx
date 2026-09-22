@@ -45,12 +45,13 @@ interface Props {
   tripId?: string | null
   contactId?: string | null
   defaultParticipants?: { name: string; email: string }[]
+  defaultDate?: string
   editingSplit?: EditingSplit | null
 }
 
 const emptyParticipant = (): Participant => ({ name: '', email: '', amount: '' })
 
-export default function SplitModal({ open, onClose, onSaved, defaultTitle, defaultAmount, tripId, contactId, defaultParticipants, editingSplit }: Props) {
+export default function SplitModal({ open, onClose, onSaved, defaultTitle, defaultAmount, defaultDate, tripId, contactId, defaultParticipants, editingSplit }: Props) {
   const [title, setTitle] = useState('')
   const [totalAmount, setTotalAmount] = useState('')
   const [category, setCategory] = useState('Food & Dining')
@@ -145,7 +146,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         const initTitle = defaultTitle ?? ''
         const initAmount = defaultAmount != null ? String(defaultAmount) : ''
         const initCategory = 'Food & Dining'
-        const initDate = format(new Date(), 'yyyy-MM-dd')
+        const initDate = defaultDate ?? format(new Date(), 'yyyy-MM-dd')
         const initTripId = tripId ?? null
         let initParticipants: Participant[]
         if (defaultParticipants && defaultParticipants.length > 0) {
@@ -184,7 +185,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         }
       }
     }
-  }, [open, editingSplit, defaultTitle, defaultAmount, defaultParticipants, tripId])
+  }, [open, editingSplit, defaultTitle, defaultAmount, defaultDate, defaultParticipants, tripId])
 
   function reset() {
     setTitle(''); setTotalAmount(''); setCategory('Food & Dining')
