@@ -54,11 +54,35 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await request.json()
-  const { data, error } = await supabase
-    .from('transactions')
-    .insert({ ...body, user_id: user.id })
-    .select()
-    .single()
+
+  // Explicit column list so unrecognised fields never reach Supabase
+  // (contact_id / contact_ids require migration 039 — safe to include; Supabase ignores
+  //  null values for missing columns and the migration adds them if not yet applied)
+  const payload: Record<string, unknown> = {
+    user_id: user.id,
+    amount: body.amount,
+    type: body.type,
+    category: body.category,
+    description: body.description ?? null,
+    date: body.date,
+    is_recurring: body.is_recurring ?? false,
+    is_discrete: body.is_discrete ?? false,
+    receipt_url: body.receipt_url ?? null,
+    trip_id: body.trip_id ?? null,
+    card_id: body.card_id ?? null,
+    split_id: body.split_id ?? null,
+  }
+  // Only include contact columns once the schema has them (graceful degradation)
+  if (body.contact_id !== undefined) payload.contact_id = body.contact_id ?? null
+  if (body.contact_ids !== undefined) payload.contact_ids = body.contact_ids ?? []
+
+  // First attempt with all fields; if schema cache error, retry without contact columns
+  let { data, error } = await supabase.from('transactions').insert(payload).select().single()
+  if (error?.message?.includes('contact_id')) {
+    delete payload.contact_id
+    delete payload.contact_ids
+    ;({ data, error } = await supabase.from('transactions').insert(payload).select().single())
+  }
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(data, { status: 201 })
@@ -73,13 +97,28 @@ export async function PUT(request: Request) {
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
   const body = await request.json()
-  const { data, error } = await supabase
-    .from('transactions')
-    .update(body)
-    .eq('id', id)
-    .eq('user_id', user.id)
-    .select()
-    .single()
+
+  const patch: Record<string, unknown> = {
+    amount: body.amount,
+    type: body.type,
+    category: body.category,
+    description: body.description ?? null,
+    date: body.date,
+    is_recurring: body.is_recurring ?? false,
+    is_discrete: body.is_discrete ?? false,
+    receipt_url: body.receipt_url ?? null,
+    trip_id: body.trip_id ?? null,
+    card_id: body.card_id ?? null,
+  }
+  if (body.contact_id !== undefined) patch.contact_id = body.contact_id ?? null
+  if (body.contact_ids !== undefined) patch.contact_ids = body.contact_ids ?? []
+
+  let { data, error } = await supabase.from('transactions').update(patch).eq('id', id).eq('user_id', user.id).select().single()
+  if (error?.message?.includes('contact_id')) {
+    delete patch.contact_id
+    delete patch.contact_ids
+    ;({ data, error } = await supabase.from('transactions').update(patch).eq('id', id).eq('user_id', user.id).select().single())
+  }
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(data)
