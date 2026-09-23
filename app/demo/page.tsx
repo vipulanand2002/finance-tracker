@@ -10,7 +10,7 @@ import {
   TrendingUp, TrendingDown, Wallet, PiggyBank, Scale,
   Receipt, Users, MessageCircle, Bot, Tag,
   CreditCard, Bell, ShieldCheck, Plane, Camera,
-  ArrowRight, Check, BarChart3, Sparkles,
+  ArrowRight, Check, BarChart3, Sparkles, ArrowUpRight, ArrowDownLeft,
 } from 'lucide-react'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 
@@ -44,17 +44,18 @@ const CAT_COLORS: Record<string, string> = {
   'Salary': '#22c55e',
   'Freelance': '#10b981',
   'Subscriptions': '#64748b',
+  'Travel': '#06b6d4',
 }
 
 const transactions = [
-  { id: 1, description: 'Swiggy — Dinner', category: 'Food & Dining', amount: -480, date: 'Jul 25' },
-  { id: 2, description: 'Salary — Infosys', category: 'Salary', amount: 85000, date: 'Jul 24' },
-  { id: 3, description: 'Uber — Office', category: 'Transportation', amount: -220, date: 'Jul 24' },
-  { id: 4, description: 'Netflix', category: 'Subscriptions', amount: -649, date: 'Jul 23' },
-  { id: 5, description: 'Zepto — Groceries', category: 'Shopping', amount: -1850, date: 'Jul 22' },
-  { id: 6, description: 'Freelance — UI Project', category: 'Freelance', amount: 15000, date: 'Jul 20' },
-  { id: 7, description: 'Electricity Bill', category: 'Utilities', amount: -1200, date: 'Jul 19' },
-  { id: 8, description: 'PVR Cinemas', category: 'Entertainment', amount: -700, date: 'Jul 18' },
+  { id: 1, description: 'Room in Anjuna', category: 'Travel', amount: -15225, date: 'Sep 8', card: 'Amazon Pay ••1234', split: true },
+  { id: 2, description: 'Swiggy — Dinner', category: 'Food & Dining', amount: -480, date: 'Jul 25', card: null, split: false },
+  { id: 3, description: 'Salary — Infosys', category: 'Salary', amount: 85000, date: 'Jul 24', card: null, split: false },
+  { id: 4, description: 'Uber — Office', category: 'Transportation', amount: -220, date: 'Jul 24', card: 'HDFC Regalia ••5678', split: false },
+  { id: 5, description: 'Netflix', category: 'Subscriptions', amount: -649, date: 'Jul 23', card: null, split: false },
+  { id: 6, description: 'Monster for everyone', category: 'Food & Dining', amount: -610, date: 'Sep 9', card: 'Amazon Pay ••1234', split: false },
+  { id: 7, description: 'Zepto — Groceries', category: 'Shopping', amount: -1850, date: 'Jul 22', card: null, split: false },
+  { id: 8, description: 'Freelance — UI Project', category: 'Freelance', amount: 15000, date: 'Jul 20', card: null, split: false },
 ]
 
 const splits = [
@@ -63,7 +64,7 @@ const splits = [
     title: 'Goa Trip — Hotel',
     totalAmount: 24000,
     category: 'Travel',
-    date: 'Jul 20',
+    date: 'Sep 8',
     participants: [
       { name: 'You', amount: 6000, paid: true, initials: 'YO' },
       { name: 'Rahul', amount: 6000, paid: true, initials: 'RK' },
@@ -111,25 +112,41 @@ const budgets = [
   { category: 'Shopping', limit: 5000, spent: 2950, color: '#ec4899' },
 ]
 
+const tripMembers = [
+  { name: 'You', email: 'you@example.com', spent: 15225, pct: 72, splits: 6000, direct: 9225 },
+  { name: 'Rahul', email: 'rahul@example.com', spent: 3200, pct: 15, splits: 800, direct: 2400 },
+  { name: 'Priya', email: null, spent: 0, pct: 0, splits: 0, direct: 0, owes: 6000 },
+  { name: 'Ankit', email: null, spent: 0, pct: 0, splits: 0, direct: 0, owes: 6000 },
+]
+
+const balances = [
+  { name: 'Priya Sharma', email: 'priya@example.com', net: 6000, splitOwed: 6000, txnOwed: 0 },
+  { name: 'Ankit Verma', email: null, net: 6000, splitOwed: 6000, txnOwed: 0 },
+  { name: 'Rahul Kumar', email: 'rahul@example.com', net: 3200, splitOwed: 800, txnOwed: 2400 },
+  { name: 'Sneha Mehta', email: 'sneha@example.com', net: -800, splitOwed: 0, txnOwed: 0 },
+]
+
 const features = [
-  { icon: BarChart3, title: 'Smart Dashboard', desc: 'All-time balance, monthly KPIs, and spending trends in one view.', color: 'text-blue-500' },
-  { icon: TrendingUp, title: 'Daily / Weekly / Monthly Charts', desc: 'Switch between granular daily views and 6-month trend lines.', color: 'text-emerald-500' },
+  { icon: BarChart3, title: 'Smart Dashboard', desc: 'All-time balance, monthly KPIs, and spending trends at a glance.', color: 'text-blue-500' },
+  { icon: TrendingUp, title: 'Spending Charts', desc: 'Daily, weekly, and 6-month trend lines with category breakdowns.', color: 'text-emerald-500' },
   { icon: Users, title: 'Expense Splits', desc: "Split bills with friends, track who's paid, send reminders.", color: 'text-violet-500' },
-  { icon: MessageCircle, title: 'Friends Chat', desc: 'Real-time chat with emoji — split cards auto-appear in conversation.', color: 'text-pink-500' },
+  { icon: Scale, title: 'Balances', desc: 'Net balance per friend across all splits and tagged transactions.', color: 'text-teal-500' },
+  { icon: Plane, title: 'Trip Tracking', desc: 'Group travel with per-member spending, shared splits, and chat.', color: 'text-orange-500' },
+  { icon: MessageCircle, title: 'Friends Chat', desc: 'Real-time chat — split cards auto-appear in conversations.', color: 'text-pink-500' },
   { icon: Bot, title: 'AI Assistant', desc: 'Ask anything about your finances. Groq-powered spending insights.', color: 'text-amber-500' },
-  { icon: Camera, title: 'Receipt Scanner', desc: 'Photograph a receipt and AI auto-fills amount, category, and date.', color: 'text-cyan-500' },
-  { icon: Plane, title: 'Trip Budgets', desc: 'Group travel with shared expense tracking and private spends.', color: 'text-orange-500' },
+  { icon: Camera, title: 'Receipt Scanner', desc: 'Photograph a receipt — AI auto-fills amount, category, and date.', color: 'text-cyan-500' },
+  { icon: CreditCard, title: 'Credit Card Tracking', desc: 'Tag any transaction with a card, track statements per cycle.', color: 'text-indigo-500' },
   { icon: Bell, title: 'Push Notifications', desc: 'Instant alerts when friends add you to a split or mark you paid.', color: 'text-red-500' },
   { icon: Tag, title: 'Custom Categories', desc: 'Add, rename, or delete expense and income categories any time.', color: 'text-teal-500' },
-  { icon: CreditCard, title: 'Credit Card Mode', desc: 'Toggle Cards-On/Off to see spending with or without card repayments.', color: 'text-indigo-500' },
   { icon: ShieldCheck, title: 'Secure by Default', desc: 'Row-level security on every table — your data is only yours.', color: 'text-green-500' },
-  { icon: Sparkles, title: 'Works Offline (PWA)', desc: 'Install as a native app on mobile — it works without internet too.', color: 'text-yellow-500' },
+  { icon: Sparkles, title: 'Works Offline (PWA)', desc: 'Install as a native app on mobile — works without internet.', color: 'text-yellow-500' },
+  { icon: PiggyBank, title: 'Budget Goals', desc: 'Set per-category budgets and get warned when you overspend.', color: 'text-lime-500' },
 ]
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function fmt(n: number) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(Math.abs(n))
 }
 
 function fmtK(n: number) {
@@ -157,7 +174,6 @@ function StatCard({ title, value, sub, icon: Icon, iconClass, positive }: {
 function DemoSection() {
   return (
     <div className="space-y-4">
-      {/* Net balance */}
       <div className="rounded-xl border-2 border-emerald-500/40 bg-card p-4 sm:p-5 flex items-center justify-between gap-4">
         <div className="min-w-0">
           <p className="text-sm font-medium text-muted-foreground">Net Account Balance</p>
@@ -167,7 +183,6 @@ function DemoSection() {
         <Scale className="w-8 h-8 sm:w-10 sm:h-10 opacity-20 text-emerald-500 shrink-0" />
       </div>
 
-      {/* 4 KPI cards */}
       <div className="grid grid-cols-2 gap-3">
         <StatCard title="Income This Month" value={fmt(85000)} sub="Total received" icon={TrendingUp} iconClass="text-emerald-500" positive={true} />
         <StatCard title="Expenses This Month" value={fmt(42350)} sub="Total spent" icon={TrendingDown} iconClass="text-red-500" positive={false} />
@@ -175,7 +190,6 @@ function DemoSection() {
         <StatCard title="Savings Rate" value="50.2%" sub="Great job!" icon={PiggyBank} iconClass="text-emerald-500" positive={true} />
       </div>
 
-      {/* Charts */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="rounded-xl border bg-card p-4">
           <p className="text-sm font-semibold mb-3">6-Month Trend</p>
@@ -218,7 +232,6 @@ function DemoSection() {
         </div>
       </div>
 
-      {/* Budget progress */}
       <div className="rounded-xl border bg-card p-4">
         <p className="text-sm font-semibold mb-3">Budget Progress — July</p>
         <div className="space-y-3">
@@ -234,10 +247,7 @@ function DemoSection() {
                   </span>
                 </div>
                 <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all"
-                    style={{ width: `${pct}%`, background: over ? '#ef4444' : b.color }}
-                  />
+                  <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: over ? '#ef4444' : b.color }} />
                 </div>
               </div>
             )
@@ -253,26 +263,35 @@ function TransactionsSection() {
     <div className="rounded-xl border bg-card overflow-hidden">
       <div className="px-4 py-3 border-b flex items-center justify-between">
         <p className="font-semibold text-sm">Recent Transactions</p>
-        <span className="text-xs text-muted-foreground">July 2026</span>
+        <span className="text-xs text-muted-foreground">Sep / Jul 2026</span>
       </div>
       <div className="divide-y">
         {transactions.map(t => {
           const color = CAT_COLORS[t.category] ?? '#94a3b8'
           return (
             <div key={t.id} className="flex items-center gap-3 px-4 py-3">
-              {/* Category colour dot */}
-              <div
-                className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
-                style={{ background: color + '22' }}
-              >
+              <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: color + '22' }}>
                 <div className="w-2.5 h-2.5 rounded-full" style={{ background: color }} />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate">{t.description}</p>
-                <p className="text-xs text-muted-foreground truncate">{t.category} · {t.date}</p>
+                <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                  <p className="text-xs text-muted-foreground">{t.category} · {t.date}</p>
+                  {t.card && (
+                    <span className="flex items-center gap-0.5 text-[10px] text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950 border border-indigo-200 dark:border-indigo-800 rounded px-1.5 py-0.5">
+                      <CreditCard className="w-2.5 h-2.5" />
+                      {t.card}
+                    </span>
+                  )}
+                  {t.split && (
+                    <span className="text-[10px] text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-950 border border-violet-200 dark:border-violet-800 rounded px-1.5 py-0.5">
+                      Split
+                    </span>
+                  )}
+                </div>
               </div>
-              <p className={`text-sm font-semibold shrink-0 ${t.amount > 0 ? 'text-emerald-600' : ''}`}>
-                {t.amount > 0 ? '+' : ''}{fmt(t.amount)}
+              <p className={`text-sm font-semibold shrink-0 ${t.amount > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                {t.amount > 0 ? '+' : '-'}{fmt(t.amount)}
               </p>
             </div>
           )
@@ -320,6 +339,143 @@ function SplitsSection() {
   )
 }
 
+function TripsSection() {
+  const totalSpent = tripMembers.reduce((s, m) => s + m.spent, 0)
+  return (
+    <div className="space-y-4">
+      {/* Trip card */}
+      <div className="rounded-xl overflow-hidden border">
+        <div className="relative h-36 bg-gradient-to-br from-violet-500 to-purple-700 flex flex-col justify-end p-4">
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+          <div className="relative">
+            <p className="text-white text-lg font-bold">Goa Trip 2026</p>
+            <p className="text-white/70 text-xs mt-0.5">Sep 8 – Sep 12 · 5 days</p>
+          </div>
+        </div>
+        <div className="bg-card p-4 grid grid-cols-3 gap-3 text-center text-sm border-b">
+          <div>
+            <p className="text-xs text-muted-foreground">Total Spent</p>
+            <p className="font-bold text-red-600 mt-0.5">{fmt(totalSpent)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Members</p>
+            <p className="font-bold mt-0.5">{tripMembers.length}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Splits</p>
+            <p className="font-bold mt-0.5">2</p>
+          </div>
+        </div>
+
+        {/* Members tab */}
+        <div className="bg-card p-4 space-y-3">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Members — Spending</p>
+          {tripMembers.map(m => {
+            const pct = totalSpent > 0 ? (m.spent / totalSpent) * 100 : 0
+            return (
+              <div key={m.name} className="rounded-lg border p-3 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="w-7 h-7 rounded-full bg-primary/15 text-primary flex items-center justify-center font-semibold text-xs shrink-0">
+                      {m.name.charAt(0)}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{m.name === 'You' ? <span>{m.name} <span className="text-muted-foreground font-normal text-xs">(you)</span></span> : m.name}</p>
+                      {m.email && <p className="text-xs text-muted-foreground truncate">{m.email}</p>}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    {m.spent > 0
+                      ? <p className="text-sm font-bold text-red-600">{fmt(m.spent)}</p>
+                      : <p className="text-sm text-muted-foreground">—</p>}
+                    {m.spent > 0 && <p className="text-[10px] text-muted-foreground">{Math.round(pct)}% of trip</p>}
+                  </div>
+                </div>
+                {m.spent > 0 && (
+                  <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                    <div className="h-full bg-primary/70 rounded-full" style={{ width: `${pct}%` }} />
+                  </div>
+                )}
+                {'owes' in m && m.owes && m.owes > 0 && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">Owes: <span className="font-medium">{fmt(m.owes)}</span></p>
+                )}
+                {m.spent > 0 && (
+                  <div className="flex gap-4 text-xs text-muted-foreground">
+                    {m.splits > 0 && <span>Splits: <span className="font-medium text-foreground">{fmt(m.splits)}</span></span>}
+                    {m.direct > 0 && <span>Direct: <span className="font-medium text-foreground">{fmt(m.direct)}</span></span>}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function BalancesSection() {
+  const owedToYou = balances.filter(b => b.net > 0).reduce((s, b) => s + b.net, 0)
+  const youOwe = balances.filter(b => b.net < 0).reduce((s, b) => s + Math.abs(b.net), 0)
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-xl border bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 px-4 py-3">
+          <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">Friends owe you</p>
+          <p className="text-xl font-bold text-emerald-700 dark:text-emerald-300 mt-0.5">{fmt(owedToYou)}</p>
+        </div>
+        <div className="rounded-xl border bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800 px-4 py-3">
+          <p className="text-xs text-blue-700 dark:text-blue-300 font-medium">You owe friends</p>
+          <p className="text-xl font-bold text-blue-700 dark:text-blue-300 mt-0.5">{fmt(youOwe)}</p>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        {balances.map(b => (
+          <div key={b.name} className="rounded-xl border bg-card p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="w-9 h-9 rounded-full bg-muted flex items-center justify-center font-semibold text-sm shrink-0">
+                  {b.name.charAt(0)}
+                </span>
+                <div className="min-w-0">
+                  <p className="font-medium text-sm truncate">{b.name}</p>
+                  {b.email && <p className="text-xs text-muted-foreground truncate">{b.email}</p>}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {b.net > 0 ? (
+                  <div className="text-right">
+                    <div className="flex items-center gap-1 text-emerald-600 font-semibold text-sm">
+                      <ArrowUpRight className="w-3.5 h-3.5" />
+                      {fmt(b.net)}
+                    </div>
+                    <p className="text-xs text-muted-foreground">owes you</p>
+                  </div>
+                ) : (
+                  <div className="text-right">
+                    <div className="flex items-center gap-1 text-blue-600 font-semibold text-sm">
+                      <ArrowDownLeft className="w-3.5 h-3.5" />
+                      {fmt(Math.abs(b.net))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">you owe</p>
+                  </div>
+                )}
+              </div>
+            </div>
+            {(b.splitOwed > 0 || b.txnOwed > 0) && (
+              <div className="mt-2 pt-2 border-t flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
+                {b.splitOwed > 0 && <span>Splits: <span className="font-medium text-foreground">{fmt(b.splitOwed)}</span></span>}
+                {b.txnOwed > 0 && <span>Expenses: <span className="font-medium text-foreground">{fmt(b.txnOwed)}</span></span>}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function ChatSection() {
   return (
     <div className="rounded-xl border bg-card overflow-hidden flex flex-col" style={{ height: '460px' }}>
@@ -327,7 +483,6 @@ function ChatSection() {
         <div className="w-8 h-8 rounded-full bg-violet-500/20 flex items-center justify-center text-xs font-bold text-violet-600 shrink-0">RK</div>
         <p className="text-sm font-semibold">Rahul Kumar</p>
       </div>
-
       <div className="flex-1 overflow-y-auto px-3 sm:px-4 py-3 space-y-3">
         {chatMessages.map(m => (
           <div key={m.id} className={`flex ${m.from === 'me' ? 'justify-end' : 'justify-start'}`}>
@@ -354,7 +509,6 @@ function ChatSection() {
           </div>
         ))}
       </div>
-
       <div className="px-3 sm:px-4 py-3 border-t flex gap-2 shrink-0">
         <div className="flex-1 rounded-full bg-muted px-3 py-2 text-sm text-muted-foreground">Type a message…</div>
         <button className="w-8 h-8 rounded-full bg-primary flex items-center justify-center shrink-0">
@@ -407,8 +561,10 @@ const TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
   { id: 'transactions', label: 'Transactions', icon: Receipt },
   { id: 'splits', label: 'Splits', icon: Users },
-  { id: 'chat', label: 'Friends Chat', icon: MessageCircle },
-  { id: 'ai', label: 'AI Assistant', icon: Bot },
+  { id: 'trips', label: 'Trips', icon: Plane },
+  { id: 'balances', label: 'Balances', icon: Scale },
+  { id: 'chat', label: 'Chat', icon: MessageCircle },
+  { id: 'ai', label: 'AI', icon: Bot },
 ] as const
 
 type TabId = typeof TABS[number]['id']
@@ -418,31 +574,20 @@ export default function DemoPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* ── Sticky header ── */}
       <header className="sticky top-0 z-50 border-b bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center gap-3">
           <div className="flex items-center gap-1.5 font-bold text-base sm:text-lg shrink-0">
             <span className="text-xl sm:text-2xl">💰</span>
             <span className="hidden xs:inline">Finance Tracker</span>
           </div>
-
           <nav className="hidden md:flex items-center gap-5 ml-4 text-sm text-muted-foreground">
             <a href="#features" className="hover:text-foreground transition-colors">Features</a>
             <a href="#preview" className="hover:text-foreground transition-colors">Preview</a>
           </nav>
-
           <div className="ml-auto flex items-center gap-2 sm:gap-3">
             <ThemeToggle />
-            <Link
-              href="/login"
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors hidden sm:block"
-            >
-              Sign In
-            </Link>
-            <Link
-              href="/signup"
-              className="rounded-lg bg-primary text-primary-foreground text-xs sm:text-sm px-3 sm:px-3.5 py-1.5 font-medium hover:bg-primary/90 transition-colors whitespace-nowrap"
-            >
+            <Link href="/login" className="text-sm text-muted-foreground hover:text-foreground transition-colors hidden sm:block">Sign In</Link>
+            <Link href="/signup" className="rounded-lg bg-primary text-primary-foreground text-xs sm:text-sm px-3 sm:px-3.5 py-1.5 font-medium hover:bg-primary/90 transition-colors whitespace-nowrap">
               Get Started
             </Link>
           </div>
@@ -451,7 +596,7 @@ export default function DemoPage() {
 
       <main className="max-w-6xl mx-auto px-4 py-8 sm:py-12 space-y-12 sm:space-y-20">
 
-        {/* ── Hero ── */}
+        {/* Hero */}
         <section className="text-center space-y-5 sm:space-y-6 py-4 sm:py-8">
           <div className="inline-flex items-center gap-2 rounded-full border px-3.5 py-1 text-xs text-muted-foreground">
             <Sparkles className="w-3.5 h-3.5 text-amber-500" />
@@ -464,26 +609,19 @@ export default function DemoPage() {
             </span>
           </h1>
           <p className="max-w-xl mx-auto text-muted-foreground text-base sm:text-lg leading-relaxed">
-            Track expenses, split bills with friends, scan receipts, and get AI-powered insights — all in one app built for India.
+            Track expenses, split bills with friends, scan receipts, manage trips, and get AI-powered insights — all in one app built for India.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <Link
-              href="/signup"
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-primary-foreground px-6 py-3 font-semibold hover:bg-primary/90 transition-colors"
-            >
+            <Link href="/signup" className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-primary-foreground px-6 py-3 font-semibold hover:bg-primary/90 transition-colors">
               Start for free <ArrowRight className="w-4 h-4" />
             </Link>
-            <a
-              href="#preview"
-              className="inline-flex items-center justify-center gap-2 rounded-xl border px-6 py-3 font-semibold hover:bg-muted transition-colors"
-            >
+            <a href="#preview" className="inline-flex items-center justify-center gap-2 rounded-xl border px-6 py-3 font-semibold hover:bg-muted transition-colors">
               Explore demo below
             </a>
           </div>
-
           <div className="flex flex-wrap justify-center gap-5 sm:gap-8 pt-2 text-sm text-muted-foreground">
             {[
-              { val: '12 features', label: 'built in' },
+              { val: '14 features', label: 'built in' },
               { val: 'Groq AI', label: 'powered insights' },
               { val: 'Real-time', label: 'split notifications' },
               { val: 'PWA', label: 'works offline' },
@@ -496,11 +634,11 @@ export default function DemoPage() {
           </div>
         </section>
 
-        {/* ── Features grid ── */}
+        {/* Features grid */}
         <section id="features" className="space-y-6 sm:space-y-8">
           <div className="text-center">
             <h2 className="text-xl sm:text-3xl font-bold">Everything you need to manage money</h2>
-            <p className="text-muted-foreground mt-2 text-sm sm:text-base">12 powerful features, zero fluff.</p>
+            <p className="text-muted-foreground mt-2 text-sm sm:text-base">14 powerful features, zero fluff.</p>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
             {features.map(({ icon: Icon, title, desc, color }) => (
@@ -513,14 +651,13 @@ export default function DemoPage() {
           </div>
         </section>
 
-        {/* ── Live preview ── */}
+        {/* Live preview */}
         <section id="preview" className="space-y-5 sm:space-y-6">
           <div className="text-center">
             <h2 className="text-xl sm:text-3xl font-bold">See it in action</h2>
             <p className="text-muted-foreground mt-2 text-sm sm:text-base">Interactive preview with realistic data.</p>
           </div>
 
-          {/* Tab bar — scrollable on mobile, show icon+label */}
           <div className="flex gap-1.5 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
             {TABS.map(({ id, label, icon: Icon }) => (
               <button
@@ -542,28 +679,24 @@ export default function DemoPage() {
             {activeTab === 'dashboard' && <DemoSection />}
             {activeTab === 'transactions' && <TransactionsSection />}
             {activeTab === 'splits' && <SplitsSection />}
+            {activeTab === 'trips' && <TripsSection />}
+            {activeTab === 'balances' && <BalancesSection />}
             {activeTab === 'chat' && <ChatSection />}
             {activeTab === 'ai' && <AISection />}
           </div>
         </section>
 
-        {/* ── CTA ── */}
+        {/* CTA */}
         <section className="rounded-2xl bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border px-5 py-10 sm:px-8 sm:py-12 text-center space-y-4 sm:space-y-5">
           <h2 className="text-xl sm:text-3xl font-bold">Ready to take control?</h2>
           <p className="text-muted-foreground max-w-sm mx-auto text-sm sm:text-base">
             Join and start tracking your finances smarter. Free, private, and built for India.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <Link
-              href="/signup"
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-primary-foreground px-6 sm:px-8 py-3 font-semibold hover:bg-primary/90 transition-colors"
-            >
+            <Link href="/signup" className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-primary-foreground px-6 sm:px-8 py-3 font-semibold hover:bg-primary/90 transition-colors">
               Create free account <ArrowRight className="w-4 h-4" />
             </Link>
-            <Link
-              href="/login"
-              className="inline-flex items-center justify-center gap-2 rounded-xl border px-6 sm:px-8 py-3 font-semibold hover:bg-muted transition-colors"
-            >
+            <Link href="/login" className="inline-flex items-center justify-center gap-2 rounded-xl border px-6 sm:px-8 py-3 font-semibold hover:bg-muted transition-colors">
               Sign in
             </Link>
           </div>
