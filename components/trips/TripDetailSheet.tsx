@@ -424,31 +424,149 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
           )}
 
           <Tabs defaultValue="overview">
-            <TabsList className={`grid mx-4 mt-4 w-[calc(100%-2rem)] ${trip.is_closed ? 'grid-cols-4' : 'grid-cols-3'}`}>
-              <TabsTrigger value="overview" className="text-xs sm:text-sm">Overview</TabsTrigger>
-              <TabsTrigger value="splits" className="text-xs sm:text-sm">
-                <Receipt className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1" />
-                Splits
-                {tripSplits.length > 0 && (
-                  <span className="ml-1 text-[10px] bg-primary/15 text-primary rounded-full px-1.5 py-0.5 font-medium">
-                    {tripSplits.length}
-                  </span>
-                )}
-              </TabsTrigger>
-              <TabsTrigger value="chat" className="text-xs sm:text-sm">
-                <MessageSquare className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1" />
-                Chat
-              </TabsTrigger>
-              {trip.is_closed && (
-                <TabsTrigger value="stats" className="text-xs sm:text-sm">
-                  <BarChart2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1" />
-                  Stats
-                </TabsTrigger>
-              )}
-            </TabsList>
+            {(() => {
+              const tabCls = trip.is_closed ? 'text-[10px] sm:text-xs' : 'text-xs sm:text-sm'
+              return (
+                <TabsList className={`grid mx-4 mt-4 w-[calc(100%-2rem)] ${trip.is_closed ? 'grid-cols-5' : 'grid-cols-4'}`}>
+                  <TabsTrigger value="overview" className={tabCls}>Overview</TabsTrigger>
+                  <TabsTrigger value="splits" className={tabCls}>
+                    <Receipt className="w-3 h-3 mr-0.5 sm:mr-1" />
+                    Splits
+                    {tripSplits.length > 0 && (
+                      <span className="ml-1 text-[10px] bg-primary/15 text-primary rounded-full px-1.5 py-0.5 font-medium hidden sm:inline">
+                        {tripSplits.length}
+                      </span>
+                    )}
+                  </TabsTrigger>
+                  <TabsTrigger value="members" className={tabCls}>
+                    <Users className="w-3 h-3 mr-0.5 sm:mr-1" />
+                    Members
+                  </TabsTrigger>
+                  <TabsTrigger value="chat" className={tabCls}>
+                    <MessageSquare className="w-3 h-3 mr-0.5 sm:mr-1" />
+                    Chat
+                  </TabsTrigger>
+                  {trip.is_closed && (
+                    <TabsTrigger value="stats" className={tabCls}>
+                      <BarChart2 className="w-3 h-3 mr-0.5 sm:mr-1" />
+                      Stats
+                    </TabsTrigger>
+                  )}
+                </TabsList>
+              )
+            })()}
 
             <TabsContent value="chat" className="mt-0 focus-visible:outline-none">
               <TripChat tripId={trip.id} />
+            </TabsContent>
+
+            <TabsContent value="members" className="p-4 space-y-3 mt-0 focus-visible:outline-none">
+              {(() => {
+                // Build full member list: current user + invitations + legacy members
+                const memberList: { name: string; email: string; userId?: string | null }[] = []
+                if (currentUserEmail) {
+                  memberList.push({ name: currentUserName || currentUserEmail.split('@')[0], email: currentUserEmail, userId: currentUserId })
+                }
+                const seenEmails = new Set(currentUserEmail ? [currentUserEmail.toLowerCase()] : [])
+                for (const inv of (trip.trip_invitations ?? [])) {
+                  if (inv.status === 'declined') continue
+                  const isPlaceholder = inv.invitee_email.startsWith('_nomail_')
+                  const e = isPlaceholder ? '' : inv.invitee_email
+                  if (e && seenEmails.has(e.toLowerCase())) continue
+                  const name = inv.invitee_name || (e ? e.split('@')[0] : '')
+                  if (!name) continue
+                  memberList.push({ name, email: e })
+                  if (e) seenEmails.add(e.toLowerCase())
+                }
+                for (const m of (trip.trip_members ?? [])) {
+                  const email = m.email ?? ''
+                  if (!email || seenEmails.has(email.toLowerCase())) continue
+                  memberList.push({ name: m.name || email.split('@')[0], email })
+                  seenEmails.add(email.toLowerCase())
+                }
+
+                if (memberList.length === 0) {
+                  return (
+                    <div className="flex flex-col items-center justify-center py-12 gap-2 text-muted-foreground">
+                      <Users className="w-8 h-8 opacity-20" />
+                      <p className="text-sm">No members added to this trip yet</p>
+                    </div>
+                  )
+                }
+
+                const totalTrip = memberList.reduce((sum, m) => {
+                  const emailLower = m.email.toLowerCase()
+                  const splitShare = tripSplits
+                    .flatMap(s => s.split_participants)
+                    .filter(p =>
+                      (m.userId && p.participant_user_id === m.userId) ||
+                      (m.email && p.participant_email?.toLowerCase() === emailLower)
+                    )
+                    .reduce((s, p) => s + p.amount_owed, 0)
+                  const directSpent = m.userId
+                    ? transactions.filter(t => t.user_id === m.userId && t.type === 'expense').reduce((s, t) => s + t.amount, 0)
+                    : 0
+                  return sum + splitShare + directSpent
+                }, 0)
+
+                return (
+                  <div className="space-y-2">
+                    {memberList.map(m => {
+                      const emailLower = m.email.toLowerCase()
+                      const splitShare = tripSplits
+                        .flatMap(s => s.split_participants)
+                        .filter(p =>
+                          (m.userId && p.participant_user_id === m.userId) ||
+                          (m.email && p.participant_email?.toLowerCase() === emailLower)
+                        )
+                        .reduce((sum, p) => sum + p.amount_owed, 0)
+                      const directSpent = m.userId
+                        ? transactions.filter(t => t.user_id === m.userId && t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
+                        : 0
+                      const total = splitShare + directSpent
+                      const pct = totalTrip > 0 ? (total / totalTrip) * 100 : 0
+                      const isMe = m.userId === currentUserId
+
+                      return (
+                        <div key={m.email || m.name} className="rounded-lg border p-3 space-y-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="w-8 h-8 rounded-full bg-primary/15 text-primary flex items-center justify-center font-semibold text-sm shrink-0">
+                                {(m.name || m.email).charAt(0).toUpperCase()}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium truncate">
+                                  {m.name}{isMe && <span className="text-muted-foreground font-normal ml-1 text-xs">(you)</span>}
+                                </p>
+                                {m.email && <p className="text-xs text-muted-foreground truncate">{m.email}</p>}
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className={`text-sm font-bold ${total > 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
+                                {total > 0 ? formatCurrency(total) : '—'}
+                              </p>
+                              {totalTrip > 0 && total > 0 && (
+                                <p className="text-[10px] text-muted-foreground">{Math.round(pct)}% of trip</p>
+                              )}
+                            </div>
+                          </div>
+                          {(splitShare > 0 || directSpent > 0) && (
+                            <>
+                              <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                                <div className="h-full bg-primary/70 rounded-full" style={{ width: `${pct}%` }} />
+                              </div>
+                              <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
+                                {splitShare > 0 && <span>Splits: <span className="font-medium text-foreground">{formatCurrency(splitShare)}</span></span>}
+                                {directSpent > 0 && <span>Direct: <span className="font-medium text-foreground">{formatCurrency(directSpent)}</span></span>}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
             </TabsContent>
 
             {/* Stats tab — only rendered when trip is closed */}
