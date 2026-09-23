@@ -140,20 +140,20 @@ export default function TripsPage() {
         <div className="grid grid-cols-3 gap-2 sm:gap-4">
           <Card>
             <CardContent className="pt-3 pb-3 sm:pt-4 sm:pb-4">
-              <p className="text-[11px] sm:text-xs text-muted-foreground">Total Trips</p>
+              <p className="text-[11px] sm:text-xs text-muted-foreground">Total</p>
               <p className="text-xl sm:text-2xl font-bold mt-0.5">{trips.length}</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-3 pb-3 sm:pt-4 sm:pb-4">
-              <p className="text-[11px] sm:text-xs text-muted-foreground leading-tight">Active</p>
+              <p className="text-[11px] sm:text-xs text-muted-foreground">Active</p>
               <p className="text-xl sm:text-2xl font-bold mt-0.5">{activeTrips.length}</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-3 pb-3 sm:pt-4 sm:pb-4">
               <p className="text-[11px] sm:text-xs text-muted-foreground">Spent</p>
-              <p className="text-base sm:text-2xl font-bold mt-0.5 text-red-600 truncate">{formatCurrency(totalAllTrips)}</p>
+              <p className="text-[13px] sm:text-xl font-bold mt-0.5 text-red-600 leading-tight break-all">{formatCurrency(totalAllTrips)}</p>
             </CardContent>
           </Card>
         </div>

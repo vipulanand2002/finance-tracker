@@ -430,25 +430,25 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                 <TabsList className={`grid mx-4 mt-4 w-[calc(100%-2rem)] ${trip.is_closed ? 'grid-cols-5' : 'grid-cols-4'}`}>
                   <TabsTrigger value="overview" className={tabCls}>Overview</TabsTrigger>
                   <TabsTrigger value="splits" className={tabCls}>
-                    <Receipt className="w-3 h-3 mr-0.5 sm:mr-1" />
+                    <Receipt className="hidden sm:block w-3 h-3 mr-1 shrink-0" />
                     Splits
                     {tripSplits.length > 0 && (
-                      <span className="ml-1 text-[10px] bg-primary/15 text-primary rounded-full px-1.5 py-0.5 font-medium hidden sm:inline">
+                      <span className="ml-1 text-[10px] bg-primary/15 text-primary rounded-full px-1 py-0.5 font-medium">
                         {tripSplits.length}
                       </span>
                     )}
                   </TabsTrigger>
                   <TabsTrigger value="members" className={tabCls}>
-                    <Users className="w-3 h-3 mr-0.5 sm:mr-1" />
+                    <Users className="hidden sm:block w-3 h-3 mr-1 shrink-0" />
                     Members
                   </TabsTrigger>
                   <TabsTrigger value="chat" className={tabCls}>
-                    <MessageSquare className="w-3 h-3 mr-0.5 sm:mr-1" />
+                    <MessageSquare className="hidden sm:block w-3 h-3 mr-1 shrink-0" />
                     Chat
                   </TabsTrigger>
                   {trip.is_closed && (
                     <TabsTrigger value="stats" className={tabCls}>
-                      <BarChart2 className="w-3 h-3 mr-0.5 sm:mr-1" />
+                      <BarChart2 className="hidden sm:block w-3 h-3 mr-1 shrink-0" />
                       Stats
                     </TabsTrigger>
                   )}
