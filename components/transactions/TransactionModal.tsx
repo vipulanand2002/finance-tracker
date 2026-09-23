@@ -15,6 +15,7 @@ import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, TRIP_EXPENSE_CATEGORIES } from '
 import { ManageCategories } from '@/components/categories/ManageCategories'
 import SplitModal from '@/components/splits/SplitModal'
 import type { Transaction, Trip, Contact } from '@/types'
+import { createClient as createBrowserClient } from '@/lib/supabase/client'
 
 interface Props {
   open: boolean
@@ -64,6 +65,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
   const [linkedSplitId, setLinkedSplitId] = useState<string | null>(null)
   const [cards, setCards] = useState<CardInfo[]>([])
   const [cardStatements, setCardStatements] = useState<CardStatement[]>([])
+  const [currentUser, setCurrentUser] = useState<{ name: string; email: string } | null>(null)
   const [selectedCycleId, setSelectedCycleId] = useState<string>('none')
   const [expenseCategories, setExpenseCategories] = useState<string[]>([...EXPENSE_CATEGORIES])
   const [incomeCategories, setIncomeCategories] = useState<string[]>([...INCOME_CATEGORIES])
@@ -95,6 +97,12 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
     fetch('/api/cards').then(r => r.json()).then(d => setCards(Array.isArray(d) ? d : [])).catch(() => {})
     loadCategories()
     setSelectedCycleId('none')
+    // Fetch current user for trip-split pre-population
+    createBrowserClient().auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      const name = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'You'
+      setCurrentUser({ name, email: user.email ?? '' })
+    }).catch(() => {})
   }, [open])
 
   // Load billing cycles whenever the selected card changes
@@ -593,6 +601,26 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         const selectedContacts = form.contact_ids
           .map(id => contacts.find(c => c.id === id))
           .filter((c): c is Contact => !!c)
+
+        // When a trip is selected, pre-fill with current user + all trip members
+        let defaultParticipants: { name: string; email: string }[] | undefined
+        if (form.trip_id && currentUser) {
+          const trip = trips.find(t => t.id === form.trip_id)
+          const members = trip?.trip_members ?? []
+          const userEmailLower = currentUser.email.toLowerCase()
+          const participants: { name: string; email: string }[] = [
+            { name: currentUser.name, email: currentUser.email },
+          ]
+          for (const m of members) {
+            if (m.email.toLowerCase() !== userEmailLower) {
+              participants.push({ name: m.name || m.email.split('@')[0], email: m.email })
+            }
+          }
+          defaultParticipants = participants
+        } else if (selectedContacts.length > 0) {
+          defaultParticipants = selectedContacts.map(c => ({ name: c.name, email: c.email ?? '' }))
+        }
+
         return (
           <SplitModal
             open={splitOpen}
@@ -616,10 +644,9 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
             defaultTitle={form.description || undefined}
             defaultAmount={form.amount || undefined}
             defaultDate={form.date}
+            tripId={form.trip_id}
             contactId={form.contact_ids[0] ?? null}
-            defaultParticipants={selectedContacts.length > 0
-              ? selectedContacts.map(c => ({ name: c.name, email: c.email ?? '' }))
-              : undefined}
+            defaultParticipants={defaultParticipants}
           />
         )
       })()}
