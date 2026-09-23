@@ -639,19 +639,12 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
           <SplitModal
             open={splitOpen}
             onClose={() => setSplitOpen(false)}
+            transactionId={transaction?.id ?? null}
             onSaved={async (splitId) => {
               setSplitOpen(false)
               if (!splitId) return
               setLinkedSplitId(splitId)
-              if (transaction?.id) {
-                // Existing transaction — patch split_id then close
-                await fetch(`/api/transactions?id=${transaction.id}`, {
-                  method: 'PATCH',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ split_id: splitId }),
-                })
-              }
-              // Split API already created a transaction for the creator; close without duplication
+              // If splitting from an existing transaction, the API already updated it (no duplicate)
               onSaved()
               onClose()
             }}

@@ -60,7 +60,7 @@ export async function POST(request: Request) {
   const { supabase, user } = await getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { participants, card_id, ...splitData } = await request.json()
+  const { participants, card_id, transaction_id, ...splitData } = await request.json()
 
   const { data: split, error: splitError } = await supabase
     .from('expense_splits')
@@ -172,27 +172,34 @@ export async function POST(request: Request) {
     }
   }
 
-  // Always create a transaction — the creator paid the full bill regardless of whether
-  // it's a trip split or a standalone split. split_id links it back for personal budget
-  // calculations (excludes the full tx, uses participant share instead).
-  const txPayload = {
-    user_id: user.id,
-    amount: splitData.total_amount,
-    type: 'expense',
-    category: splitData.category ?? 'Other',
-    description: split.title,
-    date: splitData.date,
-    trip_id: splitData.trip_id ?? null,
-    card_id: card_id ?? null,
-    split_id: split.id,
-  }
+  if (transaction_id) {
+    // Split created FROM an existing transaction — link it; don't create a duplicate
+    await supabase
+      .from('transactions')
+      .update({ split_id: split.id })
+      .eq('id', transaction_id)
+      .eq('user_id', user.id)
+  } else {
+    // Standalone split — create a transaction so the expense appears in the creator's history
+    const txPayload = {
+      user_id: user.id,
+      amount: splitData.total_amount,
+      type: 'expense',
+      category: splitData.category ?? 'Other',
+      description: split.title,
+      date: splitData.date,
+      trip_id: splitData.trip_id ?? null,
+      card_id: card_id ?? null,
+      split_id: split.id,
+    }
 
-  const { error: txError } = await supabase.from('transactions').insert(txPayload)
-  if (txError) {
-    // Fallback: split_id column may not exist yet (migration 020 pending)
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { split_id, ...txWithoutSplitId } = txPayload
-    await supabase.from('transactions').insert(txWithoutSplitId)
+    const { error: txError } = await supabase.from('transactions').insert(txPayload)
+    if (txError) {
+      // Fallback: split_id column may not exist yet
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { split_id, ...txWithoutSplitId } = txPayload
+      await supabase.from('transactions').insert(txWithoutSplitId)
+    }
   }
 
   return NextResponse.json(split, { status: 201 })

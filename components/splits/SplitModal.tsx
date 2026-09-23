@@ -47,11 +47,12 @@ interface Props {
   defaultParticipants?: { name: string; email: string }[]
   defaultDate?: string
   editingSplit?: EditingSplit | null
+  transactionId?: string | null
 }
 
 const emptyParticipant = (): Participant => ({ name: '', email: '', amount: '' })
 
-export default function SplitModal({ open, onClose, onSaved, defaultTitle, defaultAmount, defaultDate, tripId, contactId, defaultParticipants, editingSplit }: Props) {
+export default function SplitModal({ open, onClose, onSaved, defaultTitle, defaultAmount, defaultDate, tripId, contactId, defaultParticipants, editingSplit, transactionId }: Props) {
   const [title, setTitle] = useState('')
   const [totalAmount, setTotalAmount] = useState('')
   const [category, setCategory] = useState('Food & Dining')
@@ -368,7 +369,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         : await fetch('/api/splits', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...payload, card_id: selectedCardId ?? null }),
+            body: JSON.stringify({ ...payload, card_id: selectedCardId ?? null, transaction_id: transactionId ?? null }),
           })
 
       const data = await res.json()
