@@ -288,16 +288,26 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
     setSelectedTripId(newTripId)
     if (!newTripId || editingSplit) return
     const trip = trips.find(t => t.id === newTripId)
-    const members = trip?.trip_members ?? []
-    if (members.length === 0 && !myEmail) return
     const myEmailLower = myEmail.toLowerCase()
     const rows: Participant[] = []
     if (myEmail) rows.push({ name: myName, email: myEmail, amount: '' })
-    for (const m of members) {
+
+    // Accepted members
+    for (const m of (trip?.trip_members ?? [])) {
       if (m.email.toLowerCase() !== myEmailLower) {
         rows.push({ name: m.name || m.email.split('@')[0], email: m.email, amount: '' })
       }
     }
+    // Pending invitees (added but haven't accepted yet)
+    const seenEmails = new Set(rows.map(r => r.email.toLowerCase()))
+    for (const inv of (trip?.trip_invitations ?? [])) {
+      const e = inv.invitee_email.toLowerCase()
+      if (inv.status === 'pending' && e !== myEmailLower && !seenEmails.has(e)) {
+        rows.push({ name: inv.invitee_name || inv.invitee_email.split('@')[0], email: inv.invitee_email, amount: '' })
+        seenEmails.add(e)
+      }
+    }
+
     if (rows.length === 0) return
     setParticipants(rows.length >= 2 ? rows : [...rows, emptyParticipant()])
   }

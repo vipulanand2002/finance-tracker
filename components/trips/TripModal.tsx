@@ -59,7 +59,13 @@ export default function TripModal({ open, onClose, onSaved, trip }: Props) {
       setBudgets(
         (trip.trip_budgets ?? []).map(b => ({ category: b.category, amount: String(b.amount) }))
       )
-      setMembers((trip.trip_members ?? []).map(m => ({ email: m.email, name: m.name ?? '' })))
+      // Accepted members + pending invitations (so added-but-not-yet-accepted people still show up)
+      const accepted = (trip.trip_members ?? []).map(m => ({ email: m.email, name: m.name ?? '' }))
+      const acceptedEmails = new Set(accepted.map(m => m.email.toLowerCase()))
+      const pending = (trip.trip_invitations ?? [])
+        .filter(i => i.status === 'pending' && !acceptedEmails.has(i.invitee_email.toLowerCase()))
+        .map(i => ({ email: i.invitee_email, name: i.invitee_name ?? '' }))
+      setMembers([...accepted, ...pending])
       setImagePreview(trip.image_url ?? '')
       // Pre-fill existing personal budget
       fetch(`/api/trip-personal-budget?trip_id=${trip.id}&mine=true`)

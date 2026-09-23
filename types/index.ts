@@ -136,6 +136,14 @@ export interface TripMember {
   name: string | null
 }
 
+export interface TripInvitation {
+  id: string
+  trip_id: string
+  invitee_email: string
+  invitee_name: string | null
+  status: string
+}
+
 export interface Trip {
   id: string
   user_id: string
@@ -151,6 +159,7 @@ export interface Trip {
   created_at: string
   trip_budgets?: TripBudget[]
   trip_members?: TripMember[]
+  trip_invitations?: TripInvitation[]
   total_spent?: number
   transaction_count?: number
   is_owner?: boolean

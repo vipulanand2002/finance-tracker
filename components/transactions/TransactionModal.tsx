@@ -606,14 +606,23 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         let defaultParticipants: { name: string; email: string }[] | undefined
         if (form.trip_id && currentUser) {
           const trip = trips.find(t => t.id === form.trip_id)
-          const members = trip?.trip_members ?? []
           const userEmailLower = currentUser.email.toLowerCase()
           const participants: { name: string; email: string }[] = [
             { name: currentUser.name, email: currentUser.email },
           ]
-          for (const m of members) {
+          // Accepted members
+          for (const m of (trip?.trip_members ?? [])) {
             if (m.email.toLowerCase() !== userEmailLower) {
               participants.push({ name: m.name || m.email.split('@')[0], email: m.email })
+            }
+          }
+          // Pending invitees
+          const seenEmails = new Set(participants.map(p => p.email.toLowerCase()))
+          for (const inv of (trip?.trip_invitations ?? [])) {
+            const e = inv.invitee_email.toLowerCase()
+            if (inv.status === 'pending' && e !== userEmailLower && !seenEmails.has(e)) {
+              participants.push({ name: inv.invitee_name || inv.invitee_email.split('@')[0], email: inv.invitee_email })
+              seenEmails.add(e)
             }
           }
           defaultParticipants = participants

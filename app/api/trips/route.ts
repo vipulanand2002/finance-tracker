@@ -13,7 +13,7 @@ export async function GET() {
 
   const { data: trips, error } = await supabase
     .from('trips')
-    .select('*, trip_budgets(*), trip_members(*), transactions(amount, type, is_discrete)')
+    .select('*, trip_budgets(*), trip_members(*), trip_invitations(*), transactions(amount, type, is_discrete)')
     .order('created_at', { ascending: false })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
