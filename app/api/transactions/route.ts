@@ -40,7 +40,7 @@ export async function GET(request: Request) {
     // Filter to specific card or any card transaction
     if (cardId) query = query.eq('card_id', cardId)
     else if (hasCard) query = query.not('card_id', 'is', null)
-    if (contactId) query = query.eq('contact_id', contactId)
+    if (contactId) query = query.or(`contact_id.eq.${contactId},contact_ids.cs.{${contactId}}`)
   }
 
   const { data, error } = await query

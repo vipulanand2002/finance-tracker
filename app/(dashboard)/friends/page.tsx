@@ -12,7 +12,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import {
   Send, Smile, Loader2, UserPlus, ArrowLeft, Pencil, Trash2, Search,
-  SplitSquareVertical, MessageCircle, BellRing, Mail, BadgeCheck, Check, X, Clock,
+  SplitSquareVertical, MessageCircle, BellRing, Mail, BadgeCheck, Check, X, Clock, Receipt,
 } from 'lucide-react'
 import { cn, formatCurrency } from '@/lib/utils'
 const SplitModal = dynamic(() => import('@/components/splits/SplitModal'), { ssr: false })
@@ -49,6 +49,16 @@ interface SplitRow {
   date: string
   category: string
   split_participants?: { id: string; participant_name: string; participant_email: string | null; amount_owed: number; is_paid: boolean }[]
+}
+
+interface TaggedTxn {
+  id: string
+  description: string
+  amount: number
+  type: 'income' | 'expense'
+  category: string
+  date: string
+  split_id: string | null
 }
 
 interface FriendForm { name: string; email: string; notes: string }
@@ -102,6 +112,9 @@ export default function FriendsPage() {
   // Splits (all friends)
   const [splits, setSplits] = useState<SplitRow[]>([])
   const [loadingSplits, setLoadingSplits] = useState(false)
+
+  // Tagged transactions (expenses tagged to this friend, no split linked)
+  const [taggedTxns, setTaggedTxns] = useState<TaggedTxn[]>([])
 
   // Split modal
   const [splitOpen, setSplitOpen] = useState(false)
@@ -169,9 +182,10 @@ export default function FriendsPage() {
   // ── Load detail when friend selected ──────────────────────────────────────
 
   useEffect(() => {
-    if (!selected) { setMessages([]); setSplits([]); return }
+    if (!selected) { setMessages([]); setSplits([]); setTaggedTxns([]); return }
     if (selected.connected && selected.friend_user_id) loadMessages(selected.friend_user_id)
     loadSplits(selected)
+    loadTaggedTxns(selected)
   }, [selected?.id])
 
   function loadMessages(friendUserId: string) {
@@ -191,6 +205,17 @@ export default function FriendsPage() {
       .then(d => setSplits(Array.isArray(d) ? d : []))
       .catch(() => {})
       .finally(() => setLoadingSplits(false))
+  }
+
+  function loadTaggedTxns(friend: Friend) {
+    fetch(`/api/transactions?contact_id=${friend.id}`)
+      .then(r => r.json())
+      .then((d: TaggedTxn[]) => {
+        // Only unsplit expenses count as owed
+        const relevant = Array.isArray(d) ? d.filter(t => t.type === 'expense' && !t.split_id) : []
+        setTaggedTxns(relevant)
+      })
+      .catch(() => {})
   }
 
   // ── Realtime messages ──────────────────────────────────────────────────────
@@ -342,12 +367,14 @@ export default function FriendsPage() {
   )
 
   const selectedEmailLower = selected?.email?.toLowerCase()
-  const totalOwed = splits.reduce((sum, s) => {
+  const splitOwed = splits.reduce((sum, s) => {
     const relevant = (s.split_participants ?? []).filter(p =>
       !p.is_paid && (selectedEmailLower ? p.participant_email?.toLowerCase() === selectedEmailLower : false)
     )
     return sum + relevant.reduce((a, p) => a + p.amount_owed, 0)
   }, 0)
+  const txnOwed = taggedTxns.reduce((sum, t) => sum + t.amount, 0)
+  const totalOwed = splitOwed + txnOwed
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -597,22 +624,30 @@ export default function FriendsPage() {
             {(!selected.connected || chatTab === 'splits') && (
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 {/* Balance summary */}
-                {!loadingSplits && splits.length > 0 && selectedEmailLower && (
+                {!loadingSplits && (splits.length > 0 || taggedTxns.length > 0) && (
                   <div className={cn(
-                    'rounded-xl p-4 flex items-center justify-between',
+                    'rounded-xl p-4',
                     totalOwed > 0 ? 'bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800' : 'bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800'
                   )}>
-                    <div>
-                      <p className="text-xs text-muted-foreground">
-                        {totalOwed > 0 ? `${selected.name} owes you` : 'All settled up'}
-                      </p>
-                      {totalOwed > 0 && <p className={`text-xl font-bold text-amber-600`}>{formatCurrency(totalOwed)}</p>}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs text-muted-foreground">
+                          {totalOwed > 0 ? `${selected.name} owes you` : 'All settled up'}
+                        </p>
+                        {totalOwed > 0 && <p className="text-xl font-bold text-amber-600">{formatCurrency(totalOwed)}</p>}
+                      </div>
+                      {selected.email && (
+                        <Button size="sm" variant="outline" onClick={() => sendReminder(selected)} disabled={sendingReminder}>
+                          {sendingReminder ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Mail className="w-3.5 h-3.5 mr-1.5" />}
+                          Remind
+                        </Button>
+                      )}
                     </div>
-                    {selected.email && (
-                      <Button size="sm" variant="outline" onClick={() => sendReminder(selected)} disabled={sendingReminder}>
-                        {sendingReminder ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Mail className="w-3.5 h-3.5 mr-1.5" />}
-                        Remind
-                      </Button>
+                    {totalOwed > 0 && splitOwed > 0 && txnOwed > 0 && (
+                      <div className="mt-2 flex gap-3 text-xs text-muted-foreground">
+                        <span>Splits: <span className="font-medium text-amber-600">{formatCurrency(splitOwed)}</span></span>
+                        <span>Tagged: <span className="font-medium text-amber-600">{formatCurrency(txnOwed)}</span></span>
+                      </div>
                     )}
                   </div>
                 )}
@@ -629,7 +664,7 @@ export default function FriendsPage() {
                     <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
                   </div>
                 ) : splits.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-12 gap-2 text-muted-foreground text-sm">
+                  <div className="flex flex-col items-center justify-center py-6 gap-2 text-muted-foreground text-sm">
                     <SplitSquareVertical className="w-8 h-8 opacity-20" />
                     No splits with {selected.name} yet.
                   </div>
@@ -660,6 +695,36 @@ export default function FriendsPage() {
                       )
                     })}
                   </div>
+                )}
+
+                {/* Tagged transactions */}
+                {taggedTxns.length > 0 && (
+                  <>
+                    <div className="flex items-center gap-2 pt-1">
+                      <p className="text-sm font-semibold">Tagged Transactions</p>
+                      <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                        {selected.name} owes full amount
+                      </span>
+                    </div>
+                    <div className="space-y-3">
+                      {taggedTxns.map(t => (
+                        <div key={t.id} className="p-4 rounded-xl border bg-card space-y-1.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <Receipt className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                              <p className="font-medium text-sm truncate">{t.description}</p>
+                            </div>
+                            <span className="text-sm font-semibold shrink-0 text-amber-600">
+                              {formatCurrency(t.amount)}
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {format(new Date(t.date + 'T00:00:00'), 'dd MMM yyyy')} · {t.category}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
             )}
