@@ -213,7 +213,7 @@ export default function TransactionList() {
 
   async function exportToExcel() {
     const { utils, writeFile } = await import('xlsx')
-    const rows = filtered.map(t => ({
+    const rows = transactions.map(t => ({
       Date: t.date,
       Description: t.description ?? '',
       Category: t.category,
