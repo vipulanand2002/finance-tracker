@@ -47,10 +47,16 @@ export default function SpendingChart({ dailyData, weeklyData, monthlyData, cate
 
   const trendData = period === 'day' ? dailyData : period === 'week' ? weeklyData : monthlyData
 
-  // For day view with 28-31 points, only show every 5th tick to avoid crowding
-  const xAxisProps = period === 'day'
-    ? { dataKey: 'month', tick: { fontSize: 11 }, interval: 4 }
-    : { dataKey: 'month', tick: { fontSize: 12 }, interval: 0 }
+  // Per-period X-axis config to prevent label crowding on mobile
+  // daily: 28-31 points → show every 6th (≈5 labels, "1","7","13","19","25","31")
+  // weekly: 8 points of "Aug 10" etc → show every other (4 labels)
+  // monthly: 6 short "Apr" labels → show all
+  const xAxisProps =
+    period === 'day'
+      ? { dataKey: 'month', tick: { fontSize: 11 }, interval: 5 }
+      : period === 'week'
+        ? { dataKey: 'month', tick: { fontSize: 11 }, interval: 1 }
+        : { dataKey: 'month', tick: { fontSize: 12 }, interval: 0 }
 
   const periodLabel = period === 'day'
     ? `Daily — ${selectedMonth}`
