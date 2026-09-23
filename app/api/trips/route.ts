@@ -1,10 +1,76 @@
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 
 async function getUser() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   return { supabase, user }
+}
+
+type SupabaseClient = Awaited<ReturnType<typeof createClient>>
+
+async function addMembersToTrip(
+  supabase: SupabaseClient,
+  tripId: string,
+  tripName: string,
+  userId: string,
+  userEmail: string,
+  members: { email: string; name?: string | null }[]
+) {
+  const svc = createServiceClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+  const directRows: { trip_id: string; email: string | null; name: string | null }[] = []
+  const inviteRows: { email: string; name: string | null }[] = []
+
+  for (const m of members) {
+    const email = m.email?.trim().toLowerCase() || null
+
+    if (!email) {
+      // No email → add directly as name-only member
+      directRows.push({ trip_id: tripId, email: null, name: m.name?.trim() || null })
+      continue
+    }
+
+    // Check if user has an account
+    const { data: profile } = await svc
+      .from('profiles').select('id').eq('email', email).maybeSingle()
+
+    if (!profile) {
+      // No account → add directly
+      directRows.push({ trip_id: tripId, email, name: m.name?.trim() || null })
+      continue
+    }
+
+    // Has account — check friendship
+    const { data: friendship } = await supabase
+      .from('friendships').select('id')
+      .eq('user_id', userId).eq('friend_id', profile.id).maybeSingle()
+
+    if (friendship) {
+      directRows.push({ trip_id: tripId, email, name: m.name?.trim() || null })
+    } else {
+      inviteRows.push({ email, name: m.name?.trim() || null })
+    }
+  }
+
+  if (directRows.length > 0) {
+    await supabase.from('trip_members').insert(directRows)
+  }
+
+  if (inviteRows.length > 0) {
+    await supabase.from('trip_invitations').upsert(
+      inviteRows.map(m => ({
+        trip_id: tripId, trip_name: tripName,
+        inviter_id: userId, inviter_email: userEmail,
+        invitee_email: m.email, invitee_name: m.name,
+        status: 'pending',
+      })),
+      { onConflict: 'trip_id,invitee_email' }
+    )
+  }
 }
 
 export async function GET() {
@@ -55,20 +121,8 @@ export async function POST(request: Request) {
     )
   }
 
-  // Send invitations instead of direct insert — invitees join via accept flow
   if (Array.isArray(members) && members.length > 0) {
-    await supabase.from('trip_invitations').upsert(
-      members.map((m: { email: string; name?: string }) => ({
-        trip_id: trip.id,
-        trip_name: trip.name,
-        inviter_id: user.id,
-        inviter_email: user.email ?? '',
-        invitee_email: m.email.toLowerCase(),
-        invitee_name: m.name ?? null,
-        status: 'pending',
-      })),
-      { onConflict: 'trip_id,invitee_email' }
-    )
+    await addMembersToTrip(supabase, trip.id, trip.name, user.id, user.email ?? '', members)
   }
 
   return NextResponse.json(trip, { status: 201 })
@@ -105,44 +159,44 @@ export async function PATCH(request: Request) {
   }
 
   if (Array.isArray(members)) {
-    const submittedEmails = members.map((m: { email: string }) => m.email.toLowerCase())
+    const submittedEmails = members
+      .filter((m: { email: string }) => m.email?.trim())
+      .map((m: { email: string }) => m.email.trim().toLowerCase())
 
-    // Get who is currently accepted (in trip_members)
+    // Remove name-only members and re-insert (they have no stable key)
+    await supabase.from('trip_members').delete().eq('trip_id', id).is('email', null)
+    await supabase.from('trip_members').delete().eq('trip_id', id).eq('email', '')
+
+    // Remove email-based members that were dropped
     const { data: currentMembers } = await supabase
-      .from('trip_members')
-      .select('email')
-      .eq('trip_id', id)
-
-    const currentEmails = (currentMembers ?? []).map(m => m.email.toLowerCase())
-
-    // Remove members the owner dropped from the list
-    const toRemove = currentEmails.filter(e => !submittedEmails.includes(e))
-    if (toRemove.length > 0) {
-      await supabase.from('trip_members').delete().eq('trip_id', id).in('email', toRemove)
+      .from('trip_members').select('email').eq('trip_id', id)
+    const currentEmails = (currentMembers ?? [])
+      .map((m: { email: string | null }) => m.email?.toLowerCase())
+      .filter(Boolean) as string[]
+    const toRemoveEmails = currentEmails.filter(e => !submittedEmails.includes(e))
+    if (toRemoveEmails.length > 0) {
+      await supabase.from('trip_members').delete().eq('trip_id', id).in('email', toRemoveEmails)
+      await supabase.from('trip_invitations').delete()
+        .eq('trip_id', id).in('invitee_email', toRemoveEmails).eq('status', 'pending')
     }
 
-    // Invite members not yet in trip_members (new additions)
-    const toInvite = members.filter(
-      (m: { email: string }) => !currentEmails.includes(m.email.toLowerCase())
+    // Determine which email-based members are truly new (not already accepted or pending)
+    const { data: currentInvitations } = await supabase
+      .from('trip_invitations').select('invitee_email').eq('trip_id', id).eq('status', 'pending')
+    const pendingEmails = new Set(
+      (currentInvitations ?? []).map((i: { invitee_email: string }) => i.invitee_email.toLowerCase())
     )
-    if (toInvite.length > 0) {
-      // Get trip name for display in invitation
-      const tripName = (tripData as { name?: string }).name ??
-        (await supabase.from('trips').select('name').eq('id', id).single()).data?.name ?? ''
+    const updatedCurrentEmails = new Set(
+      (currentEmails ?? []).filter(e => !toRemoveEmails.includes(e))
+    )
+    const newMembers = members.filter((m: { email: string }) => {
+      const e = m.email?.trim().toLowerCase()
+      return !e || (!updatedCurrentEmails.has(e) && !pendingEmails.has(e))
+    })
 
-      await supabase.from('trip_invitations').upsert(
-        toInvite.map((m: { email: string; name?: string }) => ({
-          trip_id: id,
-          trip_name: tripName,
-          inviter_id: user.id,
-          inviter_email: user.email ?? '',
-          invitee_email: m.email.toLowerCase(),
-          invitee_name: m.name ?? null,
-          status: 'pending',
-        })),
-        { onConflict: 'trip_id,invitee_email' }
-      )
-    }
+    const tripName = (tripData as { name?: string }).name ??
+      (await supabase.from('trips').select('name').eq('id', id).single()).data?.name ?? ''
+    await addMembersToTrip(supabase, id, tripName, user.id, user.email ?? '', newMembers)
   }
 
   return NextResponse.json({ success: true })

@@ -1302,8 +1302,8 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
           ...(currentUserEmail ? [{ name: currentUserName || currentUserEmail.split('@')[0], email: currentUserEmail }] : []),
           // Other trip members (skip current user if they're also in trip_members)
           ...(trip.trip_members ?? [])
-            .filter(m => m.email.toLowerCase() !== currentUserEmail)
-            .map(m => ({ name: m.name || m.email.split('@')[0], email: m.email })),
+            .filter(m => !m.email || m.email.toLowerCase() !== currentUserEmail)
+            .map(m => ({ name: m.name || (m.email ? m.email.split('@')[0] : ''), email: m.email ?? '' })),
         ]}
       />
     </>

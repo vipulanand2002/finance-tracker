@@ -292,14 +292,14 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
     const rows: Participant[] = []
     if (myEmail) rows.push({ name: myName, email: myEmail, amount: '' })
 
-    // Accepted members
+    // Accepted members (including name-only ones with no email)
     for (const m of (trip?.trip_members ?? [])) {
-      if (m.email.toLowerCase() !== myEmailLower) {
-        rows.push({ name: m.name || m.email.split('@')[0], email: m.email, amount: '' })
-      }
+      const email = m.email ?? ''
+      if (email && email.toLowerCase() === myEmailLower) continue
+      rows.push({ name: m.name || (email ? email.split('@')[0] : ''), email, amount: '' })
     }
     // Pending invitees (added but haven't accepted yet)
-    const seenEmails = new Set(rows.map(r => r.email.toLowerCase()))
+    const seenEmails = new Set(rows.filter(r => r.email).map(r => r.email.toLowerCase()))
     for (const inv of (trip?.trip_invitations ?? [])) {
       const e = inv.invitee_email.toLowerCase()
       if (inv.status === 'pending' && e !== myEmailLower && !seenEmails.has(e)) {

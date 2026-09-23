@@ -126,7 +126,7 @@ export default function TripModal({ open, onClose, onSaved, trip }: Props) {
         .filter(b => b.category && parseFloat(b.amount) > 0)
         .map(b => ({ category: b.category, amount: parseFloat(b.amount) }))
 
-      const validMembers = members.filter(m => m.email.trim())
+      const validMembers = members.filter(m => m.email.trim() || m.name.trim())
 
       const payload = {
         name: form.name.trim(),

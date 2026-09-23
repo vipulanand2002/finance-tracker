@@ -132,7 +132,7 @@ export interface TripBudget {
 export interface TripMember {
   id: string
   trip_id: string
-  email: string
+  email: string | null
   name: string | null
 }
 
