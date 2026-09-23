@@ -372,7 +372,7 @@ export default function FriendsPage() {
     )
     return sum + relevant.reduce((a, p) => a + p.amount_owed, 0)
   }, 0)
-  const txnOwed = taggedTxns.reduce((sum, t) => sum + t.amount, 0)
+  const txnOwed = taggedTxns.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
   const totalOwed = splitOwed + txnOwed
 
   // ── Render ────────────────────────────────────────────────────────────────
