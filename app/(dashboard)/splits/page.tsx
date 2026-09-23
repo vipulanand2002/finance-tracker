@@ -99,14 +99,14 @@ const SplitCard = memo(function SplitCard({
           )}
           <span className="font-bold text-sm">{formatCurrency(split.total_amount)}</span>
           {isCreator && !split.is_settled && (
-            <>
-              <button onClick={() => onEdit(split)} className="text-muted-foreground hover:text-foreground ml-1">
-                <Pencil className="w-3.5 h-3.5" />
-              </button>
-              <button onClick={() => onDelete(split.id)} className="text-muted-foreground hover:text-destructive">
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            </>
+            <button onClick={() => onEdit(split)} className="text-muted-foreground hover:text-foreground ml-1">
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {isCreator && (
+            <button onClick={() => onDelete(split.id)} className="text-muted-foreground hover:text-destructive">
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
           )}
         </div>
       </CardHeader>
