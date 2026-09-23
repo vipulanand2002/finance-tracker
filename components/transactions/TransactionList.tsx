@@ -524,12 +524,12 @@ export default function TransactionList() {
         </div>
 
         {/* Actions + sort row */}
-        <div className="flex gap-2 flex-wrap items-center">
+        <div className="flex gap-2 items-center justify-between">
           {/* Sort */}
           <div className="flex items-center gap-1.5 shrink-0">
             <ArrowUpDown className="w-3.5 h-3.5 text-muted-foreground" />
             <Select value={sortBy} onValueChange={v => { if (v) setSortBy(v as SortBy) }}>
-              <SelectTrigger className="h-8 w-36 text-xs">
+              <SelectTrigger className="h-8 w-32 text-xs">
                 <span className="flex-1 text-left truncate">{SORT_LABELS[sortBy]}</span>
               </SelectTrigger>
               <SelectContent>
@@ -540,20 +540,21 @@ export default function TransactionList() {
             </Select>
           </div>
 
-          <div className="flex-1" />
-
-          <Button variant="outline" onClick={exportToExcel} className="shrink-0 h-8 gap-1.5" title="Export to Excel">
-            <Download className="w-4 h-4" /><span className="text-xs">Export</span>
-          </Button>
-          <Button variant="outline" onClick={() => setPdfOpen(true)} className="shrink-0 h-8" title="Import PDF">
-            <FileUp className="w-4 h-4 sm:mr-1" /><span className="hidden sm:inline text-xs">Import PDF</span>
-          </Button>
-          <Button variant="outline" onClick={pasteSms} className="shrink-0 h-8" title="Paste UPI SMS">
-            <Smartphone className="w-4 h-4 sm:mr-1" /><span className="hidden sm:inline text-xs">Paste SMS</span>
-          </Button>
-          <Button onClick={openAdd} className="shrink-0 h-8">
-            <Plus className="w-4 h-4 sm:mr-1" /><span className="text-sm">Add</span>
-          </Button>
+          {/* Right-side action buttons — always visible */}
+          <div className="flex gap-1.5 shrink-0">
+            <Button variant="outline" onClick={exportToExcel} className="h-8 gap-1.5 px-2.5" title="Export to Excel">
+              <Download className="w-4 h-4" /><span className="text-xs">Export</span>
+            </Button>
+            <Button variant="outline" onClick={() => setPdfOpen(true)} className="h-8 w-8 p-0" title="Import PDF">
+              <FileUp className="w-4 h-4" />
+            </Button>
+            <Button variant="outline" onClick={pasteSms} className="h-8 w-8 p-0" title="Paste UPI SMS">
+              <Smartphone className="w-4 h-4" />
+            </Button>
+            <Button onClick={openAdd} className="h-8 gap-1">
+              <Plus className="w-4 h-4" /><span className="text-sm">Add</span>
+            </Button>
+          </div>
           {someSelected && (
             <Button variant="outline" onClick={() => setConfirmOpen(true)}
               className="shrink-0 h-8 border-destructive/40 text-destructive hover:bg-destructive hover:text-destructive-foreground">
