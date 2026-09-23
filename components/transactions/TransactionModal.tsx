@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { EyeOff, Loader2, Settings2, Upload, X, SplitSquareVertical } from 'lucide-react'
+import { EyeOff, Loader2, Settings2, Upload, X, SplitSquareVertical, CreditCard } from 'lucide-react'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, TRIP_EXPENSE_CATEGORIES } from '@/lib/constants'
 import { ManageCategories } from '@/components/categories/ManageCategories'
 import SplitModal from '@/components/splits/SplitModal'
@@ -52,6 +52,7 @@ function buildEmptyForm(tripId?: string | null, cardId?: string | null) {
 }
 
 interface CardStatement { id: string; cycle_start: string; cycle_end: string }
+interface CardInfo { id: string; card_name: string; last_four: string | null }
 
 export default function TransactionModal({ open, onClose, onSaved, transaction, defaultTripId, defaultCardId }: Props) {
   const [form, setForm] = useState(() => buildEmptyForm(defaultTripId, defaultCardId))
@@ -61,6 +62,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
   const [contacts, setContacts] = useState<Contact[]>([])
   const [splitOpen, setSplitOpen] = useState(false)
   const [linkedSplitId, setLinkedSplitId] = useState<string | null>(null)
+  const [cards, setCards] = useState<CardInfo[]>([])
   const [cardStatements, setCardStatements] = useState<CardStatement[]>([])
   const [selectedCycleId, setSelectedCycleId] = useState<string>('none')
   const [expenseCategories, setExpenseCategories] = useState<string[]>([...EXPENSE_CATEGORIES])
@@ -90,17 +92,20 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
     if (!open) return
     fetch('/api/trips').then(r => r.json()).then(d => setTrips(Array.isArray(d) ? d : [])).catch(() => {})
     fetch('/api/contacts').then(r => r.json()).then(d => setContacts(Array.isArray(d) ? d : [])).catch(() => {})
+    fetch('/api/cards').then(r => r.json()).then(d => setCards(Array.isArray(d) ? d : [])).catch(() => {})
     loadCategories()
-    if (defaultCardId && !transaction) {
-      fetch(`/api/card-statements?card_id=${defaultCardId}`)
-        .then(r => r.json())
-        .then(d => setCardStatements(Array.isArray(d) ? d.slice(0, 6) : []))
-        .catch(() => setCardStatements([]))
-    } else {
-      setCardStatements([])
-    }
     setSelectedCycleId('none')
-  }, [open, defaultCardId, transaction])
+  }, [open])
+
+  // Load billing cycles whenever the selected card changes
+  useEffect(() => {
+    const cardId = form.card_id
+    if (!cardId) { setCardStatements([]); return }
+    fetch(`/api/card-statements?card_id=${cardId}`)
+      .then(r => r.json())
+      .then(d => setCardStatements(Array.isArray(d) ? d.slice(0, 6) : []))
+      .catch(() => setCardStatements([]))
+  }, [form.card_id])
 
   useEffect(() => {
     if (transaction) {
@@ -461,6 +466,41 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                     <SelectItem value="none">No trip</SelectItem>
                     {trips.filter(t => !t.is_closed || t.id === form.trip_id).map(t => (
                       <SelectItem key={t.id} value={t.id}>{t.name}{t.is_closed ? ' (closed)' : ''}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Card picker — always visible when cards exist; not applicable for trip transactions */}
+            {cards.length > 0 && !form.trip_id && (
+              <div className="space-y-1">
+                <Label>
+                  <span className="flex items-center gap-1.5">
+                    <CreditCard className="w-3.5 h-3.5" />
+                    Credit Card <span className="text-muted-foreground font-normal text-xs">(optional)</span>
+                  </span>
+                </Label>
+                <Select
+                  value={form.card_id ?? 'none'}
+                  onValueChange={v => {
+                    set('card_id', v === 'none' ? null : v)
+                    setSelectedCycleId('none')
+                  }}
+                >
+                  <SelectTrigger>
+                    <span className="truncate text-sm">
+                      {form.card_id
+                        ? (() => { const c = cards.find(c => c.id === form.card_id); return c ? `${c.card_name}${c.last_four ? ` ••${c.last_four}` : ''}` : '…' })()
+                        : <span className="text-muted-foreground">No card</span>}
+                    </span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No card</SelectItem>
+                    {cards.map(c => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.card_name}{c.last_four ? ` ••${c.last_four}` : ''}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
