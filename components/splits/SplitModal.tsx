@@ -284,6 +284,24 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
   function addParticipant() { setParticipants(p => [...p, emptyParticipant()]) }
   function removeParticipant(i: number) { setParticipants(p => p.filter((_, idx) => idx !== i)) }
 
+  function handleTripChange(newTripId: string | null) {
+    setSelectedTripId(newTripId)
+    if (!newTripId || editingSplit) return
+    const trip = trips.find(t => t.id === newTripId)
+    const members = trip?.trip_members ?? []
+    if (members.length === 0 && !myEmail) return
+    const myEmailLower = myEmail.toLowerCase()
+    const rows: Participant[] = []
+    if (myEmail) rows.push({ name: myName, email: myEmail, amount: '' })
+    for (const m of members) {
+      if (m.email.toLowerCase() !== myEmailLower) {
+        rows.push({ name: m.name || m.email.split('@')[0], email: m.email, amount: '' })
+      }
+    }
+    if (rows.length === 0) return
+    setParticipants(rows.length >= 2 ? rows : [...rows, emptyParticipant()])
+  }
+
   function addFriendAsParticipant(friend: Friend) {
     const emptyIdx = participants.findIndex(p => !p.name && !p.email)
     const alreadyAdded = participants.some(p =>
@@ -508,7 +526,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
                 <Label>Trip <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
                 <Select
                   value={selectedTripId ?? 'none'}
-                  onValueChange={v => setSelectedTripId(v === 'none' ? null : v)}
+                  onValueChange={v => handleTripChange(v === 'none' ? null : v)}
                 >
                   <SelectTrigger>
                     <span className="truncate text-sm">
