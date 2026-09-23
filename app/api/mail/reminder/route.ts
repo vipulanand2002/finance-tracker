@@ -1,16 +1,20 @@
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-import nodemailer from 'nodemailer'
+import { Resend } from 'resend'
 import { buildConsolidatedReminderEmail } from '@/lib/email-templates/consolidated-reminder'
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://finance-tracker.vercel.app'
 
-function createTransporter() {
-  const user = process.env.GMAIL_USER
-  const pass = process.env.GMAIL_APP_PASSWORD
-  if (!user || !pass) throw new Error('GMAIL_USER and GMAIL_APP_PASSWORD env vars are required')
-  return nodemailer.createTransport({ service: 'gmail', auth: { user, pass } })
+function getResend() {
+  const key = process.env.RESEND_API_KEY
+  if (!key) throw new Error('RESEND_API_KEY env var is required')
+  return new Resend(key)
+}
+
+function fromAddress(creatorName: string) {
+  const addr = process.env.RESEND_FROM_EMAIL ?? process.env.GMAIL_USER ?? 'noreply@example.com'
+  return `Finance Tracker (via ${creatorName}) <${addr}>`
 }
 
 type Participant = {
@@ -64,11 +68,9 @@ function groupByRecipient(
 //     | { type: 'trip', trip_id: string }
 // Sends ONE consolidated email per recipient listing ALL their pending splits.
 export async function POST(request: Request) {
-  const gmailUser = process.env.GMAIL_USER
-  const gmailPass = process.env.GMAIL_APP_PASSWORD
-  if (!gmailUser || !gmailPass) {
+  if (!process.env.RESEND_API_KEY) {
     return NextResponse.json(
-      { error: 'Email service not configured — add GMAIL_USER and GMAIL_APP_PASSWORD to Vercel env vars' },
+      { error: 'Email service not configured — add RESEND_API_KEY to Vercel env vars' },
       { status: 503 }
     )
   }
@@ -189,7 +191,7 @@ export async function POST(request: Request) {
     if (registered) entry.name = registered
   }
 
-  const transporter = createTransporter()
+  const resend = getResend()
   let sent = 0
   const errors: string[] = []
   // Track which split ids successfully had an email sent so we can update their counters
@@ -265,13 +267,19 @@ export async function POST(request: Request) {
     })
 
     try {
-      await transporter.sendMail({
-        from: `"FinanceTracker via ${creatorName}" <${gmailUser}>`,
+      const { error: sendError } = await resend.emails.send({
+        from: fromAddress(creatorName),
         to: email,
         subject,
         html,
-        ...(attachments.length > 0 ? { attachments } : {}),
+        ...(attachments.length > 0 ? {
+          attachments: attachments.map(a => ({
+            filename: a.filename,
+            content: a.content,
+          }))
+        } : {}),
       })
+      if (sendError) throw new Error(sendError.message)
       sent++
       for (const { split } of recipientSplits) sentSplitIds.add(split.id)
     } catch (err: unknown) {
