@@ -211,9 +211,8 @@ export default function FriendsPage() {
     fetch(`/api/transactions?contact_id=${friend.id}`)
       .then(r => r.json())
       .then((d: TaggedTxn[]) => {
-        // Only unsplit expenses count as owed
-        const relevant = Array.isArray(d) ? d.filter(t => t.type === 'expense' && !t.split_id) : []
-        setTaggedTxns(relevant)
+        // Show all tagged transactions; owed calc only uses unsplit expenses
+        setTaggedTxns(Array.isArray(d) ? d.filter(t => !t.split_id) : [])
       })
       .catch(() => {})
   }
@@ -700,12 +699,7 @@ export default function FriendsPage() {
                 {/* Tagged transactions */}
                 {taggedTxns.length > 0 && (
                   <>
-                    <div className="flex items-center gap-2 pt-1">
-                      <p className="text-sm font-semibold">Tagged Transactions</p>
-                      <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                        {selected.name} owes full amount
-                      </span>
-                    </div>
+                    <p className="text-sm font-semibold pt-1">Tagged Transactions</p>
                     <div className="space-y-3">
                       {taggedTxns.map(t => (
                         <div key={t.id} className="p-4 rounded-xl border bg-card space-y-1.5">
@@ -714,9 +708,14 @@ export default function FriendsPage() {
                               <Receipt className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
                               <p className="font-medium text-sm truncate">{t.description}</p>
                             </div>
-                            <span className="text-sm font-semibold shrink-0 text-amber-600">
-                              {formatCurrency(t.amount)}
-                            </span>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className={cn('text-sm font-semibold', t.type === 'income' ? 'text-emerald-600' : 'text-amber-600')}>
+                                {t.type === 'income' ? '+' : ''}{formatCurrency(t.amount)}
+                              </span>
+                              <span className={cn('text-[10px] px-1.5 py-0.5 rounded font-medium', t.type === 'income' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40' : 'bg-amber-50 text-amber-700 dark:bg-amber-950/40')}>
+                                {t.type === 'income' ? 'Received' : 'Owed'}
+                              </span>
+                            </div>
                           </div>
                           <p className="text-xs text-muted-foreground">
                             {format(new Date(t.date + 'T00:00:00'), 'dd MMM yyyy')} · {t.category}
