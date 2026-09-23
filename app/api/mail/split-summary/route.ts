@@ -19,7 +19,7 @@ function createTransporter() {
 }
 
 function fromAddress(creatorName: string) {
-  const addr = process.env.BREVO_SMTP_USER ?? 'noreply@example.com'
+  const addr = process.env.BREVO_FROM_EMAIL ?? process.env.BREVO_SMTP_USER ?? 'noreply@example.com'
   return `Finance Tracker (via ${creatorName}) <${addr}>`
 }
 
