@@ -19,7 +19,7 @@ import {
 import {
   Plus, Search, MoreHorizontal, Pencil, Trash2, FileUp, AlertTriangle,
   ChevronDown, ChevronRight, CreditCard, Smartphone, Loader2, BookUser,
-  Building2, ArrowUpDown, SplitSquareVertical,
+  Building2, ArrowUpDown, SplitSquareVertical, Download,
 } from 'lucide-react'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
 import { formatCurrency } from '@/lib/utils'
@@ -210,6 +210,25 @@ export default function TransactionList() {
 
   function openAdd() { setEditing(null); setModalOpen(true) }
   function openEdit(t: Transaction) { setEditing(t); setModalOpen(true) }
+
+  async function exportToExcel() {
+    const { utils, writeFile } = await import('xlsx')
+    const rows = filtered.map(t => ({
+      Date: t.date,
+      Description: t.description ?? '',
+      Category: t.category,
+      Type: t.type.charAt(0).toUpperCase() + t.type.slice(1),
+      Amount: t.type === 'expense' ? -t.amount : t.amount,
+      'Credit Card': (t as Transaction & { card_name?: string }).card_name ?? '',
+      Trip: (t as Transaction & { trip_name?: string }).trip_name ?? '',
+    }))
+    const ws = utils.json_to_sheet(rows)
+    ws['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 18 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 18 }]
+    const wb = utils.book_new()
+    utils.book_append_sheet(wb, ws, 'Transactions')
+    writeFile(wb, `transactions-${format(new Date(), 'yyyy-MM-dd')}.xlsx`)
+    toast.success('Exported to Excel')
+  }
 
   async function pasteSms() {
     try {
@@ -523,6 +542,9 @@ export default function TransactionList() {
 
           <div className="flex-1" />
 
+          <Button variant="outline" onClick={exportToExcel} className="shrink-0 h-8" title="Export to Excel">
+            <Download className="w-4 h-4 sm:mr-1" /><span className="hidden sm:inline text-xs">Export</span>
+          </Button>
           <Button variant="outline" onClick={() => setPdfOpen(true)} className="shrink-0 h-8" title="Import PDF">
             <FileUp className="w-4 h-4 sm:mr-1" /><span className="hidden sm:inline text-xs">Import PDF</span>
           </Button>
