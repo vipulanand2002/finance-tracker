@@ -480,8 +480,8 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
               </div>
             )}
 
-            {/* Card picker — always visible when cards exist; not applicable for trip transactions */}
-            {cards.length > 0 && !form.trip_id && (
+            {/* Card picker — visible whenever cards exist */}
+            {cards.length > 0 && (
               <div className="space-y-1">
                 <Label>
                   <span className="flex items-center gap-1.5">
