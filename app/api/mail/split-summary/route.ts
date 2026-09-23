@@ -1,28 +1,34 @@
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-import { Resend } from 'resend'
+import nodemailer from 'nodemailer'
 import { buildSplitReminderEmail } from '@/lib/email-templates/split-reminder'
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://finance-tracker.vercel.app'
 
-function getResend() {
-  const key = process.env.RESEND_API_KEY
-  if (!key) throw new Error('RESEND_API_KEY env var is required')
-  return new Resend(key)
+function createTransporter() {
+  const user = process.env.BREVO_SMTP_USER
+  const pass = process.env.BREVO_SMTP_KEY
+  if (!user || !pass) throw new Error('BREVO_SMTP_USER and BREVO_SMTP_KEY env vars are required')
+  return nodemailer.createTransport({
+    host: 'smtp-relay.brevo.com',
+    port: 587,
+    secure: false,
+    auth: { user, pass },
+  })
 }
 
 function fromAddress(creatorName: string) {
-  const addr = process.env.RESEND_FROM_EMAIL ?? process.env.GMAIL_USER ?? 'noreply@example.com'
+  const addr = process.env.BREVO_SMTP_USER ?? 'noreply@example.com'
   return `Finance Tracker (via ${creatorName}) <${addr}>`
 }
 
 // POST /api/mail/split-summary
 // Body: { split_id: string } — sends reminder to all unpaid participants who have an email
 export async function POST(request: Request) {
-  if (!process.env.RESEND_API_KEY) {
+  if (!process.env.BREVO_SMTP_USER || !process.env.BREVO_SMTP_KEY) {
     return NextResponse.json(
-      { error: 'Email service not configured — add RESEND_API_KEY to Vercel env vars' },
+      { error: 'Email service not configured — add BREVO_SMTP_USER and BREVO_SMTP_KEY to Vercel env vars' },
       { status: 503 }
     )
   }
@@ -115,7 +121,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const resend = getResend()
+  const transporter = createTransporter()
   let sent = 0
   const errors: string[] = []
 
@@ -152,19 +158,13 @@ export async function POST(request: Request) {
     })
 
     try {
-      const { error: sendError } = await resend.emails.send({
+      await transporter.sendMail({
         from: fromAddress(creatorName),
         to: participant.participant_email,
         subject,
         html,
-        ...(attachments.length > 0 ? {
-          attachments: attachments.map(a => ({
-            filename: a.filename,
-            content: a.content,
-          }))
-        } : {}),
+        ...(attachments.length > 0 ? { attachments } : {}),
       })
-      if (sendError) throw new Error(sendError.message)
       sent++
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
