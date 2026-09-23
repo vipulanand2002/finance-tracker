@@ -494,39 +494,34 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                   )
                 }
 
+                // Total = only direct expenses paid (who actually spent money)
                 const totalTrip = memberList.reduce((sum, m) => {
-                  const emailLower = m.email.toLowerCase()
-                  const splitShare = tripSplits
-                    .flatMap(s => s.split_participants)
-                    .filter(p =>
-                      (m.userId && p.participant_user_id === m.userId) ||
-                      (m.email && p.participant_email?.toLowerCase() === emailLower) ||
-                      (!m.email && !p.participant_email && p.participant_name.toLowerCase() === m.name.toLowerCase())
-                    )
-                    .reduce((s, p) => s + p.amount_owed, 0)
-                  const directSpent = m.userId
-                    ? transactions.filter(t => t.user_id === m.userId && t.type === 'expense' && !t.split_id).reduce((s, t) => s + t.amount, 0)
+                  const spent = m.userId
+                    ? transactions.filter(t => t.user_id === m.userId && t.type === 'expense').reduce((s, t) => s + t.amount, 0)
                     : 0
-                  return sum + splitShare + directSpent
+                  return sum + spent
                 }, 0)
 
                 return (
                   <div className="space-y-2">
                     {memberList.map(m => {
                       const emailLower = m.email.toLowerCase()
-                      const splitShare = tripSplits
+                      // What they actually paid out of pocket
+                      const directSpent = m.userId
+                        ? transactions.filter(t => t.user_id === m.userId && t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
+                        : 0
+                      // What they still owe from unpaid splits (informational)
+                      const splitOwed = tripSplits
                         .flatMap(s => s.split_participants)
                         .filter(p =>
-                          (m.userId && p.participant_user_id === m.userId) ||
-                          (m.email && p.participant_email?.toLowerCase() === emailLower) ||
-                          (!m.email && !p.participant_email && p.participant_name.toLowerCase() === m.name.toLowerCase())
+                          !p.is_paid && (
+                            (m.userId && p.participant_user_id === m.userId) ||
+                            (m.email && p.participant_email?.toLowerCase() === emailLower) ||
+                            (!m.email && !p.participant_email && p.participant_name.toLowerCase() === m.name.toLowerCase())
+                          )
                         )
                         .reduce((sum, p) => sum + p.amount_owed, 0)
-                      const directSpent = m.userId
-                        ? transactions.filter(t => t.user_id === m.userId && t.type === 'expense' && !t.split_id).reduce((sum, t) => sum + t.amount, 0)
-                        : 0
-                      const total = splitShare + directSpent
-                      const pct = totalTrip > 0 ? (total / totalTrip) * 100 : 0
+                      const pct = totalTrip > 0 ? (directSpent / totalTrip) * 100 : 0
                       const isMe = m.userId === currentUserId
 
                       return (
@@ -544,24 +539,23 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                               </div>
                             </div>
                             <div className="text-right shrink-0">
-                              <p className={`text-sm font-bold ${total > 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
-                                {total > 0 ? formatCurrency(total) : '—'}
+                              <p className={`text-sm font-bold ${directSpent > 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
+                                {directSpent > 0 ? formatCurrency(directSpent) : '—'}
                               </p>
-                              {totalTrip > 0 && total > 0 && (
+                              {totalTrip > 0 && directSpent > 0 && (
                                 <p className="text-[10px] text-muted-foreground">{Math.round(pct)}% of trip</p>
                               )}
                             </div>
                           </div>
-                          {(splitShare > 0 || directSpent > 0) && (
-                            <>
-                              <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                                <div className="h-full bg-primary/70 rounded-full" style={{ width: `${pct}%` }} />
-                              </div>
-                              <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
-                                {splitShare > 0 && <span>Splits: <span className="font-medium text-foreground">{formatCurrency(splitShare)}</span></span>}
-                                {directSpent > 0 && <span>Direct: <span className="font-medium text-foreground">{formatCurrency(directSpent)}</span></span>}
-                              </div>
-                            </>
+                          {directSpent > 0 && (
+                            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                              <div className="h-full bg-primary/70 rounded-full" style={{ width: `${pct}%` }} />
+                            </div>
+                          )}
+                          {splitOwed > 0 && (
+                            <p className="text-xs text-amber-600 dark:text-amber-400">
+                              Owes: <span className="font-medium">{formatCurrency(splitOwed)}</span>
+                            </p>
                           )}
                         </div>
                       )
