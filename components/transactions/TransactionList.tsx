@@ -542,8 +542,8 @@ export default function TransactionList() {
 
           <div className="flex-1" />
 
-          <Button variant="outline" onClick={exportToExcel} className="shrink-0 h-8" title="Export to Excel">
-            <Download className="w-4 h-4 sm:mr-1" /><span className="hidden sm:inline text-xs">Export</span>
+          <Button variant="outline" onClick={exportToExcel} className="shrink-0 h-8 gap-1.5" title="Export to Excel">
+            <Download className="w-4 h-4" /><span className="text-xs">Export</span>
           </Button>
           <Button variant="outline" onClick={() => setPdfOpen(true)} className="shrink-0 h-8" title="Import PDF">
             <FileUp className="w-4 h-4 sm:mr-1" /><span className="hidden sm:inline text-xs">Import PDF</span>
