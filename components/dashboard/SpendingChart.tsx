@@ -35,6 +35,13 @@ type Period = 'day' | 'week' | 'month'
 
 function currency(v: number) { return formatCurrency(v, true) }
 
+// Compact axis labels: ₹80k / ₹1.5L so they fit in the narrow Y-axis column on mobile
+function axisLabel(v: number): string {
+  if (v >= 100000) return `₹${(v / 100000) % 1 === 0 ? v / 100000 : (v / 100000).toFixed(1)}L`
+  if (v >= 1000) return `₹${(v / 1000) % 1 === 0 ? v / 1000 : (v / 1000).toFixed(1)}k`
+  return `₹${v}`
+}
+
 export default function SpendingChart({ dailyData, weeklyData, monthlyData, categoryData, selectedMonth, selectedCategory, onCategorySelect }: Props) {
   const [period, setPeriod] = useState<Period>('month')
 
@@ -85,7 +92,7 @@ export default function SpendingChart({ dailyData, weeklyData, monthlyData, cate
             </div>
 
             <ResponsiveContainer width="100%" height={240}>
-              <AreaChart data={trendData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+              <AreaChart data={trendData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="incomeGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#22c55e" stopOpacity={0.2} />
@@ -98,7 +105,7 @@ export default function SpendingChart({ dailyData, weeklyData, monthlyData, cate
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                 <XAxis {...xAxisProps} />
-                <YAxis tickFormatter={currency} tick={{ fontSize: 11 }} width={54} />
+                <YAxis tickFormatter={axisLabel} tick={{ fontSize: 11 }} width={44} />
                 <Tooltip formatter={(v) => currency(Number(v) || 0)} labelFormatter={label => `${period === 'day' ? 'Day ' : period === 'week' ? 'Week of ' : ''}${label}`} />
                 <Legend />
                 <Area type="monotone" dataKey="income" name="Income" stroke="#22c55e" fill="url(#incomeGrad)" strokeWidth={2} />
