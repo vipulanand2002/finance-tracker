@@ -500,11 +500,12 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                     .flatMap(s => s.split_participants)
                     .filter(p =>
                       (m.userId && p.participant_user_id === m.userId) ||
-                      (m.email && p.participant_email?.toLowerCase() === emailLower)
+                      (m.email && p.participant_email?.toLowerCase() === emailLower) ||
+                      (!m.email && !p.participant_email && p.participant_name.toLowerCase() === m.name.toLowerCase())
                     )
                     .reduce((s, p) => s + p.amount_owed, 0)
                   const directSpent = m.userId
-                    ? transactions.filter(t => t.user_id === m.userId && t.type === 'expense').reduce((s, t) => s + t.amount, 0)
+                    ? transactions.filter(t => t.user_id === m.userId && t.type === 'expense' && !t.split_id).reduce((s, t) => s + t.amount, 0)
                     : 0
                   return sum + splitShare + directSpent
                 }, 0)
@@ -517,11 +518,12 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                         .flatMap(s => s.split_participants)
                         .filter(p =>
                           (m.userId && p.participant_user_id === m.userId) ||
-                          (m.email && p.participant_email?.toLowerCase() === emailLower)
+                          (m.email && p.participant_email?.toLowerCase() === emailLower) ||
+                          (!m.email && !p.participant_email && p.participant_name.toLowerCase() === m.name.toLowerCase())
                         )
                         .reduce((sum, p) => sum + p.amount_owed, 0)
                       const directSpent = m.userId
-                        ? transactions.filter(t => t.user_id === m.userId && t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
+                        ? transactions.filter(t => t.user_id === m.userId && t.type === 'expense' && !t.split_id).reduce((sum, t) => sum + t.amount, 0)
                         : 0
                       const total = splitShare + directSpent
                       const pct = totalTrip > 0 ? (total / totalTrip) * 100 : 0
