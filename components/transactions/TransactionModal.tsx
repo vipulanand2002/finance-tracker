@@ -610,20 +610,25 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
           const participants: { name: string; email: string }[] = [
             { name: currentUser.name, email: currentUser.email },
           ]
-          // Accepted members (including name-only ones)
-          for (const m of (trip?.trip_members ?? [])) {
-            const email = m.email ?? ''
-            if (email && email.toLowerCase() === userEmailLower) continue
-            participants.push({ name: m.name || (email ? email.split('@')[0] : ''), email })
-          }
-          // Pending invitees
+          // All non-declined invitations are trip members
           const seenEmails = new Set(participants.filter(p => p.email).map(p => p.email.toLowerCase()))
           for (const inv of (trip?.trip_invitations ?? [])) {
-            const e = inv.invitee_email.toLowerCase()
-            if (inv.status === 'pending' && e !== userEmailLower && !seenEmails.has(e)) {
-              participants.push({ name: inv.invitee_name || inv.invitee_email.split('@')[0], email: inv.invitee_email })
-              seenEmails.add(e)
-            }
+            if (inv.status === 'declined') continue
+            const isPlaceholder = inv.invitee_email.startsWith('_nomail_')
+            const e = isPlaceholder ? '' : inv.invitee_email
+            if (e && e.toLowerCase() === userEmailLower) continue
+            if (e && seenEmails.has(e.toLowerCase())) continue
+            const name = inv.invitee_name || (e ? e.split('@')[0] : '')
+            if (!name) continue
+            participants.push({ name, email: e })
+            if (e) seenEmails.add(e.toLowerCase())
+          }
+          // Legacy trip_members not yet in invitations
+          for (const m of (trip?.trip_members ?? [])) {
+            const email = m.email ?? ''
+            if (!email || email.toLowerCase() === userEmailLower || seenEmails.has(email.toLowerCase())) continue
+            participants.push({ name: m.name || email.split('@')[0], email })
+            seenEmails.add(email.toLowerCase())
           }
           defaultParticipants = participants
         } else if (selectedContacts.length > 0) {

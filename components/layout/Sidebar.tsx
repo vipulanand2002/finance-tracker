@@ -20,6 +20,7 @@ import {
   Plane,
   MessageCircle,
   Settings,
+  Scale,
 } from 'lucide-react'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 
@@ -30,6 +31,7 @@ const navItems = [
   { label: 'Trips', href: '/trips', icon: Plane },
   { label: 'Budgets', href: '/budgets', icon: Target },
   { label: 'Splits', href: '/splits', icon: Users },
+  { label: 'Balances', href: '/balances', icon: Scale },
   { label: 'Friends', href: '/friends', icon: MessageCircle },
   { label: 'AI Assistant', href: '/ai', icon: BrainCircuit },
   { label: 'Settings', href: '/settings', icon: Settings },

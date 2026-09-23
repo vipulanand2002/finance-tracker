@@ -10,6 +10,10 @@ async function getUser() {
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>
 
+// Use trip_invitations as source of truth for all members.
+// Friends/no-account/name-only → status='accepted' (immediate membership).
+// Non-friend with account → status='pending' (real invitation flow).
+// Name-only members get a unique placeholder email so the unique constraint holds.
 async function addMembersToTrip(
   supabase: SupabaseClient,
   tripId: string,
@@ -22,55 +26,41 @@ async function addMembersToTrip(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
-  const directRows: { trip_id: string; email: string | null; name: string | null }[] = []
-  const inviteRows: { email: string; name: string | null }[] = []
+
+  const rows: {
+    trip_id: string; trip_name: string; inviter_id: string; inviter_email: string;
+    invitee_email: string; invitee_name: string | null; status: string
+  }[] = []
 
   for (const m of members) {
-    const email = m.email?.trim().toLowerCase() || null
+    const rawEmail = m.email?.trim().toLowerCase() || null
+    // Name-only members get a unique placeholder so the unique constraint is satisfied
+    const inviteeEmail = rawEmail || `_nomail_${Math.random().toString(36).slice(2, 9)}@local`
+    let status = 'accepted'
 
-    if (!email) {
-      // No email → add directly as name-only member
-      directRows.push({ trip_id: tripId, email: null, name: m.name?.trim() || null })
-      continue
+    if (rawEmail) {
+      const { data: profile } = await svc
+        .from('profiles').select('id').eq('email', rawEmail).maybeSingle()
+
+      if (profile && profile.id !== userId) {
+        const { data: friendship } = await supabase
+          .from('friendships').select('id')
+          .eq('user_id', userId).eq('friend_id', profile.id).maybeSingle()
+        if (!friendship) status = 'pending'
+      }
     }
 
-    // Check if user has an account
-    const { data: profile } = await svc
-      .from('profiles').select('id').eq('email', email).maybeSingle()
-
-    if (!profile) {
-      // No account → add directly
-      directRows.push({ trip_id: tripId, email, name: m.name?.trim() || null })
-      continue
-    }
-
-    // Has account — check friendship
-    const { data: friendship } = await supabase
-      .from('friendships').select('id')
-      .eq('user_id', userId).eq('friend_id', profile.id).maybeSingle()
-
-    if (friendship) {
-      directRows.push({ trip_id: tripId, email, name: m.name?.trim() || null })
-    } else {
-      inviteRows.push({ email, name: m.name?.trim() || null })
-    }
+    rows.push({
+      trip_id: tripId, trip_name: tripName,
+      inviter_id: userId, inviter_email: userEmail,
+      invitee_email: inviteeEmail,
+      invitee_name: m.name?.trim() || null,
+      status,
+    })
   }
 
-  if (directRows.length > 0) {
-    // Use service client to bypass RLS — trip_members inserts require elevated privileges
-    await svc.from('trip_members').insert(directRows)
-  }
-
-  if (inviteRows.length > 0) {
-    await supabase.from('trip_invitations').upsert(
-      inviteRows.map(m => ({
-        trip_id: tripId, trip_name: tripName,
-        inviter_id: userId, inviter_email: userEmail,
-        invitee_email: m.email, invitee_name: m.name,
-        status: 'pending',
-      })),
-      { onConflict: 'trip_id,invitee_email' }
-    )
+  if (rows.length > 0) {
+    await svc.from('trip_invitations').upsert(rows, { onConflict: 'trip_id,invitee_email' })
   }
 }
 
@@ -191,44 +181,49 @@ export async function PATCH(request: Request) {
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     )
+
+    // Read all current invitations for this trip via service client
+    const { data: currentInvitations } = await svcPatch
+      .from('trip_invitations').select('id, invitee_email, status')
+      .eq('trip_id', id).neq('status', 'declined')
+
+    // Delete placeholder (name-only) rows — they'll be regenerated with new placeholders
+    const placeholderIds = (currentInvitations ?? [])
+      .filter((i: { invitee_email: string }) => i.invitee_email.startsWith('_nomail_'))
+      .map((i: { id: string }) => i.id)
+    if (placeholderIds.length > 0) {
+      await svcPatch.from('trip_invitations').delete().in('id', placeholderIds)
+    }
+
+    // Real-email members currently in the trip
+    const currentRealEmails = (currentInvitations ?? [])
+      .filter((i: { invitee_email: string }) => !i.invitee_email.startsWith('_nomail_'))
+      .map((i: { invitee_email: string }) => i.invitee_email.toLowerCase())
+
+    // Submitted real-email members
     const submittedEmails = members
       .filter((m: { email: string }) => m.email?.trim())
       .map((m: { email: string }) => m.email.trim().toLowerCase())
 
-    // Remove name-only members and re-insert (they have no stable key)
-    await svcPatch.from('trip_members').delete().eq('trip_id', id).is('email', null)
-    await svcPatch.from('trip_members').delete().eq('trip_id', id).eq('email', '')
-
-    // Remove email-based members that were dropped
-    const { data: currentMembers } = await svcPatch
-      .from('trip_members').select('email').eq('trip_id', id)
-    const currentEmails = (currentMembers ?? [])
-      .map((m: { email: string | null }) => m.email?.toLowerCase())
-      .filter(Boolean) as string[]
-    const toRemoveEmails = currentEmails.filter(e => !submittedEmails.includes(e))
-    if (toRemoveEmails.length > 0) {
-      await svcPatch.from('trip_members').delete().eq('trip_id', id).in('email', toRemoveEmails)
-      await supabase.from('trip_invitations').delete()
-        .eq('trip_id', id).in('invitee_email', toRemoveEmails).eq('status', 'pending')
+    // Remove real-email members that the owner dropped
+    const toRemove = currentRealEmails.filter(e => !submittedEmails.includes(e))
+    if (toRemove.length > 0) {
+      await svcPatch.from('trip_invitations').delete()
+        .eq('trip_id', id).in('invitee_email', toRemove)
     }
 
-    // Determine which email-based members are truly new (not already accepted or pending)
-    const { data: currentInvitations } = await supabase
-      .from('trip_invitations').select('invitee_email').eq('trip_id', id).eq('status', 'pending')
-    const pendingEmails = new Set(
-      (currentInvitations ?? []).map((i: { invitee_email: string }) => i.invitee_email.toLowerCase())
-    )
-    const updatedCurrentEmails = new Set(
-      (currentEmails ?? []).filter(e => !toRemoveEmails.includes(e))
-    )
+    // Add only members that aren't already in the trip (avoid duplicate real-email rows)
+    const remaining = new Set(currentRealEmails.filter(e => !toRemove.includes(e)))
     const newMembers = members.filter((m: { email: string }) => {
       const e = m.email?.trim().toLowerCase()
-      return !e || (!updatedCurrentEmails.has(e) && !pendingEmails.has(e))
+      return !e || !remaining.has(e) // name-only always re-added; email-based only if new
     })
 
     const tripName = (tripData as { name?: string }).name ??
-      (await supabase.from('trips').select('name').eq('id', id).single()).data?.name ?? ''
-    await addMembersToTrip(supabase, id, tripName, user.id, user.email ?? '', newMembers)
+      (await svcPatch.from('trips').select('name').eq('id', id).single()).data?.name ?? ''
+    if (newMembers.length > 0) {
+      await addMembersToTrip(supabase, id, tripName, user.id, user.email ?? '', newMembers)
+    }
   }
 
   return NextResponse.json({ success: true })

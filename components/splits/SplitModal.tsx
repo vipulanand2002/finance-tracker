@@ -292,20 +292,25 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
     const rows: Participant[] = []
     if (myEmail) rows.push({ name: myName, email: myEmail, amount: '' })
 
-    // Accepted members (including name-only ones with no email)
-    for (const m of (trip?.trip_members ?? [])) {
-      const email = m.email ?? ''
-      if (email && email.toLowerCase() === myEmailLower) continue
-      rows.push({ name: m.name || (email ? email.split('@')[0] : ''), email, amount: '' })
-    }
-    // Pending invitees (added but haven't accepted yet)
+    // All non-declined invitations are members (accepted = direct add, pending = awaiting)
     const seenEmails = new Set(rows.filter(r => r.email).map(r => r.email.toLowerCase()))
     for (const inv of (trip?.trip_invitations ?? [])) {
-      const e = inv.invitee_email.toLowerCase()
-      if (inv.status === 'pending' && e !== myEmailLower && !seenEmails.has(e)) {
-        rows.push({ name: inv.invitee_name || inv.invitee_email.split('@')[0], email: inv.invitee_email, amount: '' })
-        seenEmails.add(e)
-      }
+      if (inv.status === 'declined') continue
+      const isPlaceholder = inv.invitee_email.startsWith('_nomail_')
+      const e = isPlaceholder ? '' : inv.invitee_email
+      if (e && e.toLowerCase() === myEmailLower) continue
+      if (e && seenEmails.has(e.toLowerCase())) continue
+      const name = inv.invitee_name || (e ? e.split('@')[0] : '')
+      if (!name) continue
+      rows.push({ name, email: e, amount: '' })
+      if (e) seenEmails.add(e.toLowerCase())
+    }
+    // Legacy trip_members not yet in invitations
+    for (const m of (trip?.trip_members ?? [])) {
+      const email = m.email ?? ''
+      if (!email || email.toLowerCase() === myEmailLower || seenEmails.has(email.toLowerCase())) continue
+      rows.push({ name: m.name || email.split('@')[0], email, amount: '' })
+      seenEmails.add(email.toLowerCase())
     }
 
     if (rows.length === 0) return
