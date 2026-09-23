@@ -11,10 +11,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   Upload, Loader2, CheckSquare, Square, Eye, EyeOff,
   ChevronDown, ChevronUp, FileText, ArrowUpCircle, ArrowDownCircle, KeyRound,
+  Plus, X,
 } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
-import type { Trip, Contact } from '@/types'
+import type { Trip } from '@/types'
+
+interface Friend { id: string; name: string; email: string | null }
+
+interface SplitParticipant { name: string; email: string; amount: string }
 
 interface EditableTx {
   date: string
@@ -26,7 +31,7 @@ interface EditableTx {
   trip_id: string | null
   contact_id: string | null
   split_enabled: boolean
-  split_amount: string
+  split_participants: SplitParticipant[]
   selected: boolean
   expanded: boolean
 }
@@ -56,7 +61,11 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
   const [cycleStart, setCycleStart] = useState('')
   const [cycleEnd, setCycleEnd] = useState('')
   const [trips, setTrips] = useState<Trip[]>([])
-  const [contacts, setContacts] = useState<Contact[]>([])
+  const [friends, setFriends] = useState<Friend[]>([])
+  // inline "add new friend" state per-row
+  const [addingFriendRow, setAddingFriendRow] = useState<number | null>(null)
+  const [newFriendName, setNewFriendName] = useState('')
+  const [newFriendEmail, setNewFriendEmail] = useState('')
   const [expenseCategories, setExpenseCategories] = useState<string[]>([...EXPENSE_CATEGORIES])
   const [incomeCategories, setIncomeCategories] = useState<string[]>([...INCOME_CATEGORIES])
   const fileRef = useRef<HTMLInputElement>(null)
@@ -68,7 +77,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
   useEffect(() => {
     if (!open) return
     fetch('/api/trips').then(r => r.json()).then(d => setTrips(Array.isArray(d) ? d : [])).catch(() => {})
-    fetch('/api/contacts').then(r => r.json()).then(d => setContacts(Array.isArray(d) ? d : [])).catch(() => {})
+    fetch('/api/friends').then(r => r.json()).then(d => setFriends(Array.isArray(d) ? d : [])).catch(() => {})
     fetch('/api/categories')
       .then(r => r.json())
       .then((data: { list_type: string; name: string }[]) => {
@@ -151,7 +160,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
 
       const parsed: EditableTx[] = data.transactions.map(
         (t: Omit<EditableTx, 'note' | 'trip_id' | 'contact_id' | 'selected' | 'expanded'>) => ({
-          ...t, note: '', trip_id: null, contact_id: null, split_enabled: false, split_amount: '', selected: true, expanded: false,
+          ...t, note: '', trip_id: null, contact_id: null, split_enabled: false, split_participants: [], selected: true, expanded: false,
         })
       )
       setTransactions(parsed)
@@ -184,6 +193,28 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
 
   function updateTx(idx: number, patch: Partial<EditableTx>) {
     setTransactions(prev => prev.map((t, i) => i === idx ? { ...t, ...patch } : t))
+  }
+
+  async function handleAddFriend(txIdx: number) {
+    const name = newFriendName.trim()
+    if (!name) return
+    const email = newFriendEmail.trim().toLowerCase() || null
+    try {
+      const res = await fetch('/api/friends', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        const newFriend: Friend = { id: data.id, name: data.name, email: data.email }
+        setFriends(prev => [...prev, newFriend].sort((a, b) => a.name.localeCompare(b.name)))
+        updateTx(txIdx, { contact_id: data.id })
+      }
+    } catch { /* silent */ }
+    setNewFriendName('')
+    setNewFriendEmail('')
+    setAddingFriendRow(null)
   }
 
   const monthGroups = useCallback(() => {
@@ -220,9 +251,9 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
         if (res.ok) {
           imported++
           // Create a split if requested
-          if (t.split_enabled && t.contact_id && t.split_amount && parseFloat(t.split_amount) > 0) {
-            const contact = contacts.find(c => c.id === t.contact_id)
-            if (contact) {
+          if (t.split_enabled && t.split_participants.length > 0) {
+            const validParticipants = t.split_participants.filter(p => p.name.trim() && parseFloat(p.amount) > 0)
+            if (validParticipants.length > 0) {
               await fetch('/api/splits', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -231,10 +262,12 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                   total_amount: t.amount,
                   category: t.category,
                   date: t.date,
-                  contact_id: t.contact_id,
-                  participants: [
-                    { name: contact.name, email: contact.email ?? '', amount: parseFloat(t.split_amount) },
-                  ],
+                  contact_id: t.contact_id ?? null,
+                  participants: validParticipants.map(p => ({
+                    name: p.name.trim(),
+                    email: p.email.trim() || '',
+                    amount: parseFloat(p.amount),
+                  })),
                 }),
               }).catch(() => {})
             }
@@ -532,29 +565,47 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                                   />
                                 </div>
                                 <div className="grid grid-cols-2 gap-2.5">
-                                  {contacts.length > 0 && (
-                                    <div className="space-y-1">
-                                      <Label className="text-xs">
-                                        Contact <span className="text-muted-foreground font-normal">(optional)</span>
-                                      </Label>
-                                      {/* key forces re-mount when contacts load so display name resolves correctly */}
+                                  <div className="space-y-1">
+                                    <div className="flex items-center justify-between">
+                                      <Label className="text-xs">Friend <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                                      {addingFriendRow !== absIdx && (
+                                        <button onClick={() => { setAddingFriendRow(absIdx); setNewFriendName(''); setNewFriendEmail('') }}
+                                          className="text-[10px] text-primary hover:underline flex items-center gap-0.5">
+                                          <Plus className="w-2.5 h-2.5" />New
+                                        </button>
+                                      )}
+                                    </div>
+                                    {addingFriendRow === absIdx ? (
+                                      <div className="space-y-1">
+                                        <Input placeholder="Name *" value={newFriendName} onChange={e => setNewFriendName(e.target.value)} className="h-7 text-xs" />
+                                        <Input placeholder="Email (optional)" type="email" value={newFriendEmail} onChange={e => setNewFriendEmail(e.target.value)} className="h-7 text-xs" />
+                                        <div className="flex gap-1">
+                                          <Button size="sm" className="h-6 text-[10px] flex-1 px-1" onClick={() => handleAddFriend(absIdx)}>Add</Button>
+                                          <Button size="sm" variant="ghost" className="h-6 text-[10px] px-1" onClick={() => setAddingFriendRow(null)}>Cancel</Button>
+                                        </div>
+                                      </div>
+                                    ) : (
                                       <Select
-                                        key={`c-${contacts.length}-${tx.contact_id}`}
+                                        key={`f-${friends.length}-${tx.contact_id}`}
                                         value={tx.contact_id ?? 'none'}
                                         onValueChange={v => updateTx(absIdx, { contact_id: v === 'none' ? null : v })}
                                       >
                                         <SelectTrigger className="h-8 text-xs">
-                                          <SelectValue placeholder="Link to a contact" />
+                                          <span className="text-xs truncate">
+                                            {tx.contact_id
+                                              ? (friends.find(f => f.id === tx.contact_id)?.name ?? 'Unknown')
+                                              : <span className="text-muted-foreground">Tag a friend…</span>}
+                                          </span>
                                         </SelectTrigger>
                                         <SelectContent>
-                                          <SelectItem value="none">No contact</SelectItem>
-                                          {contacts.map(c => (
-                                            <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                                          <SelectItem value="none">No friend</SelectItem>
+                                          {friends.map(f => (
+                                            <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
                                           ))}
                                         </SelectContent>
                                       </Select>
-                                    </div>
-                                  )}
+                                    )}
+                                  </div>
                                   {trips.length > 0 && (
                                     <div className="space-y-1">
                                       <Label className="text-xs">
@@ -580,7 +631,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                                   )}
                                 </div>
 
-                                {/* Split — always visible for expense transactions */}
+                                {/* Split — for expense transactions */}
                                 {tx.type === 'expense' && (
                                   <div className="space-y-1.5 pt-1 border-t">
                                     <div className="flex items-center gap-2">
@@ -588,51 +639,113 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                                         type="checkbox"
                                         id={`split-${absIdx}`}
                                         checked={tx.split_enabled}
-                                        onChange={e => updateTx(absIdx, {
-                                          split_enabled: e.target.checked,
-                                          split_amount: e.target.checked
-                                            ? (tx.amount / 2).toFixed(2)
-                                            : '',
-                                        })}
+                                        onChange={e => {
+                                          const enabled = e.target.checked
+                                          updateTx(absIdx, {
+                                            split_enabled: enabled,
+                                            split_participants: enabled && tx.split_participants.length === 0
+                                              ? [{ name: '', email: '', amount: (tx.amount / 2).toFixed(2) }]
+                                              : tx.split_participants,
+                                          })
+                                        }}
                                         className="w-3.5 h-3.5 rounded"
                                       />
                                       <Label htmlFor={`split-${absIdx}`} className="text-xs cursor-pointer font-medium">
-                                        Create split
+                                        Split this expense
                                       </Label>
                                     </div>
                                     {tx.split_enabled && (
                                       <div className="pl-5 space-y-2">
-                                        {contacts.length > 0 && (
-                                          <Select
-                                            key={`sc-${contacts.length}-${tx.contact_id}`}
-                                            value={tx.contact_id ?? 'none'}
-                                            onValueChange={v => updateTx(absIdx, { contact_id: v === 'none' ? null : v })}
-                                          >
-                                            <SelectTrigger className="h-7 text-xs">
-                                              <SelectValue placeholder="Select who to split with" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                              <SelectItem value="none">Select contact</SelectItem>
-                                              {contacts.map(c => (
-                                                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                                              ))}
-                                            </SelectContent>
-                                          </Select>
-                                        )}
-                                        <div className="flex items-center gap-2">
-                                          <Label className="text-xs text-muted-foreground shrink-0">Their share</Label>
-                                          <Input
-                                            type="number"
-                                            min="0.01"
-                                            step="0.01"
-                                            value={tx.split_amount}
-                                            onChange={e => updateTx(absIdx, { split_amount: e.target.value })}
-                                            className="h-7 text-xs w-28"
-                                          />
-                                          <span className="text-xs text-muted-foreground">
-                                            of {formatCurrency(tx.amount)}
-                                          </span>
-                                        </div>
+                                        {tx.split_participants.map((p, pIdx) => (
+                                          <div key={pIdx} className="space-y-1 p-2 rounded-lg border bg-background">
+                                            <div className="flex items-center gap-1.5">
+                                              {/* name: pick from friends or type new */}
+                                              <div className="flex-1 min-w-0">
+                                                <Select
+                                                  value={friends.find(f => f.name === p.name)?.id ?? '__custom__'}
+                                                  onValueChange={v => {
+                                                    const friend = friends.find(f => f.id === v)
+                                                    const updated = [...tx.split_participants]
+                                                    updated[pIdx] = { ...updated[pIdx], name: friend?.name ?? '', email: friend?.email ?? updated[pIdx].email }
+                                                    updateTx(absIdx, { split_participants: updated })
+                                                  }}
+                                                >
+                                                  <SelectTrigger className="h-7 text-xs">
+                                                    <span className="text-xs truncate">
+                                                      {p.name || <span className="text-muted-foreground">Pick friend…</span>}
+                                                    </span>
+                                                  </SelectTrigger>
+                                                  <SelectContent>
+                                                    <SelectItem value="__custom__">Type a name…</SelectItem>
+                                                    {friends.map(f => (
+                                                      <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                                                    ))}
+                                                  </SelectContent>
+                                                </Select>
+                                              </div>
+                                              <button
+                                                onClick={() => {
+                                                  const updated = tx.split_participants.filter((_, i) => i !== pIdx)
+                                                  updateTx(absIdx, { split_participants: updated })
+                                                }}
+                                                className="text-muted-foreground hover:text-destructive shrink-0"
+                                              >
+                                                <X className="w-3.5 h-3.5" />
+                                              </button>
+                                            </div>
+                                            {/* custom name input if not from friends list */}
+                                            {!friends.some(f => f.name === p.name) && (
+                                              <Input
+                                                placeholder="Name *"
+                                                value={p.name}
+                                                onChange={e => {
+                                                  const updated = [...tx.split_participants]
+                                                  updated[pIdx] = { ...updated[pIdx], name: e.target.value }
+                                                  updateTx(absIdx, { split_participants: updated })
+                                                }}
+                                                className="h-7 text-xs"
+                                              />
+                                            )}
+                                            <div className="flex gap-1.5">
+                                              <Input
+                                                placeholder="Email (optional)"
+                                                type="email"
+                                                value={p.email}
+                                                onChange={e => {
+                                                  const updated = [...tx.split_participants]
+                                                  updated[pIdx] = { ...updated[pIdx], email: e.target.value }
+                                                  updateTx(absIdx, { split_participants: updated })
+                                                }}
+                                                className="h-7 text-xs flex-1"
+                                              />
+                                              <Input
+                                                type="number" min="0.01" step="0.01"
+                                                placeholder="Amount"
+                                                value={p.amount}
+                                                onChange={e => {
+                                                  const updated = [...tx.split_participants]
+                                                  updated[pIdx] = { ...updated[pIdx], amount: e.target.value }
+                                                  updateTx(absIdx, { split_participants: updated })
+                                                }}
+                                                className="h-7 text-xs w-24"
+                                              />
+                                            </div>
+                                          </div>
+                                        ))}
+                                        <button
+                                          onClick={() => {
+                                            const updated = [...tx.split_participants, { name: '', email: '', amount: '' }]
+                                            updateTx(absIdx, { split_participants: updated })
+                                          }}
+                                          className="flex items-center gap-1 text-xs text-primary hover:underline"
+                                        >
+                                          <Plus className="w-3 h-3" /> Add person
+                                        </button>
+                                        <p className="text-[10px] text-muted-foreground">
+                                          Total: {formatCurrency(tx.amount)} · Remaining: {formatCurrency(
+                                            tx.amount - tx.split_participants.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
+                                          )}
+                                        </p>
                                       </div>
                                     )}
                                   </div>
