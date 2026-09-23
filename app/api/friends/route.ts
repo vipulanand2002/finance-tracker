@@ -92,6 +92,31 @@ export async function GET() {
   )
 }
 
+// ─── helper: back-fill email on split participants with matching name ──────────
+async function backfillSplitParticipants(
+  supabase: Awaited<ReturnType<typeof import('@/lib/supabase/server').createClient>>,
+  userId: string,
+  name: string,
+  email: string,
+) {
+  // Get all split IDs owned by this user
+  const { data: userSplits } = await supabase
+    .from('expense_splits')
+    .select('id')
+    .eq('created_by', userId)
+
+  const splitIds = (userSplits ?? []).map((s: { id: string }) => s.id)
+  if (splitIds.length === 0) return
+
+  // Update participants where name matches and email is not yet set
+  await supabase
+    .from('split_participants')
+    .update({ participant_email: email })
+    .in('split_id', splitIds)
+    .ilike('participant_name', name)
+    .is('participant_email', null)
+}
+
 // ─── POST /api/friends ────────────────────────────────────────────────────────
 // Body: { name, email?, notes? }
 // Saves to contacts. If email matches a profile → also creates friendship for chat.
@@ -185,6 +210,11 @@ export async function POST(request: Request) {
     }
   }
 
+  // Back-fill email on any existing split participants with this name
+  if (email) {
+    backfillSplitParticipants(supabase, user.id, name, email).catch(() => {})
+  }
+
   return NextResponse.json({
     ...contact,
     connected: !!friendshipId,
@@ -256,6 +286,11 @@ export async function PUT(request: Request) {
         friendshipId = existing.id
       }
     }
+  }
+
+  // Back-fill email on any existing split participants with this name
+  if (email) {
+    backfillSplitParticipants(supabase, user.id, name, email).catch(() => {})
   }
 
   return NextResponse.json({

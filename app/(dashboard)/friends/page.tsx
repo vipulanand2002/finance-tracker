@@ -373,7 +373,9 @@ export default function FriendsPage() {
     return sum + relevant.reduce((a, p) => a + p.amount_owed, 0)
   }, 0)
   const txnOwed = taggedTxns.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
-  const totalOwed = splitOwed + txnOwed
+  const txnReceived = taggedTxns.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
+  // positive = friend owes you; negative = you owe friend
+  const netBalance = splitOwed + txnOwed - txnReceived
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -626,26 +628,35 @@ export default function FriendsPage() {
                 {!loadingSplits && (splits.length > 0 || taggedTxns.length > 0) && (
                   <div className={cn(
                     'rounded-xl p-4',
-                    totalOwed > 0 ? 'bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800' : 'bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800'
+                    netBalance > 0 ? 'bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800'
+                    : netBalance < 0 ? 'bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800'
+                    : 'bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800'
                   )}>
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-xs text-muted-foreground">
-                          {totalOwed > 0 ? `${selected.name} owes you` : 'All settled up'}
+                          {netBalance > 0 ? `${selected.name} owes you`
+                            : netBalance < 0 ? `You owe ${selected.name}`
+                            : 'All settled up'}
                         </p>
-                        {totalOwed > 0 && <p className="text-xl font-bold text-amber-600">{formatCurrency(totalOwed)}</p>}
+                        {netBalance !== 0 && (
+                          <p className={cn('text-xl font-bold', netBalance > 0 ? 'text-amber-600' : 'text-blue-600')}>
+                            {formatCurrency(Math.abs(netBalance))}
+                          </p>
+                        )}
                       </div>
-                      {selected.email && (
+                      {selected.email && netBalance > 0 && (
                         <Button size="sm" variant="outline" onClick={() => sendReminder(selected)} disabled={sendingReminder}>
                           {sendingReminder ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Mail className="w-3.5 h-3.5 mr-1.5" />}
                           Remind
                         </Button>
                       )}
                     </div>
-                    {totalOwed > 0 && splitOwed > 0 && txnOwed > 0 && (
-                      <div className="mt-2 flex gap-3 text-xs text-muted-foreground">
-                        <span>Splits: <span className="font-medium text-amber-600">{formatCurrency(splitOwed)}</span></span>
-                        <span>Tagged: <span className="font-medium text-amber-600">{formatCurrency(txnOwed)}</span></span>
+                    {(splitOwed > 0 || txnOwed > 0 || txnReceived > 0) && (
+                      <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                        {splitOwed > 0 && <span>Splits: <span className="font-medium text-amber-600">{formatCurrency(splitOwed)}</span></span>}
+                        {txnOwed > 0 && <span>Expenses: <span className="font-medium text-amber-600">{formatCurrency(txnOwed)}</span></span>}
+                        {txnReceived > 0 && <span>Received: <span className="font-medium text-emerald-600">−{formatCurrency(txnReceived)}</span></span>}
                       </div>
                     )}
                   </div>
