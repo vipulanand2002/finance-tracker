@@ -58,14 +58,17 @@ export default function SpendingChart({ dailyData, weeklyData, monthlyData, cate
       </CardHeader>
       <CardContent>
         <Tabs defaultValue="trend">
-          <TabsList className="mb-4">
-            <TabsTrigger value="trend">Trend</TabsTrigger>
-            <TabsTrigger value="categories">By Category ({selectedMonth})</TabsTrigger>
+          <TabsList className="mb-4 w-full sm:w-auto">
+            <TabsTrigger value="trend" className="flex-1 sm:flex-none">Trend</TabsTrigger>
+            <TabsTrigger value="categories" className="flex-1 sm:flex-none">
+              <span className="hidden sm:inline">By Category ({selectedMonth})</span>
+              <span className="sm:hidden">Categories</span>
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="trend">
             {/* Period toggle */}
-            <div className="flex items-center gap-1 mb-4">
+            <div className="flex flex-wrap items-center gap-1 mb-4">
               <span className="text-xs text-muted-foreground mr-1">View:</span>
               {(['day', 'week', 'month'] as Period[]).map(p => (
                 <Button
@@ -78,7 +81,7 @@ export default function SpendingChart({ dailyData, weeklyData, monthlyData, cate
                   {p === 'day' ? 'Daily' : p === 'week' ? 'Weekly' : 'Monthly'}
                 </Button>
               ))}
-              <span className="ml-auto text-xs text-muted-foreground">{periodLabel}</span>
+              <span className="ml-auto text-xs text-muted-foreground whitespace-nowrap">{periodLabel}</span>
             </div>
 
             <ResponsiveContainer width="100%" height={240}>
@@ -95,7 +98,7 @@ export default function SpendingChart({ dailyData, weeklyData, monthlyData, cate
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                 <XAxis {...xAxisProps} />
-                <YAxis tickFormatter={currency} tick={{ fontSize: 12 }} width={60} />
+                <YAxis tickFormatter={currency} tick={{ fontSize: 11 }} width={54} />
                 <Tooltip formatter={(v) => currency(Number(v) || 0)} labelFormatter={label => `${period === 'day' ? 'Day ' : period === 'week' ? 'Week of ' : ''}${label}`} />
                 <Legend />
                 <Area type="monotone" dataKey="income" name="Income" stroke="#22c55e" fill="url(#incomeGrad)" strokeWidth={2} />
@@ -116,16 +119,16 @@ export default function SpendingChart({ dailyData, weeklyData, monthlyData, cate
                     Showing <span className="font-medium text-foreground">{selectedCategory}</span> · click slice again to clear
                   </p>
                 )}
-                <ResponsiveContainer width="100%" height={240}>
-                  <PieChart>
+                <ResponsiveContainer width="100%" height={280}>
+                  <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                     <Pie
                       data={categoryData}
                       dataKey="amount"
                       nameKey="category"
                       cx="50%"
-                      cy="50%"
-                      innerRadius={55}
-                      outerRadius={85}
+                      cy="42%"
+                      innerRadius={50}
+                      outerRadius={80}
                       paddingAngle={2}
                       style={{ cursor: onCategorySelect ? 'pointer' : 'default' }}
                       onClick={(data) => {
@@ -143,7 +146,10 @@ export default function SpendingChart({ dailyData, weeklyData, monthlyData, cate
                       ))}
                     </Pie>
                     <Tooltip formatter={(v) => currency(Number(v) || 0)} />
-                    <Legend formatter={v => <span className="text-xs">{v}</span>} />
+                    <Legend
+                      formatter={v => <span className="text-xs">{v}</span>}
+                      wrapperStyle={{ fontSize: 11, paddingTop: 4 }}
+                    />
                   </PieChart>
                 </ResponsiveContainer>
               </>

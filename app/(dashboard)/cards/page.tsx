@@ -100,12 +100,12 @@ function BarChartView({ txs }: { txs: Transaction[] }) {
     <div className="space-y-3">
       {cats.map(([cat, amt]) => (
         <div key={cat} className="space-y-1">
-          <div className="flex justify-between text-xs">
-            <div className="flex items-center gap-1.5">
+          <div className="flex items-center justify-between text-xs gap-2">
+            <div className="flex items-center gap-1.5 min-w-0 flex-1">
               <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: CATEGORY_COLORS[cat] ?? '#94a3b8' }} />
-              <span className="text-muted-foreground">{cat}</span>
+              <span className="text-muted-foreground truncate">{cat}</span>
             </div>
-            <span className="font-medium">{formatCurrency(amt)}</span>
+            <span className="font-medium shrink-0">{formatCurrency(amt)}</span>
           </div>
           <div className="h-2 rounded-full bg-muted overflow-hidden">
             <div
@@ -236,29 +236,31 @@ function BudgetSection({
                 style={{ backgroundColor: CATEGORY_COLORS[cat] ?? '#94a3b8' }}
               />
               <span className="text-sm flex-1 min-w-0 truncate">{cat}</span>
-              <span className="text-xs text-muted-foreground shrink-0">{formatCurrency(spent)}</span>
-              {canEdit ? (
-                <div className="relative shrink-0">
-                  <Input
-                    type="number"
-                    min="0"
-                    placeholder="Budget"
-                    value={inputs[cat] ?? ''}
-                    onChange={e => setInputs(i => ({ ...i, [cat]: e.target.value }))}
-                    onBlur={() => handleBlur(cat)}
-                    className="w-24 h-7 text-xs pr-1"
-                    disabled={saving[cat]}
-                  />
-                  {saving[cat] && (
-                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">…</span>
-                  )}
-                </div>
-              ) : (
-                budgetAmt > 0 && (
-                  <span className="text-xs text-muted-foreground shrink-0">/ {formatCurrency(budgetAmt)}</span>
-                )
-              )}
-              {over && <Badge variant="destructive" className="text-[10px] px-1.5 py-0 shrink-0">Over</Badge>}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="text-xs text-muted-foreground">{formatCurrency(spent)}</span>
+                {canEdit ? (
+                  <div className="relative">
+                    <Input
+                      type="number"
+                      min="0"
+                      placeholder="Budget"
+                      value={inputs[cat] ?? ''}
+                      onChange={e => setInputs(i => ({ ...i, [cat]: e.target.value }))}
+                      onBlur={() => handleBlur(cat)}
+                      className="w-20 h-7 text-xs pr-1"
+                      disabled={saving[cat]}
+                    />
+                    {saving[cat] && (
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">…</span>
+                    )}
+                  </div>
+                ) : (
+                  budgetAmt > 0 && (
+                    <span className="text-xs text-muted-foreground">/ {formatCurrency(budgetAmt)}</span>
+                  )
+                )}
+                {over && <Badge variant="destructive" className="text-[10px] px-1.5 py-0">Over</Badge>}
+              </div>
             </div>
             {budgetAmt > 0 && (
               <div className="pl-4">
@@ -558,16 +560,15 @@ export default function CardsPage() {
                     </Button>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
                   {/* Card selector */}
                   <Select value={selectedCardId} onValueChange={v => {
                     if (!v) return
                     setSelectedCardId(v)
                     setSelectedCycle('all')
-                    // Cycle mode only works per-card; fall back to monthly for all-cards
                     if (v === 'all' && periodMode === 'cycle') setPeriodMode('monthly')
                   }}>
-                    <SelectTrigger className="w-40 h-8 text-xs">
+                    <SelectTrigger className="h-8 text-xs w-full sm:w-40">
                       <span className="flex-1 truncate text-left">
                         {selectedCardId === 'all'
                           ? 'All Cards'
@@ -582,60 +583,62 @@ export default function CardsPage() {
                     </SelectContent>
                   </Select>
 
-                  {/* Period mode toggle */}
-                  <div className="flex rounded-md border overflow-hidden text-xs">
-                    <button
-                      className={`px-3 py-1.5 transition-colors ${periodMode === 'monthly' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted text-muted-foreground'}`}
-                      onClick={() => { setPeriodMode('monthly'); setSelectedCycle('all') }}
-                    >
-                      Monthly
-                    </button>
-                    <button
-                      disabled={selectedCardId === 'all'}
-                      className={`px-3 py-1.5 border-l transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${periodMode === 'cycle' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted text-muted-foreground'}`}
-                      onClick={() => { setPeriodMode('cycle'); setSelectedMonth('all') }}
-                    >
-                      Cycle
-                    </button>
-                  </div>
+                  <div className="flex items-center gap-2">
+                    {/* Period mode toggle */}
+                    <div className="flex rounded-md border overflow-hidden text-xs shrink-0">
+                      <button
+                        className={`px-3 py-1.5 transition-colors ${periodMode === 'monthly' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted text-muted-foreground'}`}
+                        onClick={() => { setPeriodMode('monthly'); setSelectedCycle('all') }}
+                      >
+                        Monthly
+                      </button>
+                      <button
+                        disabled={selectedCardId === 'all'}
+                        className={`px-3 py-1.5 border-l transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${periodMode === 'cycle' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted text-muted-foreground'}`}
+                        onClick={() => { setPeriodMode('cycle'); setSelectedMonth('all') }}
+                      >
+                        Cycle
+                      </button>
+                    </div>
 
-                  {/* Period selector */}
-                  {periodMode === 'monthly' ? (
-                    <Select value={selectedMonth} onValueChange={v => v && setSelectedMonth(v)}>
-                      <SelectTrigger className="w-36 h-8 text-xs"><SelectValue placeholder="All Time" /></SelectTrigger>
-                      <SelectContent>
-                        {MONTH_OPTIONS.map(opt => (
-                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <Select value={selectedCycle} onValueChange={v => v && setSelectedCycle(v)}>
-                      <SelectTrigger className="w-52 h-8 text-xs">
-                        <span className="flex-1 truncate text-left">
-                          {(() => {
-                            if (selectedCycle === 'all') return 'All Cycles'
-                            const s = statements.find(st => st.id === selectedCycle)
-                            if (!s) return 'All Cycles'
-                            return `${format(new Date(s.cycle_start + 'T00:00:00'), 'dd MMM')} – ${format(new Date(s.cycle_end + 'T00:00:00'), 'dd MMM yyyy')}`
-                          })()}
-                        </span>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Cycles</SelectItem>
-                        {statements.map(s => (
-                          <SelectItem key={s.id} value={s.id}>
-                            {format(new Date(s.cycle_start + 'T00:00:00'), 'dd MMM')}
-                            {' – '}
-                            {format(new Date(s.cycle_end + 'T00:00:00'), 'dd MMM yyyy')}
-                          </SelectItem>
-                        ))}
-                        {statements.length === 0 && (
-                          <SelectItem value="none" disabled>No cycles yet — import a PDF</SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                  )}
+                    {/* Period selector */}
+                    {periodMode === 'monthly' ? (
+                      <Select value={selectedMonth} onValueChange={v => v && setSelectedMonth(v)}>
+                        <SelectTrigger className="flex-1 sm:w-36 h-8 text-xs"><SelectValue placeholder="All Time" /></SelectTrigger>
+                        <SelectContent>
+                          {MONTH_OPTIONS.map(opt => (
+                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Select value={selectedCycle} onValueChange={v => v && setSelectedCycle(v)}>
+                        <SelectTrigger className="flex-1 sm:w-52 h-8 text-xs">
+                          <span className="flex-1 truncate text-left">
+                            {(() => {
+                              if (selectedCycle === 'all') return 'All Cycles'
+                              const s = statements.find(st => st.id === selectedCycle)
+                              if (!s) return 'All Cycles'
+                              return `${format(new Date(s.cycle_start + 'T00:00:00'), 'dd MMM')} – ${format(new Date(s.cycle_end + 'T00:00:00'), 'dd MMM yyyy')}`
+                            })()}
+                          </span>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Cycles</SelectItem>
+                          {statements.map(s => (
+                            <SelectItem key={s.id} value={s.id}>
+                              {format(new Date(s.cycle_start + 'T00:00:00'), 'dd MMM')}
+                              {' – '}
+                              {format(new Date(s.cycle_end + 'T00:00:00'), 'dd MMM yyyy')}
+                            </SelectItem>
+                          ))}
+                          {statements.length === 0 && (
+                            <SelectItem value="none" disabled>No cycles yet — import a PDF</SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
                 </div>
               </div>
             </CardHeader>
