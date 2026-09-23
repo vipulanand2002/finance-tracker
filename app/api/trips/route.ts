@@ -57,7 +57,8 @@ async function addMembersToTrip(
   }
 
   if (directRows.length > 0) {
-    await supabase.from('trip_members').insert(directRows)
+    // Use service client to bypass RLS — trip_members inserts require elevated privileges
+    await svc.from('trip_members').insert(directRows)
   }
 
   if (inviteRows.length > 0) {
@@ -79,10 +80,35 @@ export async function GET() {
 
   const { data: trips, error } = await supabase
     .from('trips')
-    .select('*, trip_budgets(*), trip_members(*), trip_invitations(*), transactions(amount, type, is_discrete)')
+    .select('*, trip_budgets(*), transactions(amount, type, is_discrete)')
     .order('created_at', { ascending: false })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  const tripIds = (trips ?? []).map(t => t.id as string)
+
+  // Use service client to read trip_members and trip_invitations without RLS restrictions
+  const svcGet = createServiceClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+  const [{ data: allMembers }, { data: allInvitations }] = await Promise.all([
+    tripIds.length > 0 ? svcGet.from('trip_members').select('*').in('trip_id', tripIds) : Promise.resolve({ data: [] }),
+    tripIds.length > 0 ? svcGet.from('trip_invitations').select('*').in('trip_id', tripIds) : Promise.resolve({ data: [] }),
+  ])
+
+  const membersByTrip = new Map<string, object[]>()
+  const invitesByTrip = new Map<string, object[]>()
+  for (const m of allMembers ?? []) {
+    const tid = (m as { trip_id: string }).trip_id
+    if (!membersByTrip.has(tid)) membersByTrip.set(tid, [])
+    membersByTrip.get(tid)!.push(m)
+  }
+  for (const i of allInvitations ?? []) {
+    const tid = (i as { trip_id: string }).trip_id
+    if (!invitesByTrip.has(tid)) invitesByTrip.set(tid, [])
+    invitesByTrip.get(tid)!.push(i)
+  }
 
   const enriched = (trips ?? []).map(trip => {
     const txs = (trip.transactions ?? []) as { amount: number; type: string; is_discrete?: boolean }[]
@@ -92,6 +118,8 @@ export async function GET() {
       total_spent: txs.filter(t => t.type === 'expense' && !t.is_discrete).reduce((s, t) => s + t.amount, 0),
       transaction_count: txs.length,
       transactions: undefined,
+      trip_members: membersByTrip.get(trip.id) ?? [],
+      trip_invitations: invitesByTrip.get(trip.id) ?? [],
     }
   })
 
@@ -159,23 +187,27 @@ export async function PATCH(request: Request) {
   }
 
   if (Array.isArray(members)) {
+    const svcPatch = createServiceClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
     const submittedEmails = members
       .filter((m: { email: string }) => m.email?.trim())
       .map((m: { email: string }) => m.email.trim().toLowerCase())
 
     // Remove name-only members and re-insert (they have no stable key)
-    await supabase.from('trip_members').delete().eq('trip_id', id).is('email', null)
-    await supabase.from('trip_members').delete().eq('trip_id', id).eq('email', '')
+    await svcPatch.from('trip_members').delete().eq('trip_id', id).is('email', null)
+    await svcPatch.from('trip_members').delete().eq('trip_id', id).eq('email', '')
 
     // Remove email-based members that were dropped
-    const { data: currentMembers } = await supabase
+    const { data: currentMembers } = await svcPatch
       .from('trip_members').select('email').eq('trip_id', id)
     const currentEmails = (currentMembers ?? [])
       .map((m: { email: string | null }) => m.email?.toLowerCase())
       .filter(Boolean) as string[]
     const toRemoveEmails = currentEmails.filter(e => !submittedEmails.includes(e))
     if (toRemoveEmails.length > 0) {
-      await supabase.from('trip_members').delete().eq('trip_id', id).in('email', toRemoveEmails)
+      await svcPatch.from('trip_members').delete().eq('trip_id', id).in('email', toRemoveEmails)
       await supabase.from('trip_invitations').delete()
         .eq('trip_id', id).in('invitee_email', toRemoveEmails).eq('status', 'pending')
     }
