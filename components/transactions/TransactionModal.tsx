@@ -41,8 +41,34 @@ interface Props {
 
 const DATE_KEY = 'lastTransactionDate'
 
-interface Participant { name: string; email: string; amount: string }
-const emptyParticipant = (): Participant => ({ name: '', email: '', amount: '' })
+type SplitMode = 'equal' | 'percent' | 'shares' | 'exact'
+interface Participant { name: string; email: string; amount: string; percent: string; shares: string }
+const mkParticipant = (name = '', email = ''): Participant => ({ name, email, amount: '', percent: '', shares: '' })
+
+const round2 = (n: number) => Math.round(n * 100) / 100
+
+// Distribute `total` across `weights`, spreading rounding remainder by largest
+// fractional part so the parts always sum back to exactly `total`.
+function distributeAmounts(total: number, weights: number[]): number[] {
+  const sumW = weights.reduce((a, b) => a + b, 0)
+  if (!(sumW > 0) || !(total > 0)) return weights.map(() => 0)
+  const cents = Math.round(total * 100)
+  const raw = weights.map(w => (w / sumW) * cents)
+  const floor = raw.map(r => Math.floor(r))
+  const rem = cents - floor.reduce((a, b) => a + b, 0)
+  const order = raw.map((r, i) => ({ i, frac: r - Math.floor(r) })).sort((a, b) => b.frac - a.frac)
+  const res = [...floor]
+  for (let k = 0; k < rem; k++) res[order[k % res.length].i]++
+  return res.map(c => c / 100)
+}
+
+// Per-participant owed amounts for the active split mode
+function amountsFor(mode: SplitMode, ps: Participant[], total: number): number[] {
+  if (mode === 'equal') return distributeAmounts(total, ps.map(() => 1))
+  if (mode === 'shares') return distributeAmounts(total, ps.map(p => parseFloat(p.shares) || 0))
+  if (mode === 'percent') return ps.map(p => round2(total * (parseFloat(p.percent) || 0) / 100))
+  return ps.map(p => parseFloat(p.amount) || 0)
+}
 
 function getDefaultDate() {
   if (typeof window !== 'undefined') {
@@ -97,7 +123,8 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
   const [cardEnabled, setCardEnabled] = useState(false)
   const [friendsEnabled, setFriendsEnabled] = useState(false)
   const [splitEnabled, setSplitEnabled] = useState(false)
-  const [participants, setParticipants] = useState<Participant[]>([emptyParticipant(), emptyParticipant()])
+  const [splitMode, setSplitMode] = useState<SplitMode>('equal')
+  const [participants, setParticipants] = useState<Participant[]>([mkParticipant(), mkParticipant()])
   const fileRef = useRef<HTMLInputElement>(null)
   const originalFormRef = useRef<ReturnType<typeof buildEmptyForm> | null>(null)
 
@@ -153,8 +180,8 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
   }, [form.card_id])
 
   function seedParticipants(): Participant[] {
-    if (currentUser?.email) return [{ name: currentUser.name, email: currentUser.email, amount: '' }, emptyParticipant()]
-    return [emptyParticipant(), emptyParticipant()]
+    if (currentUser?.email) return [mkParticipant(currentUser.name, currentUser.email), mkParticipant()]
+    return [mkParticipant(), mkParticipant()]
   }
 
   // Initial split rows when opening: caller-provided participants take precedence
@@ -162,8 +189,8 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
     if (defaultSplitParticipants && defaultSplitParticipants.length > 0) {
       const rows = defaultSplitParticipants
         .filter(p => p.name || p.email)
-        .map(p => ({ name: p.name || (p.email ? p.email.split('@')[0] : ''), email: p.email ?? '', amount: '' }))
-      return rows.length >= 2 ? rows : [...rows, emptyParticipant()]
+        .map(p => mkParticipant(p.name || (p.email ? p.email.split('@')[0] : ''), p.email ?? ''))
+      return rows.length >= 2 ? rows : [...rows, mkParticipant()]
     }
     return seedParticipants()
   }
@@ -210,6 +237,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
     }
     setAddContactKey(k => k + 1)
     setSplitOpen(false)
+    setSplitMode('equal')
     setLinkedSplitId(transaction?.split_id ?? null)
     // Default props (amount/description/participants) are only read on open; leaving
     // them out of deps keeps re-renders from resetting an in-progress form.
@@ -266,7 +294,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
     const trip = trips.find(t => t.id === tripId)
     const myEmailLower = (currentUser?.email ?? '').toLowerCase()
     const rows: Participant[] = []
-    if (currentUser?.email) rows.push({ name: currentUser.name, email: currentUser.email, amount: '' })
+    if (currentUser?.email) rows.push(mkParticipant(currentUser.name, currentUser.email))
     const seen = new Set(rows.filter(r => r.email).map(r => r.email.toLowerCase()))
     for (const inv of (trip?.trip_invitations ?? [])) {
       if (inv.status === 'declined') continue
@@ -276,37 +304,56 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       if (e && seen.has(e.toLowerCase())) continue
       const name = inv.invitee_name || (e ? e.split('@')[0] : '')
       if (!name) continue
-      rows.push({ name, email: e, amount: '' })
+      rows.push(mkParticipant(name, e))
       if (e) seen.add(e.toLowerCase())
     }
     for (const m of (trip?.trip_members ?? [])) {
       const email = m.email ?? ''
       if (!email || email.toLowerCase() === myEmailLower || seen.has(email.toLowerCase())) continue
-      rows.push({ name: m.name || email.split('@')[0], email, amount: '' })
+      rows.push(mkParticipant(m.name || email.split('@')[0], email))
       seen.add(email.toLowerCase())
     }
-    return rows.length >= 2 ? rows : [...rows, emptyParticipant()]
+    return rows.length >= 2 ? rows : [...rows, mkParticipant()]
   }
 
-  function splitEqually() {
-    const total = parseFloat(form.amount)
-    if (!total || participants.length === 0) return
-    const each = (total / participants.length).toFixed(2)
-    setParticipants(p => p.map(pt => ({ ...pt, amount: each })))
+  // Switch split mode, seeding sensible defaults so the split stays balanced
+  function changeSplitMode(mode: SplitMode) {
+    const prevAmounts = amountsFor(splitMode, participants, parseFloat(form.amount) || 0)
+    setSplitMode(mode)
+    setParticipants(prev => {
+      if (mode === 'percent') {
+        const eq = distributeAmounts(100, prev.map(() => 1)) // equal %s summing to 100
+        return prev.map((p, i) => ({ ...p, percent: p.percent && parseFloat(p.percent) > 0 ? p.percent : String(eq[i]) }))
+      }
+      if (mode === 'shares') {
+        return prev.map(p => ({ ...p, shares: p.shares && parseFloat(p.shares) > 0 ? p.shares : '1' }))
+      }
+      if (mode === 'exact') {
+        // Carry the currently displayed amounts into editable fields
+        return prev.map((p, i) => ({ ...p, amount: prevAmounts[i] ? String(prevAmounts[i]) : p.amount }))
+      }
+      return prev // equal — computed automatically
+    })
   }
 
   function updateParticipant(i: number, key: keyof Participant, val: string) {
     setParticipants(prev => prev.map((p, idx) => idx === i ? { ...p, [key]: val } : p))
   }
 
-  function addParticipant() { setParticipants(p => [...p, emptyParticipant()]) }
+  function addParticipant() {
+    const row = mkParticipant()
+    if (splitMode === 'shares') row.shares = '1'
+    setParticipants(p => [...p, row])
+  }
   function removeParticipant(i: number) { setParticipants(p => p.filter((_, idx) => idx !== i)) }
 
   function addMe() {
     if (!currentUser?.email) return
     const meLower = currentUser.email.toLowerCase()
     if (participants.some(p => p.email.toLowerCase() === meLower)) return
-    setParticipants(prev => [{ name: currentUser.name, email: currentUser.email, amount: '' }, ...prev])
+    const me = mkParticipant(currentUser.name, currentUser.email)
+    if (splitMode === 'shares') me.shares = '1'
+    setParticipants(prev => [me, ...prev])
   }
 
   function addFriendAsParticipant(friend: Friend) {
@@ -314,7 +361,8 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       (friend.email && p.email === friend.email) || p.name.toLowerCase() === friend.name.toLowerCase()
     )
     if (alreadyAdded) { toast.error(`${friend.name} is already added`); return }
-    const newRow: Participant = { name: friend.name, email: friend.email ?? '', amount: '' }
+    const newRow = mkParticipant(friend.name, friend.email ?? '')
+    if (splitMode === 'shares') newRow.shares = '1'
     const emptyIdx = participants.findIndex(p => !p.name && !p.email)
     if (emptyIdx !== -1) {
       setParticipants(prev => prev.map((p, i) => i === emptyIdx ? newRow : p))
@@ -346,8 +394,11 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
   }
 
   const splitTotal = parseFloat(form.amount) || 0
-  const allocatedTotal = participants.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
-  const splitDiff = splitTotal - allocatedTotal
+  const computedAmounts = amountsFor(splitMode, participants, splitTotal)
+  const allocatedTotal = round2(computedAmounts.reduce((s, a) => s + a, 0))
+  const splitDiff = round2(splitTotal - allocatedTotal)
+  const percentSum = round2(participants.reduce((s, p) => s + (parseFloat(p.percent) || 0), 0))
+  const sharesSum = participants.reduce((s, p) => s + (parseFloat(p.shares) || 0), 0)
 
   async function doSubmit() {
     if (!form.amount || !form.category || !form.date) {
@@ -355,11 +406,18 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       return
     }
     // Validate inline split before touching the network
-    let validParticipants: Participant[] = []
+    let splitRows: { name: string; email: string; amount: number }[] = []
     if (splitEnabled && !linkedSplitId && form.type === 'expense') {
-      validParticipants = participants.filter(p => p.name.trim() && parseFloat(p.amount) > 0)
-      if (validParticipants.length === 0) {
+      const amts = amountsFor(splitMode, participants, parseFloat(form.amount) || 0)
+      splitRows = participants
+        .map((p, i) => ({ name: p.name.trim(), email: p.email.trim(), amount: round2(amts[i] || 0) }))
+        .filter(r => r.name && r.amount > 0)
+      if (splitRows.length === 0) {
         toast.warning('Add at least one participant with an amount, or turn off Split')
+        return
+      }
+      if (splitMode === 'percent' && Math.abs(percentSum - 100) > 0.01) {
+        toast.warning(`Percentages add up to ${percentSum}% — they must total 100%`)
         return
       }
     }
@@ -393,7 +451,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       const txId = transaction?.id ?? txData?.id ?? null
 
       // Create the linked split (inline) — the API sets this transaction's split_id
-      if (splitEnabled && !linkedSplitId && form.type === 'expense' && validParticipants.length > 0) {
+      if (splitEnabled && !linkedSplitId && form.type === 'expense' && splitRows.length > 0) {
         const splitPayload = {
           title: form.description?.trim() || form.category,
           total_amount: parseFloat(form.amount),
@@ -404,10 +462,10 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
           card_id: form.card_id || null,
           contact_id: form.contact_ids[0] ?? null,
           transaction_id: txId,
-          participants: validParticipants.map(p => ({
-            name: p.name.trim(),
-            email: p.email.trim() || undefined,
-            amount: parseFloat(p.amount),
+          participants: splitRows.map(r => ({
+            name: r.name,
+            email: r.email || undefined,
+            amount: r.amount,
           })),
         }
         const sRes = await fetch('/api/splits', {
@@ -575,12 +633,28 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
 
                     {/* Inline participant editor */}
                     {splitEnabled && !linkedSplitId && (
-                      <div className="space-y-2 rounded-lg bg-muted/30 p-2.5">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-xs text-muted-foreground">Who's sharing this?</Label>
-                          <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={splitEqually} disabled={!form.amount}>
-                            Split equally
-                          </Button>
+                      <div className="space-y-2.5 rounded-lg bg-muted/30 p-2.5">
+                        {/* Split-mode selector */}
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">How to split?</Label>
+                          <div className="flex items-center bg-background border rounded-lg p-0.5 text-[11px]">
+                            {([['equal', 'Equally'], ['percent', '%'], ['shares', 'Shares'], ['exact', 'Exact']] as const).map(([m, label]) => (
+                              <button
+                                key={m}
+                                type="button"
+                                onClick={() => changeSplitMode(m)}
+                                className={`flex-1 px-2 py-1 rounded-md transition-colors ${splitMode === m ? 'bg-primary text-primary-foreground font-medium' : 'text-muted-foreground hover:text-foreground'}`}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                          <p className="text-[11px] text-muted-foreground">
+                            {splitMode === 'equal' && 'Divided evenly — amounts fill in automatically.'}
+                            {splitMode === 'percent' && 'Enter each person’s % — must total 100%.'}
+                            {splitMode === 'shares' && 'Enter shares (weights) — amounts scale to the total.'}
+                            {splitMode === 'exact' && 'Type each person’s exact amount.'}
+                          </p>
                         </div>
 
                         <FriendPicker
@@ -600,15 +674,38 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
-                              <div className="grid grid-cols-[1fr_90px] gap-2 pr-6">
-                                <div className="space-y-1">
+                              <div className="flex items-end gap-2 pr-6">
+                                <div className="flex-1 space-y-1 min-w-0">
                                   <Label className="text-xs text-muted-foreground">Name *</Label>
                                   <Input placeholder="Person's name" value={p.name} onChange={e => updateParticipant(i, 'name', e.target.value)} />
                                 </div>
-                                <div className="space-y-1">
-                                  <Label className="text-xs text-muted-foreground">Amount</Label>
-                                  <Input type="number" min="0" step="0.01" placeholder="0" value={p.amount} onChange={e => updateParticipant(i, 'amount', e.target.value)} />
-                                </div>
+
+                                {splitMode === 'percent' && (
+                                  <div className="w-14 space-y-1 shrink-0">
+                                    <Label className="text-xs text-muted-foreground">%</Label>
+                                    <Input type="number" min="0" step="0.01" placeholder="0" value={p.percent} onChange={e => updateParticipant(i, 'percent', e.target.value)} />
+                                  </div>
+                                )}
+                                {splitMode === 'shares' && (
+                                  <div className="w-16 space-y-1 shrink-0">
+                                    <Label className="text-xs text-muted-foreground">Shares</Label>
+                                    <Input type="number" min="0" step="1" placeholder="1" value={p.shares} onChange={e => updateParticipant(i, 'shares', e.target.value)} />
+                                  </div>
+                                )}
+
+                                {splitMode === 'exact' ? (
+                                  <div className="w-24 space-y-1 shrink-0">
+                                    <Label className="text-xs text-muted-foreground">Amount</Label>
+                                    <Input type="number" min="0" step="0.01" placeholder="0" value={p.amount} onChange={e => updateParticipant(i, 'amount', e.target.value)} />
+                                  </div>
+                                ) : (
+                                  <div className="w-20 space-y-1 shrink-0">
+                                    <Label className="text-xs text-muted-foreground">Owes</Label>
+                                    <div className="h-9 flex items-center justify-end px-2 rounded-md bg-muted text-sm font-medium tabular-nums truncate">
+                                      {formatCurrency(computedAmounts[i] || 0)}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                               <div className="space-y-1">
                                 <Label className="text-xs text-muted-foreground">Email <span className="text-muted-foreground/60">(optional — for notifications)</span></Label>
@@ -630,10 +727,18 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                         </div>
 
                         {splitTotal > 0 && (
-                          <div className={`text-xs rounded-md px-3 py-2 ${Math.abs(splitDiff) < 0.01 ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300'}`}>
-                            Allocated {formatCurrency(allocatedTotal)} of {formatCurrency(splitTotal)}
-                            {Math.abs(splitDiff) >= 0.01 && <span className="ml-1">({splitDiff > 0 ? formatCurrency(splitDiff) + ' unallocated' : formatCurrency(-splitDiff) + ' over'})</span>}
-                          </div>
+                          splitMode === 'percent' ? (
+                            <div className={`text-xs rounded-md px-3 py-2 ${Math.abs(percentSum - 100) < 0.01 ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300'}`}>
+                              {percentSum}% of 100% · {formatCurrency(allocatedTotal)} of {formatCurrency(splitTotal)}
+                              {Math.abs(percentSum - 100) >= 0.01 && <span className="ml-1">({round2(100 - percentSum)}% {percentSum < 100 ? 'left' : 'over'})</span>}
+                            </div>
+                          ) : (
+                            <div className={`text-xs rounded-md px-3 py-2 ${Math.abs(splitDiff) < 0.01 ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300'}`}>
+                              Allocated {formatCurrency(allocatedTotal)} of {formatCurrency(splitTotal)}
+                              {splitMode === 'shares' && sharesSum > 0 && <span className="ml-1">· {sharesSum} shares</span>}
+                              {Math.abs(splitDiff) >= 0.01 && <span className="ml-1">({splitDiff > 0 ? formatCurrency(splitDiff) + ' unallocated' : formatCurrency(-splitDiff) + ' over'})</span>}
+                            </div>
+                          )
                         )}
                       </div>
                     )}
