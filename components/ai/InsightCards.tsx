@@ -7,6 +7,15 @@ import { Button } from '@/components/ui/button'
 import { Lightbulb, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 
+// Render **bold** markdown as real bold; everything else stays literal text.
+function renderRichText(text: string) {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
+    /^\*\*[^*]+\*\*$/.test(part)
+      ? <strong key={i}>{part.slice(2, -2)}</strong>
+      : <span key={i}>{part}</span>
+  )
+}
+
 export default function InsightCards() {
   const [insights, setInsights] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
@@ -54,7 +63,7 @@ export default function InsightCards() {
           insights.map((insight, i) => (
             <div key={i} className="flex gap-3 p-3 rounded-lg bg-muted/50">
               <span className="text-amber-500 text-sm shrink-0">✦</span>
-              <p className="text-sm">{insight}</p>
+              <p className="text-sm">{renderRichText(insight)}</p>
             </div>
           ))
         )}

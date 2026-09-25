@@ -13,6 +13,16 @@ interface Message {
   content: string
 }
 
+// Render **bold** markdown as real bold; everything else stays literal text.
+// (whitespace-pre-wrap on the container already preserves line breaks/lists.)
+function renderRichText(text: string) {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
+    /^\*\*[^*]+\*\*$/.test(part)
+      ? <strong key={i}>{part.slice(2, -2)}</strong>
+      : <span key={i}>{part}</span>
+  )
+}
+
 const SUGGESTIONS = [
   'How much did I spend on food last month?',
   'What is my biggest expense category?',
@@ -90,7 +100,7 @@ export default function ChatInterface() {
                   : 'bg-muted text-foreground'
               }`}
             >
-              {m.content}
+              {renderRichText(m.content)}
             </div>
           </div>
         ))}
