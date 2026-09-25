@@ -95,6 +95,7 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(false)
   const [addExpenseOpen, setAddExpenseOpen] = useState(false)
+  const [editingTx, setEditingTx] = useState<Transaction | null>(null)
   const [splitOpen, setSplitOpen] = useState(false)
   const [linkMode, setLinkMode] = useState(false)
   const [linkCandidates, setLinkCandidates] = useState<Transaction[]>([])
@@ -1251,10 +1252,17 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                               <EyeOff className="w-2.5 h-2.5" /> Private
                             </span>
                           )}
+                          {t.receipt_url && <Paperclip className="w-3 h-3 text-muted-foreground shrink-0" />}
                         </div>
                         <p className="text-xs text-muted-foreground">{t.category}</p>
                       </div>
                       <span className="text-sm font-semibold shrink-0 text-red-600">-{formatCurrency(t.amount)}</span>
+                      {t.user_id === currentUserId && (
+                        <button onClick={() => setEditingTx(t)} title="Edit transaction"
+                          className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity shrink-0">
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                       {!trip.is_closed && (
                         <button onClick={() => unlinkTransaction(t.id)} title="Unlink from trip"
                           className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity shrink-0">
@@ -1298,9 +1306,16 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                                           <EyeOff className="w-2.5 h-2.5" /> Private
                                         </span>
                                       )}
+                                      {t.receipt_url && <Paperclip className="w-3 h-3 text-muted-foreground shrink-0" />}
                                     </div>
                                   </div>
                                   <span className="text-sm font-semibold shrink-0 text-red-600">-{formatCurrency(t.amount)}</span>
+                                  {t.user_id === currentUserId && (
+                                    <button onClick={() => setEditingTx(t)} title="Edit transaction"
+                                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity shrink-0">
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
                                   {!trip.is_closed && (
                                     <button onClick={() => unlinkTransaction(t.id)} title="Unlink from trip"
                                       className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity shrink-0">
@@ -1369,10 +1384,17 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                                           <EyeOff className="w-2.5 h-2.5" /> Private
                                         </span>
                                       )}
+                                      {t.receipt_url && <Paperclip className="w-3 h-3 text-muted-foreground shrink-0" />}
                                     </div>
                                     <p className="text-xs text-muted-foreground">{t.category}</p>
                                   </div>
                                   <span className="text-sm font-semibold shrink-0 text-red-600">-{formatCurrency(t.amount)}</span>
+                                  {t.user_id === currentUserId && (
+                                    <button onClick={() => setEditingTx(t)} title="Edit transaction"
+                                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity shrink-0">
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
                                   {!trip.is_closed && (
                                     <button onClick={() => unlinkTransaction(t.id)} title="Unlink from trip"
                                       className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity shrink-0">
@@ -1401,6 +1423,13 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
         onClose={() => setAddExpenseOpen(false)}
         onSaved={() => { fetchTransactions(); onUpdated() }}
         defaultTripId={trip.id}
+      />
+
+      <TransactionModal
+        open={!!editingTx}
+        transaction={editingTx ?? undefined}
+        onClose={() => setEditingTx(null)}
+        onSaved={() => { setEditingTx(null); fetchTransactions(); onUpdated() }}
       />
 
       <SplitModal
