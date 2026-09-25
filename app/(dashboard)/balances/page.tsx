@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { formatCurrency } from '@/lib/utils'
-import { ArrowUpRight, ArrowDownLeft, CheckCircle2, Loader2, Send } from 'lucide-react'
+import { ArrowUpRight, ArrowDownLeft, CheckCircle2, Loader2, Send, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 
@@ -20,6 +20,8 @@ export default function BalancesPage() {
   const [balances, setBalances] = useState<FriendBalance[]>([])
   const [loading, setLoading] = useState(true)
   const [reminding, setReminding] = useState<string | null>(null)
+  const [confirmClose, setConfirmClose] = useState<string | null>(null)  // contact id pending confirmation
+  const [closing, setClosing] = useState<string | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -78,6 +80,35 @@ export default function BalancesPage() {
     }
     load()
   }, [])
+
+  async function closeBalance(friend: FriendBalance) {
+    setClosing(friend.id)
+    setConfirmClose(null)
+    try {
+      const res = await fetch('/api/splits?type=close_balance', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contact_email: friend.email, contact_name: friend.name }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success(
+        data.markedPaid > 0
+          ? `Settled ${data.markedPaid} split share${data.markedPaid !== 1 ? 's' : ''} with ${friend.name}`
+          : `No open splits found for ${friend.name}`
+      )
+      // Refresh balances
+      setBalances(prev => prev.filter(b => {
+        if (b.id !== friend.id) return true
+        // Keep if they still have txn-only balance
+        return b.txnOwed > 0 || b.txnReceived > 0
+      }).map(b => b.id === friend.id ? { ...b, splitOwed: 0, net: b.txnOwed - b.txnReceived } : b))
+    } catch {
+      toast.error('Failed to close balance')
+    } finally {
+      setClosing(null)
+    }
+  }
 
   async function remind(friend: FriendBalance) {
     if (!friend.email) { toast.error('No email for this friend'); return }
@@ -184,11 +215,42 @@ export default function BalancesPage() {
                       Remind
                     </Button>
                   )}
+
+                  {/* Close Balance button — only when splits are owed */}
+                  {b.splitOwed > 0 && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-xs gap-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
+                      disabled={closing === b.id}
+                      onClick={() => setConfirmClose(b.id)}
+                    >
+                      {closing === b.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                      Settle
+                    </Button>
+                  )}
                 </div>
               </div>
 
+              {/* Inline confirm for closing balance */}
+              {confirmClose === b.id && (
+                <div className="mt-3 pt-3 border-t flex items-center justify-between gap-2 flex-wrap">
+                  <p className="text-xs text-muted-foreground">
+                    Mark all splits with <span className="font-medium text-foreground">{b.name}</span> as paid?
+                  </p>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setConfirmClose(null)}>
+                      <X className="w-3 h-3 mr-1" />Cancel
+                    </Button>
+                    <Button size="sm" className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => closeBalance(b)}>
+                      <CheckCircle2 className="w-3 h-3 mr-1" />Confirm
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               {/* Breakdown */}
-              {(b.splitOwed > 0 || b.txnOwed > 0 || b.txnReceived > 0) && (
+              {confirmClose !== b.id && (b.splitOwed > 0 || b.txnOwed > 0 || b.txnReceived > 0) && (
                 <div className="mt-3 pt-3 border-t flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                   {b.splitOwed > 0 && <span>Splits: <span className="font-medium text-foreground">{formatCurrency(b.splitOwed)}</span></span>}
                   {b.txnOwed > 0 && <span>Expenses: <span className="font-medium text-foreground">{formatCurrency(b.txnOwed)}</span></span>}

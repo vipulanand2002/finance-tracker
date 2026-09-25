@@ -238,6 +238,70 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ success: true })
   }
 
+  // PATCH /api/splits?type=close_balance
+  // Body: { contact_email: string | null, contact_name: string }
+  // Marks all unpaid split shares for this person as paid;
+  // auto-settles any split where all participants are now paid.
+  if (type === 'close_balance') {
+    const { contact_email, contact_name } = body as { contact_email: string | null; contact_name: string }
+
+    // Get all unsettled splits created by this user
+    const { data: userSplits } = await supabase
+      .from('expense_splits')
+      .select('id')
+      .eq('created_by', user.id)
+      .eq('is_settled', false)
+
+    const splitIds = (userSplits ?? []).map((s: { id: string }) => s.id)
+    if (splitIds.length === 0) return NextResponse.json({ markedPaid: 0 })
+
+    // Find matching unpaid participants
+    let participantQuery = supabase
+      .from('split_participants')
+      .select('id, split_id')
+      .in('split_id', splitIds)
+      .eq('is_paid', false)
+
+    if (contact_email) {
+      participantQuery = participantQuery.eq('participant_email', contact_email.toLowerCase())
+    } else {
+      participantQuery = participantQuery
+        .ilike('participant_name', contact_name)
+        .is('participant_email', null)
+    }
+
+    const { data: matched } = await participantQuery
+    if (!matched?.length) return NextResponse.json({ markedPaid: 0 })
+
+    const participantIds = matched.map((p: { id: string }) => p.id)
+    const affectedSplitIds = [...new Set(matched.map((p: { split_id: string }) => p.split_id))]
+
+    // Mark them all paid
+    await supabase
+      .from('split_participants')
+      .update({ is_paid: true, paid_at: new Date().toISOString() })
+      .in('id', participantIds)
+
+    // Auto-settle any split where no unpaid participants remain
+    for (const splitId of affectedSplitIds) {
+      const { data: remaining } = await supabase
+        .from('split_participants')
+        .select('id')
+        .eq('split_id', splitId)
+        .eq('is_paid', false)
+
+      if (!remaining?.length) {
+        await supabase
+          .from('expense_splits')
+          .update({ is_settled: true })
+          .eq('id', splitId)
+          .eq('created_by', user.id)
+      }
+    }
+
+    return NextResponse.json({ markedPaid: participantIds.length })
+  }
+
   if (type === 'update') {
     const { participants, card_id, ...splitFields } = body as {
       participants: { name: string; email?: string; amount: number }[]
