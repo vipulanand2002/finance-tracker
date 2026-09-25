@@ -12,11 +12,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
-import { EyeOff, Loader2, Settings2, Upload, X, SplitSquareVertical, CreditCard, MapPin, Users } from 'lucide-react'
+import { EyeOff, Loader2, Settings2, Upload, X, SplitSquareVertical, CreditCard, MapPin, Users, Plus, Trash2, UserPlus } from 'lucide-react'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, TRIP_EXPENSE_CATEGORIES } from '@/lib/constants'
 import { ManageCategories } from '@/components/categories/ManageCategories'
+import { FriendPicker } from '@/components/friends/FriendPicker'
+import { formatCurrency } from '@/lib/utils'
 import SplitModal from '@/components/splits/SplitModal'
-import type { Transaction, Trip, Contact } from '@/types'
+import type { Transaction, Trip, Contact, Friend } from '@/types'
 import { createClient as createBrowserClient } from '@/lib/supabase/client'
 
 interface Props {
@@ -26,12 +28,15 @@ interface Props {
   transaction?: Transaction | null
   defaultTripId?: string | null
   defaultCardId?: string | null
-  // When true (and creating a new expense), the split editor opens immediately —
+  // When true (and creating a new expense), the split toggle starts enabled —
   // used when launching this modal from the Splits area.
   defaultSplitOpen?: boolean
 }
 
 const DATE_KEY = 'lastTransactionDate'
+
+interface Participant { name: string; email: string; amount: string }
+const emptyParticipant = (): Participant => ({ name: '', email: '', amount: '' })
 
 function getDefaultDate() {
   if (typeof window !== 'undefined') {
@@ -66,6 +71,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
   const [scanningReceipt, setScanningReceipt] = useState(false)
   const [trips, setTrips] = useState<Trip[]>([])
   const [contacts, setContacts] = useState<Contact[]>([])
+  const [friends, setFriends] = useState<Friend[]>([])
   const [splitOpen, setSplitOpen] = useState(false)
   const [linkedSplitId, setLinkedSplitId] = useState<string | null>(null)
   const [cards, setCards] = useState<CardInfo[]>([])
@@ -77,13 +83,15 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
   const [manageCatOpen, setManageCatOpen] = useState(false)
   // Incremented to remount the "add contact" Select after each pick, resetting to placeholder
   const [addContactKey, setAddContactKey] = useState(0)
-  // Whether trips / contacts / cards have all resolved — gates the options block so
-  // the toggle rows appear together instead of popping in one by one.
+  // Whether trips / contacts / cards / friends have all resolved — gates the options
+  // block so the toggle rows appear together instead of popping in one by one.
   const [optionsLoaded, setOptionsLoaded] = useState(false)
   // Progressive-disclosure toggles for the optional sections
   const [tripEnabled, setTripEnabled] = useState(false)
   const [cardEnabled, setCardEnabled] = useState(false)
   const [friendsEnabled, setFriendsEnabled] = useState(false)
+  const [splitEnabled, setSplitEnabled] = useState(false)
+  const [participants, setParticipants] = useState<Participant[]>([emptyParticipant(), emptyParticipant()])
   const fileRef = useRef<HTMLInputElement>(null)
   const originalFormRef = useRef<ReturnType<typeof buildEmptyForm> | null>(null)
 
@@ -110,10 +118,12 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       fetch('/api/trips').then(r => r.json()).catch(() => []),
       fetch('/api/contacts').then(r => r.json()).catch(() => []),
       fetch('/api/cards').then(r => r.json()).catch(() => []),
-    ]).then(([t, c, cd]) => {
+      fetch('/api/friends').then(r => r.json()).catch(() => []),
+    ]).then(([t, c, cd, fr]) => {
       setTrips(Array.isArray(t) ? t : [])
       setContacts(Array.isArray(c) ? c : [])
       setCards(Array.isArray(cd) ? cd : [])
+      setFriends(Array.isArray(fr) ? fr : [])
       setOptionsLoaded(true)
     })
     loadCategories()
@@ -136,6 +146,11 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       .catch(() => setCardStatements([]))
   }, [form.card_id])
 
+  function seedParticipants(): Participant[] {
+    if (currentUser?.email) return [{ name: currentUser.name, email: currentUser.email, amount: '' }, emptyParticipant()]
+    return [emptyParticipant(), emptyParticipant()]
+  }
+
   useEffect(() => {
     if (transaction) {
       const populated = {
@@ -154,23 +169,29 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
           : transaction.contact_id ? [transaction.contact_id] : [],
         card_id: transaction.card_id ?? null,
       }
+      const hasSplit = !!transaction.split_id
       setForm(populated)
       originalFormRef.current = populated
       setTripEnabled(!!populated.trip_id)
       setCardEnabled(!!populated.card_id)
-      setFriendsEnabled(populated.contact_ids.length > 0)
+      setSplitEnabled(hasSplit)
+      // Split and friend-tagging are mutually exclusive
+      setFriendsEnabled(!hasSplit && populated.contact_ids.length > 0)
+      setParticipants(seedParticipants())
     } else {
       const empty = buildEmptyForm(defaultTripId, defaultCardId)
+      const wantSplit = !!defaultSplitOpen
       setForm(empty)
       originalFormRef.current = empty
       setTripEnabled(!!defaultTripId)
       setCardEnabled(!!defaultCardId)
+      setSplitEnabled(wantSplit)
       setFriendsEnabled(false)
+      setParticipants(seedParticipants())
     }
     setAddContactKey(k => k + 1)
+    setSplitOpen(false)
     setLinkedSplitId(transaction?.split_id ?? null)
-    // Open the split editor straight away when launched from the Splits area
-    setSplitOpen(open && !transaction && !!defaultSplitOpen)
   }, [transaction, open, defaultTripId, defaultCardId, defaultSplitOpen])
 
   const categories = form.type === 'income'
@@ -186,7 +207,6 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
   function toggleTrip(on: boolean) {
     setTripEnabled(on)
     if (on) {
-      // Trips are expense-only; force type and reset a non-trip category
       set('type', 'expense')
       const tripCats = TRIP_EXPENSE_CATEGORIES as unknown as string[]
       if (!tripCats.includes(form.category)) set('category', '')
@@ -205,7 +225,80 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
 
   function toggleFriends(on: boolean) {
     setFriendsEnabled(on)
+    if (on) setSplitEnabled(false) // mutually exclusive with splitting
     if (!on) set('contact_ids', [])
+  }
+
+  function toggleSplit(on: boolean) {
+    setSplitEnabled(on)
+    if (on) {
+      // Mutually exclusive with tagging friends
+      setFriendsEnabled(false)
+      set('contact_ids', [])
+      setParticipants(prev => prev.some(p => p.name || p.email) ? prev : seedParticipants())
+    }
+  }
+
+  // Build split participants from a trip's members (used when a trip is picked while splitting)
+  function participantsFromTrip(tripId: string): Participant[] {
+    const trip = trips.find(t => t.id === tripId)
+    const myEmailLower = (currentUser?.email ?? '').toLowerCase()
+    const rows: Participant[] = []
+    if (currentUser?.email) rows.push({ name: currentUser.name, email: currentUser.email, amount: '' })
+    const seen = new Set(rows.filter(r => r.email).map(r => r.email.toLowerCase()))
+    for (const inv of (trip?.trip_invitations ?? [])) {
+      if (inv.status === 'declined') continue
+      const isPlaceholder = inv.invitee_email.startsWith('_nomail_')
+      const e = isPlaceholder ? '' : inv.invitee_email
+      if (e && e.toLowerCase() === myEmailLower) continue
+      if (e && seen.has(e.toLowerCase())) continue
+      const name = inv.invitee_name || (e ? e.split('@')[0] : '')
+      if (!name) continue
+      rows.push({ name, email: e, amount: '' })
+      if (e) seen.add(e.toLowerCase())
+    }
+    for (const m of (trip?.trip_members ?? [])) {
+      const email = m.email ?? ''
+      if (!email || email.toLowerCase() === myEmailLower || seen.has(email.toLowerCase())) continue
+      rows.push({ name: m.name || email.split('@')[0], email, amount: '' })
+      seen.add(email.toLowerCase())
+    }
+    return rows.length >= 2 ? rows : [...rows, emptyParticipant()]
+  }
+
+  function splitEqually() {
+    const total = parseFloat(form.amount)
+    if (!total || participants.length === 0) return
+    const each = (total / participants.length).toFixed(2)
+    setParticipants(p => p.map(pt => ({ ...pt, amount: each })))
+  }
+
+  function updateParticipant(i: number, key: keyof Participant, val: string) {
+    setParticipants(prev => prev.map((p, idx) => idx === i ? { ...p, [key]: val } : p))
+  }
+
+  function addParticipant() { setParticipants(p => [...p, emptyParticipant()]) }
+  function removeParticipant(i: number) { setParticipants(p => p.filter((_, idx) => idx !== i)) }
+
+  function addMe() {
+    if (!currentUser?.email) return
+    const meLower = currentUser.email.toLowerCase()
+    if (participants.some(p => p.email.toLowerCase() === meLower)) return
+    setParticipants(prev => [{ name: currentUser.name, email: currentUser.email, amount: '' }, ...prev])
+  }
+
+  function addFriendAsParticipant(friend: Friend) {
+    const alreadyAdded = participants.some(p =>
+      (friend.email && p.email === friend.email) || p.name.toLowerCase() === friend.name.toLowerCase()
+    )
+    if (alreadyAdded) { toast.error(`${friend.name} is already added`); return }
+    const newRow: Participant = { name: friend.name, email: friend.email ?? '', amount: '' }
+    const emptyIdx = participants.findIndex(p => !p.name && !p.email)
+    if (emptyIdx !== -1) {
+      setParticipants(prev => prev.map((p, i) => i === emptyIdx ? newRow : p))
+    } else {
+      setParticipants(prev => [...prev, newRow])
+    }
   }
 
   async function handleReceiptUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -230,10 +323,23 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
     }
   }
 
+  const splitTotal = parseFloat(form.amount) || 0
+  const allocatedTotal = participants.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
+  const splitDiff = splitTotal - allocatedTotal
+
   async function doSubmit() {
     if (!form.amount || !form.category || !form.date) {
       toast.warning('Please fill in amount, category, and date to save')
       return
+    }
+    // Validate inline split before touching the network
+    let validParticipants: Participant[] = []
+    if (splitEnabled && !linkedSplitId && form.type === 'expense') {
+      validParticipants = participants.filter(p => p.name.trim() && parseFloat(p.amount) > 0)
+      if (validParticipants.length === 0) {
+        toast.warning('Add at least one participant with an amount, or turn off Split')
+        return
+      }
     }
     setSaving(true)
     try {
@@ -261,6 +367,38 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         const errData = await res.json().catch(() => ({}))
         throw new Error(errData.error ?? 'Failed to save')
       }
+      const txData = await res.json().catch(() => null)
+      const txId = transaction?.id ?? txData?.id ?? null
+
+      // Create the linked split (inline) — the API sets this transaction's split_id
+      if (splitEnabled && !linkedSplitId && form.type === 'expense' && validParticipants.length > 0) {
+        const splitPayload = {
+          title: form.description?.trim() || form.category,
+          total_amount: parseFloat(form.amount),
+          category: form.category,
+          description: form.description || null,
+          date: form.date,
+          trip_id: form.trip_id || null,
+          card_id: form.card_id || null,
+          contact_id: form.contact_ids[0] ?? null,
+          transaction_id: txId,
+          participants: validParticipants.map(p => ({
+            name: p.name.trim(),
+            email: p.email.trim() || undefined,
+            amount: parseFloat(p.amount),
+          })),
+        }
+        const sRes = await fetch('/api/splits', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(splitPayload),
+        })
+        if (!sRes.ok) {
+          const e = await sRes.json().catch(() => ({}))
+          throw new Error(e.error ?? 'Transaction saved, but the split failed')
+        }
+      }
+
       localStorage.setItem(DATE_KEY, form.date)
       toast.success(transaction ? 'Transaction updated' : 'Transaction added')
       // Notify trips page to refresh totals when a trip-linked transaction changes
@@ -312,7 +450,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                     variant={form.type === t ? 'default' : 'outline'}
                     size="sm"
                     className="flex-1 capitalize"
-                    onClick={() => { set('type', t); set('category', '') }}
+                    onClick={() => { set('type', t); set('category', ''); if (t === 'income') setSplitEnabled(false) }}
                   >
                     {t}
                   </Button>
@@ -393,24 +531,89 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
               </div>
             ) : (
               <div className="space-y-3 rounded-lg border p-3">
-                {/* Split (expense only) */}
+                {/* Split toggle (expense only) */}
                 {form.type === 'expense' && (
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium flex items-center gap-2">
-                      <SplitSquareVertical className="w-4 h-4 text-muted-foreground" />
-                      Split this expense
-                    </span>
-                    {linkedSplitId ? (
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs text-emerald-600 font-medium">Linked</span>
-                        <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setSplitOpen(true)}>
-                          Edit
-                        </Button>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium flex items-center gap-2">
+                        <SplitSquareVertical className="w-4 h-4 text-muted-foreground" />
+                        Split this expense
+                      </span>
+                      {linkedSplitId ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs text-emerald-600 font-medium">Linked</span>
+                          <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setSplitOpen(true)}>
+                            Edit
+                          </Button>
+                        </div>
+                      ) : (
+                        <Switch checked={splitEnabled} onCheckedChange={toggleSplit} />
+                      )}
+                    </div>
+
+                    {/* Inline participant editor */}
+                    {splitEnabled && !linkedSplitId && (
+                      <div className="space-y-2 rounded-lg bg-muted/30 p-2.5">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs text-muted-foreground">Who's sharing this?</Label>
+                          <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={splitEqually} disabled={!form.amount}>
+                            Split equally
+                          </Button>
+                        </div>
+
+                        <FriendPicker
+                          friends={friends}
+                          isSelected={f => participants.some(p => (f.email && p.email === f.email) || p.name.toLowerCase() === f.name.toLowerCase())}
+                          onSelect={addFriendAsParticipant}
+                          placeholder="Search friends to add…"
+                        />
+
+                        <div className="space-y-2">
+                          {participants.map((p, i) => (
+                            <div key={i} className="rounded-lg border bg-background p-2.5 space-y-2 relative">
+                              <button
+                                type="button"
+                                onClick={() => removeParticipant(i)}
+                                className="absolute top-2 right-2 text-muted-foreground hover:text-destructive"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                              <div className="grid grid-cols-[1fr_90px] gap-2 pr-6">
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Name *</Label>
+                                  <Input placeholder="Person's name" value={p.name} onChange={e => updateParticipant(i, 'name', e.target.value)} />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Amount</Label>
+                                  <Input type="number" min="0" step="0.01" placeholder="0" value={p.amount} onChange={e => updateParticipant(i, 'amount', e.target.value)} />
+                                </div>
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Email <span className="text-muted-foreground/60">(optional — for notifications)</span></Label>
+                                <Input placeholder="email@example.com" type="email" value={p.email} onChange={e => updateParticipant(i, 'email', e.target.value)} />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="flex gap-2">
+                          <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={addParticipant}>
+                            <Plus className="w-3.5 h-3.5 mr-1" /> Add member
+                          </Button>
+                          {currentUser?.email && !participants.some(p => p.email.toLowerCase() === currentUser!.email.toLowerCase()) && (
+                            <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={addMe}>
+                              <UserPlus className="w-3.5 h-3.5 mr-1" /> Add me
+                            </Button>
+                          )}
+                        </div>
+
+                        {splitTotal > 0 && (
+                          <div className={`text-xs rounded-md px-3 py-2 ${Math.abs(splitDiff) < 0.01 ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300'}`}>
+                            Allocated {formatCurrency(allocatedTotal)} of {formatCurrency(splitTotal)}
+                            {Math.abs(splitDiff) >= 0.01 && <span className="ml-1">({splitDiff > 0 ? formatCurrency(splitDiff) + ' unallocated' : formatCurrency(-splitDiff) + ' over'})</span>}
+                          </div>
+                        )}
                       </div>
-                    ) : (
-                      <Button type="button" variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => setSplitOpen(true)}>
-                        Add split
-                      </Button>
                     )}
                   </div>
                 )}
@@ -434,6 +637,8 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                             set('trip_id', v)
                             const tripCats = TRIP_EXPENSE_CATEGORIES as unknown as string[]
                             if (!tripCats.includes(form.category)) set('category', '')
+                            // Pre-fill split participants from the trip's members
+                            if (splitEnabled) setParticipants(participantsFromTrip(v))
                           }}
                         >
                           <SelectTrigger>
@@ -551,7 +756,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                   </div>
                 )}
 
-                {/* Friends toggle */}
+                {/* Friends toggle — mutually exclusive with Split */}
                 {contacts.length > 0 && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
@@ -672,21 +877,18 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         onChanged={loadCategories}
       />
 
+      {/* Full split editor — used only to edit an already-linked split */}
       {(() => {
         const selectedContacts = form.contact_ids
           .map(id => contacts.find(c => c.id === id))
           .filter((c): c is Contact => !!c)
 
-        // When a trip is selected, pre-fill with current user + all trip members
         let defaultParticipants: { name: string; email: string }[] | undefined
         if (form.trip_id && currentUser) {
           const trip = trips.find(t => t.id === form.trip_id)
           const userEmailLower = currentUser.email.toLowerCase()
-          const participants: { name: string; email: string }[] = [
-            { name: currentUser.name, email: currentUser.email },
-          ]
-          // All non-declined invitations are trip members
-          const seenEmails = new Set(participants.filter(p => p.email).map(p => p.email.toLowerCase()))
+          const ps: { name: string; email: string }[] = [{ name: currentUser.name, email: currentUser.email }]
+          const seenEmails = new Set(ps.filter(p => p.email).map(p => p.email.toLowerCase()))
           for (const inv of (trip?.trip_invitations ?? [])) {
             if (inv.status === 'declined') continue
             const isPlaceholder = inv.invitee_email.startsWith('_nomail_')
@@ -695,17 +897,16 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
             if (e && seenEmails.has(e.toLowerCase())) continue
             const name = inv.invitee_name || (e ? e.split('@')[0] : '')
             if (!name) continue
-            participants.push({ name, email: e })
+            ps.push({ name, email: e })
             if (e) seenEmails.add(e.toLowerCase())
           }
-          // Legacy trip_members not yet in invitations
           for (const m of (trip?.trip_members ?? [])) {
             const email = m.email ?? ''
             if (!email || email.toLowerCase() === userEmailLower || seenEmails.has(email.toLowerCase())) continue
-            participants.push({ name: m.name || email.split('@')[0], email })
+            ps.push({ name: m.name || email.split('@')[0], email })
             seenEmails.add(email.toLowerCase())
           }
-          defaultParticipants = participants
+          defaultParticipants = ps
         } else if (selectedContacts.length > 0) {
           defaultParticipants = selectedContacts.map(c => ({ name: c.name, email: c.email ?? '' }))
         }
@@ -713,13 +914,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         return (
           <SplitModal
             open={splitOpen}
-            onClose={() => {
-              setSplitOpen(false)
-              // Launched straight into the split editor (Splits page) and nothing
-              // was linked — close the whole modal instead of leaving the user on
-              // an empty transaction form.
-              if (defaultSplitOpen && !transaction && !linkedSplitId) onClose()
-            }}
+            onClose={() => setSplitOpen(false)}
             transactionId={transaction?.id ?? null}
             onSaved={async (splitId) => {
               setSplitOpen(false)
