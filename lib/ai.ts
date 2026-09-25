@@ -16,27 +16,39 @@ function client() {
   return new GoogleGenAI({ apiKey })
 }
 
+// Retry transient Google errors (429 rate limit, 5xx / model overloaded).
+// gemini-3.x flash can return 503 "high demand" during spikes.
+async function generate(contents: unknown, temperature: number): Promise<string> {
+  const cfg = { temperature, maxOutputTokens: MAX_OUTPUT_TOKENS }
+  let lastErr: unknown = null
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await client().models.generateContent({ model: GEMINI_MODEL, contents: contents as any, config: cfg })
+      return res.text ?? ''
+    } catch (err) {
+      lastErr = err
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const status = (err as any)?.status ?? (err as any)?.code
+      const transient = status === 429 || status === 500 || status === 502 || status === 503 || status === 504
+      if (transient && attempt < 3) {
+        await new Promise(r => setTimeout(r, 800 * Math.pow(2, attempt))) // 0.8s, 1.6s, 3.2s
+        continue
+      }
+      throw err
+    }
+  }
+  throw lastErr
+}
+
 // Plain text prompt → text.
 export async function geminiText(prompt: string, temperature = 0.2): Promise<string> {
-  const res = await client().models.generateContent({
-    model: GEMINI_MODEL,
-    contents: prompt,
-    config: { temperature, maxOutputTokens: MAX_OUTPUT_TOKENS },
-  })
-  return res.text ?? ''
+  return generate(prompt, temperature)
 }
 
 // Multimodal prompt (image or PDF bytes + instructions) → text.
 export async function geminiVision(prompt: string, base64: string, mimeType: string, temperature = 0.1): Promise<string> {
-  const res = await client().models.generateContent({
-    model: GEMINI_MODEL,
-    contents: [
-      { inlineData: { data: base64, mimeType } },
-      { text: prompt },
-    ],
-    config: { temperature, maxOutputTokens: MAX_OUTPUT_TOKENS },
-  })
-  return res.text ?? ''
+  return generate([{ inlineData: { data: base64, mimeType } }, { text: prompt }], temperature)
 }
 
 function buildTransactionSummary(transactions: Transaction[]): string {
