@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GoogleGenAI } from '@google/genai'
 import type { Transaction } from '@/types'
 
 // Gemini model used across the app (chat, insights, receipts, statements).
@@ -6,33 +6,35 @@ import type { Transaction } from '@/types'
 export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash'
 const MAX_OUTPUT_TOKENS = 8192
 
+// Uses the current @google/genai SDK, which supports both legacy "AIza" keys and
+// the newer "AQ." auth keys that Google AI Studio now issues.
 function client() {
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured')
-  return new GoogleGenerativeAI(apiKey)
+  return new GoogleGenAI({ apiKey })
 }
 
 // Plain text prompt → text.
 export async function geminiText(prompt: string, temperature = 0.2): Promise<string> {
-  const model = client().getGenerativeModel({
+  const res = await client().models.generateContent({
     model: GEMINI_MODEL,
-    generationConfig: { temperature, maxOutputTokens: MAX_OUTPUT_TOKENS },
+    contents: prompt,
+    config: { temperature, maxOutputTokens: MAX_OUTPUT_TOKENS },
   })
-  const result = await model.generateContent(prompt)
-  return result.response.text()
+  return res.text ?? ''
 }
 
 // Multimodal prompt (image or PDF bytes + instructions) → text.
 export async function geminiVision(prompt: string, base64: string, mimeType: string, temperature = 0.1): Promise<string> {
-  const model = client().getGenerativeModel({
+  const res = await client().models.generateContent({
     model: GEMINI_MODEL,
-    generationConfig: { temperature, maxOutputTokens: MAX_OUTPUT_TOKENS },
+    contents: [
+      { inlineData: { data: base64, mimeType } },
+      { text: prompt },
+    ],
+    config: { temperature, maxOutputTokens: MAX_OUTPUT_TOKENS },
   })
-  const result = await model.generateContent([
-    { inlineData: { data: base64, mimeType } },
-    { text: prompt },
-  ])
-  return result.response.text()
+  return res.text ?? ''
 }
 
 function buildTransactionSummary(transactions: Transaction[]): string {
