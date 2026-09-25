@@ -542,8 +542,8 @@ export default function TransactionList() {
 
           {/* Right-side action buttons — always visible */}
           <div className="flex gap-1.5 shrink-0">
-            <Button variant="outline" onClick={exportToExcel} className="h-8 gap-1.5 px-2.5" title="Export to Excel">
-              <Download className="w-4 h-4" /><span className="text-xs">Export</span>
+            <Button variant="outline" onClick={exportToExcel} className="h-8 w-8 p-0 sm:w-auto sm:px-2.5 sm:gap-1.5" title="Export to Excel">
+              <Download className="w-4 h-4" /><span className="hidden sm:inline text-xs">Export</span>
             </Button>
             <Button variant="outline" onClick={() => setPdfOpen(true)} className="h-8 w-8 p-0" title="Import PDF">
               <FileUp className="w-4 h-4" />
