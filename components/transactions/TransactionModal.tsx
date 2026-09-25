@@ -31,6 +31,12 @@ interface Props {
   // When true (and creating a new expense), the split toggle starts enabled —
   // used when launching this modal from the Splits area.
   defaultSplitOpen?: boolean
+  // Pre-fill amount / description when creating a new transaction (e.g. splitting
+  // a whole trip pre-fills the trip total + a title).
+  defaultAmount?: string | number
+  defaultDescription?: string
+  // Seed the inline split participant list (e.g. a friend, or all trip members).
+  defaultSplitParticipants?: { name: string; email: string }[]
 }
 
 const DATE_KEY = 'lastTransactionDate'
@@ -65,7 +71,7 @@ function buildEmptyForm(tripId?: string | null, cardId?: string | null) {
 interface CardStatement { id: string; cycle_start: string; cycle_end: string }
 interface CardInfo { id: string; card_name: string; last_four: string | null }
 
-export default function TransactionModal({ open, onClose, onSaved, transaction, defaultTripId, defaultCardId, defaultSplitOpen }: Props) {
+export default function TransactionModal({ open, onClose, onSaved, transaction, defaultTripId, defaultCardId, defaultSplitOpen, defaultAmount, defaultDescription, defaultSplitParticipants }: Props) {
   const [form, setForm] = useState(() => buildEmptyForm(defaultTripId, defaultCardId))
   const [saving, setSaving] = useState(false)
   const [scanningReceipt, setScanningReceipt] = useState(false)
@@ -151,6 +157,17 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
     return [emptyParticipant(), emptyParticipant()]
   }
 
+  // Initial split rows when opening: caller-provided participants take precedence
+  function initialParticipants(): Participant[] {
+    if (defaultSplitParticipants && defaultSplitParticipants.length > 0) {
+      const rows = defaultSplitParticipants
+        .filter(p => p.name || p.email)
+        .map(p => ({ name: p.name || (p.email ? p.email.split('@')[0] : ''), email: p.email ?? '', amount: '' }))
+      return rows.length >= 2 ? rows : [...rows, emptyParticipant()]
+    }
+    return seedParticipants()
+  }
+
   useEffect(() => {
     if (transaction) {
       const populated = {
@@ -180,6 +197,8 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       setParticipants(seedParticipants())
     } else {
       const empty = buildEmptyForm(defaultTripId, defaultCardId)
+      if (defaultAmount != null && String(defaultAmount) !== '') empty.amount = String(defaultAmount)
+      if (defaultDescription) empty.description = defaultDescription
       const wantSplit = !!defaultSplitOpen
       setForm(empty)
       originalFormRef.current = empty
@@ -187,11 +206,14 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       setCardEnabled(!!defaultCardId)
       setSplitEnabled(wantSplit)
       setFriendsEnabled(false)
-      setParticipants(seedParticipants())
+      setParticipants(initialParticipants())
     }
     setAddContactKey(k => k + 1)
     setSplitOpen(false)
     setLinkedSplitId(transaction?.split_id ?? null)
+    // Default props (amount/description/participants) are only read on open; leaving
+    // them out of deps keeps re-renders from resetting an in-progress form.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transaction, open, defaultTripId, defaultCardId, defaultSplitOpen])
 
   const categories = form.type === 'income'

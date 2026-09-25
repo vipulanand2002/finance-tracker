@@ -1434,15 +1434,16 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
         onSaved={() => { setEditingTx(null); fetchTransactions(); onUpdated() }}
       />
 
-      <SplitModal
-        open={splitOpen || !!editingTripSplit}
-        editingSplit={editingTripSplit}
-        onClose={() => { setSplitOpen(false); setEditingTripSplit(null) }}
-        onSaved={() => { fetchTripSplits(); fetchTransactions(); onUpdated() }}
-        defaultTitle={splitDefaultTitle}
+      {/* New trip split → global transaction popup, opening with the split toggle on */}
+      <TransactionModal
+        open={splitOpen}
+        onClose={() => setSplitOpen(false)}
+        onSaved={() => { setSplitOpen(false); fetchTripSplits(); fetchTransactions(); onUpdated() }}
+        defaultTripId={trip.id}
+        defaultSplitOpen
         defaultAmount={totalSpent}
-        tripId={trip.id}
-        defaultParticipants={[
+        defaultDescription={splitDefaultTitle}
+        defaultSplitParticipants={[
           // Current user first (owner or member — they paid the bill)
           ...(currentUserEmail ? [{ name: currentUserName || currentUserEmail.split('@')[0], email: currentUserEmail }] : []),
           // Other trip members (skip current user if they're also in trip_members)
@@ -1450,6 +1451,14 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
             .filter(m => !m.email || m.email.toLowerCase() !== currentUserEmail)
             .map(m => ({ name: m.name || (m.email ? m.email.split('@')[0] : ''), email: m.email ?? '' })),
         ]}
+      />
+
+      {/* Editing an existing trip split stays a direct split edit */}
+      <SplitModal
+        open={!!editingTripSplit}
+        editingSplit={editingTripSplit}
+        onClose={() => setEditingTripSplit(null)}
+        onSaved={() => { fetchTripSplits(); fetchTransactions(); onUpdated() }}
       />
     </>
   )

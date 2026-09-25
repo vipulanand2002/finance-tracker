@@ -15,7 +15,7 @@ import {
   SplitSquareVertical, MessageCircle, BellRing, Mail, BadgeCheck, Check, X, Clock, Receipt,
 } from 'lucide-react'
 import { cn, formatCurrency } from '@/lib/utils'
-const SplitModal = dynamic(() => import('@/components/splits/SplitModal'), { ssr: false })
+const TransactionModal = dynamic(() => import('@/components/transactions/TransactionModal'), { ssr: false })
 import type { Message } from '@/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -773,13 +773,14 @@ export default function FriendsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ══ Split modal ══ */}
+      {/* ══ Split via the global transaction popup ══ */}
       {selected && (
-        <SplitModal
+        <TransactionModal
           open={splitOpen}
           onClose={() => setSplitOpen(false)}
           onSaved={() => { setSplitOpen(false); loadSplits(selected) }}
-          defaultParticipants={[{ name: selected.name, email: selected.email ?? '' }]}
+          defaultSplitOpen
+          defaultSplitParticipants={[{ name: selected.name, email: selected.email ?? '' }]}
         />
       )}
     </div>
