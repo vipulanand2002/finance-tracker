@@ -13,10 +13,12 @@ interface Message {
   content: string
 }
 
-// Render **bold** markdown as real bold; everything else stays literal text.
-// (whitespace-pre-wrap on the container already preserves line breaks/lists.)
+// Render lightweight markdown from Gemini: **bold** → bold, and leading
+// "* " / "- " list markers → real bullets. Line breaks are preserved by the
+// container's whitespace-pre-wrap. No HTML injection (returns React nodes).
 function renderRichText(text: string) {
-  return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
+  const withBullets = text.replace(/^[ \t]*[*-][ \t]+/gm, '• ')
+  return withBullets.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
     /^\*\*[^*]+\*\*$/.test(part)
       ? <strong key={i}>{part.slice(2, -2)}</strong>
       : <span key={i}>{part}</span>

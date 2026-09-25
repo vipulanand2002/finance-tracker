@@ -7,9 +7,10 @@ import { Button } from '@/components/ui/button'
 import { Lightbulb, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 
-// Render **bold** markdown as real bold; everything else stays literal text.
+// Render lightweight markdown: **bold** → bold, leading "* "/"- " → bullets.
 function renderRichText(text: string) {
-  return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
+  const withBullets = text.replace(/^[ \t]*[*-][ \t]+/gm, '• ')
+  return withBullets.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
     /^\*\*[^*]+\*\*$/.test(part)
       ? <strong key={i}>{part.slice(2, -2)}</strong>
       : <span key={i}>{part}</span>
