@@ -3,8 +3,10 @@ import type { Transaction } from '@/types'
 
 // Gemini model used across the app (chat, insights, receipts, statements).
 // Overridable via GEMINI_MODEL env so the model can change without a code deploy.
-export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash'
-const MAX_OUTPUT_TOKENS = 8192
+export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
+// Generous cap: gemini-3.x flash is a thinking model that counts its internal
+// reasoning against this budget, so a small value can truncate the real output.
+const MAX_OUTPUT_TOKENS = 65536
 
 // Uses the current @google/genai SDK, which supports both legacy "AIza" keys and
 // the newer "AQ." auth keys that Google AI Studio now issues.
