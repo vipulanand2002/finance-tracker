@@ -21,6 +21,7 @@ interface Participant {
   id: string
   participant_name: string
   participant_email: string | null
+  participant_user_id: string | null
   amount_owed: number
   is_paid: boolean
   paid_at: string | null
@@ -358,8 +359,25 @@ export default function SplitsPage() {
   const active = splits.filter(s => !s.is_settled)
   const settled = splits.filter(s => s.is_settled)
 
-  const totalOwedByOthers = active.reduce((sum, s) =>
-    sum + s.split_participants.filter(p => !p.is_paid).reduce((s2, p) => s2 + p.amount_owed, 0), 0)
+  // Is a given participant row "me"? (creator is auto-added as a participant)
+  const isMe = (p: Participant) =>
+    (p.participant_user_id && p.participant_user_id === myId) ||
+    (!!myEmail && p.participant_email?.toLowerCase() === myEmail)
+
+  // Perspective matters:
+  //  - Splits I created → others' unpaid shares are owed TO me.
+  //  - Splits I only participate in → only MY unpaid share is what I owe.
+  const owedToYou = active
+    .filter(s => !!myId && s.created_by === myId)
+    .reduce((sum, s) => sum + s.split_participants
+      .filter(p => !p.is_paid && !isMe(p))
+      .reduce((a, p) => a + p.amount_owed, 0), 0)
+
+  const youOwe = active
+    .filter(s => !(myId && s.created_by === myId))
+    .reduce((sum, s) => sum + s.split_participants
+      .filter(p => !p.is_paid && isMe(p))
+      .reduce((a, p) => a + p.amount_owed, 0), 0)
 
   return (
     <div className="space-y-6">
@@ -378,15 +396,15 @@ export default function SplitsPage() {
           <Card>
             <CardContent className="pt-4">
               <p className="text-xs text-muted-foreground">Others owe you</p>
-              <p className="text-xl font-bold text-emerald-600">{formatCurrency(totalOwedByOthers)}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">across {active.length} active split{active.length !== 1 ? 's' : ''}</p>
+              <p className="text-xl font-bold text-emerald-600">{formatCurrency(owedToYou)}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">from splits you created</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-4">
-              <p className="text-xs text-muted-foreground">Active splits</p>
-              <p className="text-xl font-bold">{active.length}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">{settled.length} settled</p>
+              <p className="text-xs text-muted-foreground">You owe</p>
+              <p className="text-xl font-bold text-blue-600">{formatCurrency(youOwe)}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">across {active.length} active split{active.length !== 1 ? 's' : ''}</p>
             </CardContent>
           </Card>
         </div>

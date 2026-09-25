@@ -6,11 +6,27 @@ import { ArrowUpRight, ArrowDownLeft, CheckCircle2, Loader2, Send, X } from 'luc
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 
+interface Participant {
+  participant_name: string
+  participant_email: string | null
+  participant_user_id: string | null
+  amount_owed: number
+  is_paid: boolean
+}
+
+interface SplitRow {
+  created_by: string
+  is_settled: boolean
+  split_participants: Participant[]
+}
+
 interface FriendBalance {
-  id: string
+  key: string            // stable unique id for React/state (contact id, else email/name)
+  id: string | null      // contact id if this counterparty is a saved friend
   name: string
   email: string | null
-  splitOwed: number      // they owe you from splits
+  splitOwed: number      // they owe you (splits you created)
+  splitYouOwe: number    // you owe them (splits they created)
   txnOwed: number        // expense tagged to them
   txnReceived: number    // income tagged from them
   net: number            // positive = they owe you, negative = you owe them
@@ -27,53 +43,90 @@ export default function BalancesPage() {
     async function load() {
       setLoading(true)
       try {
+        const { createClient } = require('@/lib/supabase/client') as typeof import('@/lib/supabase/client')
+        const { data: { user } } = await createClient().auth.getUser()
+        const myId = user?.id ?? ''
+        const myEmail = (user?.email ?? '').toLowerCase()
+
         const [friendsRes, splitsRes] = await Promise.all([
           fetch('/api/friends'),
           fetch('/api/splits'),
         ])
         const friends = await friendsRes.json()
         const splits = await splitsRes.json()
+        const friendList: { id: string; name: string; email: string | null }[] = Array.isArray(friends) ? friends : []
+        const splitList: SplitRow[] = Array.isArray(splits) ? splits : []
 
-        if (!Array.isArray(friends)) return
+        // Build counterparties keyed by email (or name when no email), pulling from
+        // both the friends list and every split participant/creator.
+        const map = new Map<string, FriendBalance>()
+        const keyOf = (email: string | null, name: string) =>
+          email ? `e:${email.toLowerCase()}` : `n:${name.toLowerCase()}`
+        const ensure = (name: string, email: string | null, id?: string | null): FriendBalance => {
+          const key = keyOf(email, name)
+          let cp = map.get(key)
+          if (!cp) {
+            cp = { key, id: id ?? null, name, email: email ?? null, splitOwed: 0, splitYouOwe: 0, txnOwed: 0, txnReceived: 0, net: 0 }
+            map.set(key, cp)
+          } else {
+            if (!cp.id && id) cp.id = id
+            if (!cp.email && email) cp.email = email
+          }
+          return cp
+        }
 
-        const result: FriendBalance[] = await Promise.all(
-          friends.map(async (f: { id: string; name: string; email: string | null }) => {
-            // Fetch tagged transactions for this friend
-            const txRes = await fetch(`/api/transactions?contact_id=${f.id}`)
+        const isSelf = (p: Participant) =>
+          (!!p.participant_user_id && p.participant_user_id === myId) ||
+          (!!myEmail && p.participant_email?.toLowerCase() === myEmail)
+
+        // Seed with saved friends so tagged transactions can be attributed to them
+        for (const f of friendList) ensure(f.name, f.email, f.id)
+
+        for (const sp of splitList) {
+          if (sp.is_settled) continue
+          const iAmCreator = !!myId && sp.created_by === myId
+          if (iAmCreator) {
+            // Everyone else's unpaid share is owed TO me
+            for (const p of sp.split_participants ?? []) {
+              if (p.is_paid || isSelf(p)) continue
+              ensure(p.participant_name, p.participant_email).splitOwed += p.amount_owed
+            }
+          } else {
+            // I only participate → my unpaid share is what I owe the creator
+            const myRow = (sp.split_participants ?? []).find(isSelf)
+            if (myRow && !myRow.is_paid) {
+              const creator = (sp.split_participants ?? []).find(p => p.participant_user_id === sp.created_by)
+              ensure(creator?.participant_name ?? 'Split creator', creator?.participant_email ?? null)
+                .splitYouOwe += myRow.amount_owed
+            }
+          }
+        }
+
+        // Tagged (non-split) transactions only exist for saved friends (need contact_id)
+        await Promise.all(
+          [...map.values()].filter(cp => cp.id).map(async cp => {
+            const txRes = await fetch(`/api/transactions?contact_id=${cp.id}`)
             const txns = txRes.ok ? await txRes.json() : []
             const txList = Array.isArray(txns) ? txns : txns.transactions ?? []
-
-            const txnOwed = txList
+            cp.txnOwed = txList
               .filter((t: { type: string; split_id: string | null }) => t.type === 'expense' && !t.split_id)
               .reduce((s: number, t: { amount: number }) => s + t.amount, 0)
-            const txnReceived = txList
+            cp.txnReceived = txList
               .filter((t: { type: string; split_id: string | null }) => t.type === 'income' && !t.split_id)
               .reduce((s: number, t: { amount: number }) => s + t.amount, 0)
-
-            // Splits owed by this friend
-            const splitOwed = Array.isArray(splits)
-              ? splits
-                  .filter((sp: { is_settled: boolean }) => !sp.is_settled)
-                  .flatMap((sp: { split_participants: { participant_email: string | null; participant_name: string; amount_owed: number; is_paid: boolean }[] }) =>
-                    sp.split_participants ?? []
-                  )
-                  .filter((p: { participant_email: string | null; participant_name: string; is_paid: boolean }) => {
-                    if (p.is_paid) return false
-                    if (f.email && p.participant_email?.toLowerCase() === f.email.toLowerCase()) return true
-                    if (!p.participant_email && p.participant_name.toLowerCase() === f.name.toLowerCase()) return true
-                    return false
-                  })
-                  .reduce((s: number, p: { amount_owed: number }) => s + p.amount_owed, 0)
-              : 0
-
-            const net = splitOwed + txnOwed - txnReceived
-            return { id: f.id, name: f.name, email: f.email, splitOwed, txnOwed, txnReceived, net }
           })
         )
 
-        // Only show friends with any interaction
-        setBalances(result.filter(b => b.net !== 0 || b.txnOwed > 0 || b.txnReceived > 0 || b.splitOwed > 0)
-          .sort((a, b) => b.net - a.net))
+        const result = [...map.values()].map(cp => ({
+          ...cp,
+          net: cp.splitOwed + cp.txnOwed - cp.splitYouOwe - cp.txnReceived,
+        }))
+
+        setBalances(
+          result
+            .filter(b => Math.abs(b.net) > 0.001 || b.splitOwed > 0 || b.splitYouOwe > 0 || b.txnOwed > 0 || b.txnReceived > 0)
+            .sort((a, b) => b.net - a.net)
+        )
       } finally {
         setLoading(false)
       }
@@ -82,7 +135,7 @@ export default function BalancesPage() {
   }, [])
 
   async function closeBalance(friend: FriendBalance) {
-    setClosing(friend.id)
+    setClosing(friend.key)
     setConfirmClose(null)
     try {
       const res = await fetch('/api/splits?type=close_balance', {
@@ -99,10 +152,10 @@ export default function BalancesPage() {
       )
       // Refresh balances
       setBalances(prev => prev.filter(b => {
-        if (b.id !== friend.id) return true
+        if (b.key !== friend.key) return true
         // Keep if they still have txn-only balance
         return b.txnOwed > 0 || b.txnReceived > 0
-      }).map(b => b.id === friend.id ? { ...b, splitOwed: 0, net: b.txnOwed - b.txnReceived } : b))
+      }).map(b => b.key === friend.key ? { ...b, splitOwed: 0, net: b.txnOwed - b.txnReceived } : b))
     } catch {
       toast.error('Failed to close balance')
     } finally {
@@ -112,7 +165,7 @@ export default function BalancesPage() {
 
   async function remind(friend: FriendBalance) {
     if (!friend.email) { toast.error('No email for this friend'); return }
-    setReminding(friend.id)
+    setReminding(friend.key)
     try {
       const res = await fetch('/api/mail/reminder', {
         method: 'POST',
@@ -165,7 +218,7 @@ export default function BalancesPage() {
       ) : (
         <div className="space-y-2">
           {balances.map(b => (
-            <div key={b.id} className="rounded-xl border bg-card p-4 space-y-3">
+            <div key={b.key} className="rounded-xl border bg-card p-4 space-y-3">
 
               {/* Row 1: avatar + name (left)  |  net amount (right) */}
               <div className="flex items-center gap-3">
@@ -200,29 +253,30 @@ export default function BalancesPage() {
               </div>
 
               {/* Row 2: breakdown chips */}
-              {(b.splitOwed > 0 || b.txnOwed > 0 || b.txnReceived > 0) && (
+              {(b.splitOwed > 0 || b.splitYouOwe > 0 || b.txnOwed > 0 || b.txnReceived > 0) && (
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                  {b.splitOwed   > 0 && <span>Splits: <span className="font-medium text-foreground">{formatCurrency(b.splitOwed)}</span></span>}
-                  {b.txnOwed     > 0 && <span>Expenses: <span className="font-medium text-foreground">{formatCurrency(b.txnOwed)}</span></span>}
-                  {b.txnReceived > 0 && <span>Received: <span className="font-medium text-foreground">{formatCurrency(b.txnReceived)}</span></span>}
+                  {b.splitOwed    > 0 && <span>They owe (splits): <span className="font-medium text-foreground">{formatCurrency(b.splitOwed)}</span></span>}
+                  {b.splitYouOwe  > 0 && <span>You owe (splits): <span className="font-medium text-foreground">{formatCurrency(b.splitYouOwe)}</span></span>}
+                  {b.txnOwed      > 0 && <span>Expenses: <span className="font-medium text-foreground">{formatCurrency(b.txnOwed)}</span></span>}
+                  {b.txnReceived  > 0 && <span>Received: <span className="font-medium text-foreground">{formatCurrency(b.txnReceived)}</span></span>}
                 </div>
               )}
 
               {/* Row 3: action buttons */}
-              {(b.net > 0 || b.splitOwed > 0) && confirmClose !== b.id && (
+              {(b.net > 0 || b.splitOwed > 0) && confirmClose !== b.key && (
                 <div className="flex gap-2 justify-end pt-1 border-t">
                   {b.net > 0 && (
                     <Button size="sm" variant="outline" className="h-8 px-3 text-xs gap-1.5"
-                      disabled={reminding === b.id || !b.email} onClick={() => remind(b)}>
-                      {reminding === b.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                      disabled={reminding === b.key || !b.email} onClick={() => remind(b)}>
+                      {reminding === b.key ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
                       Remind
                     </Button>
                   )}
                   {b.splitOwed > 0 && (
                     <Button size="sm" variant="outline"
                       className="h-8 px-3 text-xs gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
-                      disabled={closing === b.id} onClick={() => setConfirmClose(b.id)}>
-                      {closing === b.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                      disabled={closing === b.key} onClick={() => setConfirmClose(b.key)}>
+                      {closing === b.key ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
                       Close Balance
                     </Button>
                   )}
@@ -230,7 +284,7 @@ export default function BalancesPage() {
               )}
 
               {/* Inline confirm */}
-              {confirmClose === b.id && (
+              {confirmClose === b.key && (
                 <div className="flex items-center justify-between gap-2 flex-wrap pt-1 border-t">
                   <p className="text-xs text-muted-foreground">
                     Mark all splits with <span className="font-medium text-foreground">{b.name}</span> as paid?
