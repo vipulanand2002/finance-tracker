@@ -1,8 +1,10 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import type { Transaction } from '@/types'
 
-// Single Gemini model used across the app (chat, insights, receipts, statements).
-export const GEMINI_MODEL = 'gemini-3.6-flash'
+// Gemini model used across the app (chat, insights, receipts, statements).
+// Overridable via GEMINI_MODEL env so the model can change without a code deploy.
+export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash'
+const MAX_OUTPUT_TOKENS = 8192
 
 function client() {
   const apiKey = process.env.GEMINI_API_KEY
@@ -10,12 +12,11 @@ function client() {
   return new GoogleGenerativeAI(apiKey)
 }
 
-// Plain text prompt → text. maxOutputTokens is generous because gemini-3.6 counts
-// its internal reasoning against the output budget, which can truncate short replies.
+// Plain text prompt → text.
 export async function geminiText(prompt: string, temperature = 0.2): Promise<string> {
   const model = client().getGenerativeModel({
     model: GEMINI_MODEL,
-    generationConfig: { temperature, maxOutputTokens: 65536 },
+    generationConfig: { temperature, maxOutputTokens: MAX_OUTPUT_TOKENS },
   })
   const result = await model.generateContent(prompt)
   return result.response.text()
@@ -25,7 +26,7 @@ export async function geminiText(prompt: string, temperature = 0.2): Promise<str
 export async function geminiVision(prompt: string, base64: string, mimeType: string, temperature = 0.1): Promise<string> {
   const model = client().getGenerativeModel({
     model: GEMINI_MODEL,
-    generationConfig: { temperature, maxOutputTokens: 65536 },
+    generationConfig: { temperature, maxOutputTokens: MAX_OUTPUT_TOKENS },
   })
   const result = await model.generateContent([
     { inlineData: { data: base64, mimeType } },
@@ -85,7 +86,8 @@ Return ONLY the JSON array, no other text.`
   try {
     const text = await geminiText(prompt)
     return JSON.parse(cleanJson(text))
-  } catch {
+  } catch (err) {
+    console.error('[AI] analyzeSpending failed:', err instanceof Error ? err.message : err)
     return ['Unable to generate insights at this time.']
   }
 }
@@ -107,7 +109,8 @@ Return ONLY the JSON array, no other text.`
   try {
     const text = await geminiText(prompt)
     return JSON.parse(cleanJson(text))
-  } catch {
+  } catch (err) {
+    console.error('[AI] getBudgetRecommendations failed:', err instanceof Error ? err.message : err)
     return []
   }
 }
