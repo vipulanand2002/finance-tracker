@@ -855,6 +855,8 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                                     date: s.date,
                                     trip_id: trip.id,
                                     contact_id: null,
+                                    receipt_url: s.receipt_url ?? null,
+                                    receipt_url_2: s.receipt_url_2 ?? null,
                                     split_participants: s.split_participants,
                                   })}
                                   className="text-muted-foreground hover:text-foreground"
