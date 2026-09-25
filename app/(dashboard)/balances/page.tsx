@@ -165,98 +165,87 @@ export default function BalancesPage() {
       ) : (
         <div className="space-y-2">
           {balances.map(b => (
-            <div key={b.id} className="rounded-xl border bg-card p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className="w-9 h-9 rounded-full bg-muted flex items-center justify-center font-semibold text-sm shrink-0">
-                    {b.name.charAt(0).toUpperCase()}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="font-medium text-sm truncate">{b.name}</p>
-                    {b.email && <p className="text-xs text-muted-foreground truncate">{b.email}</p>}
-                  </div>
-                </div>
+            <div key={b.id} className="rounded-xl border bg-card p-4 space-y-3">
 
-                <div className="flex items-center gap-2 shrink-0">
+              {/* Row 1: avatar + name (left)  |  net amount (right) */}
+              <div className="flex items-center gap-3">
+                <span className="w-9 h-9 rounded-full bg-muted flex items-center justify-center font-semibold text-sm shrink-0">
+                  {b.name.charAt(0).toUpperCase()}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm leading-tight">{b.name}</p>
+                  {b.email && <p className="text-xs text-muted-foreground truncate mt-0.5">{b.email}</p>}
+                </div>
+                <div className="shrink-0 text-right">
                   {b.net > 0 ? (
-                    <div className="text-right">
-                      <div className="flex items-center gap-1 text-emerald-600 font-semibold text-sm">
-                        <ArrowUpRight className="w-3.5 h-3.5" />
-                        {formatCurrency(b.net)}
+                    <>
+                      <div className="flex items-center justify-end gap-1 text-emerald-600 font-bold text-base leading-tight">
+                        <ArrowUpRight className="w-4 h-4" />{formatCurrency(b.net)}
                       </div>
                       <p className="text-xs text-muted-foreground">owes you</p>
-                    </div>
+                    </>
                   ) : b.net < 0 ? (
-                    <div className="text-right">
-                      <div className="flex items-center gap-1 text-blue-600 font-semibold text-sm">
-                        <ArrowDownLeft className="w-3.5 h-3.5" />
-                        {formatCurrency(Math.abs(b.net))}
+                    <>
+                      <div className="flex items-center justify-end gap-1 text-blue-600 font-bold text-base leading-tight">
+                        <ArrowDownLeft className="w-4 h-4" />{formatCurrency(Math.abs(b.net))}
                       </div>
                       <p className="text-xs text-muted-foreground">you owe</p>
-                    </div>
+                    </>
                   ) : (
-                    <div className="text-right">
-                      <div className="flex items-center gap-1 text-muted-foreground text-sm">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                        Settled
-                      </div>
+                    <div className="flex items-center gap-1 text-emerald-600 text-sm">
+                      <CheckCircle2 className="w-4 h-4" />Settled
                     </div>
-                  )}
-
-                  {b.net > 0 && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 px-2 text-xs gap-1"
-                      disabled={reminding === b.id || !b.email}
-                      onClick={() => remind(b)}
-                    >
-                      {reminding === b.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
-                      Remind
-                    </Button>
-                  )}
-
-                  {/* Close Balance button — only when splits are owed */}
-                  {b.splitOwed > 0 && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 px-2 text-xs gap-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
-                      disabled={closing === b.id}
-                      onClick={() => setConfirmClose(b.id)}
-                    >
-                      {closing === b.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
-                      Settle
-                    </Button>
                   )}
                 </div>
               </div>
 
-              {/* Inline confirm for closing balance */}
+              {/* Row 2: breakdown chips */}
+              {(b.splitOwed > 0 || b.txnOwed > 0 || b.txnReceived > 0) && (
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  {b.splitOwed   > 0 && <span>Splits: <span className="font-medium text-foreground">{formatCurrency(b.splitOwed)}</span></span>}
+                  {b.txnOwed     > 0 && <span>Expenses: <span className="font-medium text-foreground">{formatCurrency(b.txnOwed)}</span></span>}
+                  {b.txnReceived > 0 && <span>Received: <span className="font-medium text-foreground">{formatCurrency(b.txnReceived)}</span></span>}
+                </div>
+              )}
+
+              {/* Row 3: action buttons */}
+              {(b.net > 0 || b.splitOwed > 0) && confirmClose !== b.id && (
+                <div className="flex gap-2 justify-end pt-1 border-t">
+                  {b.net > 0 && (
+                    <Button size="sm" variant="outline" className="h-8 px-3 text-xs gap-1.5"
+                      disabled={reminding === b.id || !b.email} onClick={() => remind(b)}>
+                      {reminding === b.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                      Remind
+                    </Button>
+                  )}
+                  {b.splitOwed > 0 && (
+                    <Button size="sm" variant="outline"
+                      className="h-8 px-3 text-xs gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
+                      disabled={closing === b.id} onClick={() => setConfirmClose(b.id)}>
+                      {closing === b.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                      Close Balance
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {/* Inline confirm */}
               {confirmClose === b.id && (
-                <div className="mt-3 pt-3 border-t flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center justify-between gap-2 flex-wrap pt-1 border-t">
                   <p className="text-xs text-muted-foreground">
                     Mark all splits with <span className="font-medium text-foreground">{b.name}</span> as paid?
                   </p>
                   <div className="flex gap-2">
-                    <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setConfirmClose(null)}>
-                      <X className="w-3 h-3 mr-1" />Cancel
+                    <Button size="sm" variant="ghost" className="h-8 px-3 text-xs gap-1" onClick={() => setConfirmClose(null)}>
+                      <X className="w-3 h-3" />Cancel
                     </Button>
-                    <Button size="sm" className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => closeBalance(b)}>
-                      <CheckCircle2 className="w-3 h-3 mr-1" />Confirm
+                    <Button size="sm" className="h-8 px-3 text-xs gap-1 bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => closeBalance(b)}>
+                      <CheckCircle2 className="w-3 h-3" />Confirm
                     </Button>
                   </div>
                 </div>
               )}
 
-              {/* Breakdown */}
-              {confirmClose !== b.id && (b.splitOwed > 0 || b.txnOwed > 0 || b.txnReceived > 0) && (
-                <div className="mt-3 pt-3 border-t flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                  {b.splitOwed > 0 && <span>Splits: <span className="font-medium text-foreground">{formatCurrency(b.splitOwed)}</span></span>}
-                  {b.txnOwed > 0 && <span>Expenses: <span className="font-medium text-foreground">{formatCurrency(b.txnOwed)}</span></span>}
-                  {b.txnReceived > 0 && <span>Received: <span className="font-medium text-foreground">{formatCurrency(b.txnReceived)}</span></span>}
-                </div>
-              )}
             </div>
           ))}
         </div>
