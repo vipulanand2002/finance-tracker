@@ -92,29 +92,79 @@ export async function GET() {
   )
 }
 
-// ─── helper: back-fill email on split participants with matching name ──────────
-async function backfillSplitParticipants(
+// ─── helper: back-fill email across splits, trip invitations, and trip members ──
+async function backfillAllReferences(
   supabase: Awaited<ReturnType<typeof import('@/lib/supabase/server').createClient>>,
   userId: string,
   name: string,
-  email: string,
+  oldEmail: string | null,
+  newEmail: string,
 ) {
-  // Get all split IDs owned by this user
+  const emailChanged = oldEmail && oldEmail !== newEmail
+
+  // 1. split_participants (scoped to splits created by this user)
   const { data: userSplits } = await supabase
     .from('expense_splits')
     .select('id')
     .eq('created_by', userId)
 
   const splitIds = (userSplits ?? []).map((s: { id: string }) => s.id)
-  if (splitIds.length === 0) return
+  if (splitIds.length > 0) {
+    if (emailChanged) {
+      await supabase
+        .from('split_participants')
+        .update({ participant_email: newEmail })
+        .in('split_id', splitIds)
+        .eq('participant_email', oldEmail)
+    }
+    // name-only → email (null email + name match)
+    await supabase
+      .from('split_participants')
+      .update({ participant_email: newEmail })
+      .in('split_id', splitIds)
+      .ilike('participant_name', name)
+      .is('participant_email', null)
+  }
 
-  // Update participants where name matches and email is not yet set
+  // 2. trip_invitations sent by this user
+  if (emailChanged) {
+    await supabase
+      .from('trip_invitations')
+      .update({ invitee_email: newEmail })
+      .eq('inviter_id', userId)
+      .eq('invitee_email', oldEmail)
+  }
+  // name-only invitations (no email at time of invite)
   await supabase
-    .from('split_participants')
-    .update({ participant_email: email })
-    .in('split_id', splitIds)
-    .ilike('participant_name', name)
-    .is('participant_email', null)
+    .from('trip_invitations')
+    .update({ invitee_email: newEmail })
+    .eq('inviter_id', userId)
+    .ilike('invitee_name', name)
+    .is('invitee_email', null)
+
+  // 3. trip_members in trips owned by this user
+  const { data: userTrips } = await supabase
+    .from('trips')
+    .select('id')
+    .eq('user_id', userId)
+
+  const tripIds = (userTrips ?? []).map((t: { id: string }) => t.id)
+  if (tripIds.length > 0) {
+    if (emailChanged) {
+      await supabase
+        .from('trip_members')
+        .update({ email: newEmail })
+        .in('trip_id', tripIds)
+        .eq('email', oldEmail)
+    }
+    // name-only members
+    await supabase
+      .from('trip_members')
+      .update({ email: newEmail })
+      .in('trip_id', tripIds)
+      .ilike('name', name)
+      .is('email', null)
+  }
 }
 
 // ─── POST /api/friends ────────────────────────────────────────────────────────
@@ -210,9 +260,9 @@ export async function POST(request: Request) {
     }
   }
 
-  // Back-fill email on any existing split participants with this name
+  // Back-fill email across all tagged records (new contact, no old email)
   if (email) {
-    backfillSplitParticipants(supabase, user.id, name, email).catch(() => {})
+    backfillAllReferences(supabase, user.id, name, null, email).catch(() => {})
   }
 
   return NextResponse.json({
@@ -239,6 +289,16 @@ export async function PUT(request: Request) {
 
   const email = body.email?.trim().toLowerCase() || null
   const notes = body.notes?.trim() || null
+
+  // Fetch old email before updating so we can propagate changes
+  const { data: oldContact } = await supabase
+    .from('contacts')
+    .select('email')
+    .eq('id', id)
+    .eq('user_id', user.id)
+    .single()
+
+  const oldEmail = oldContact?.email ?? null
 
   const { data: contact, error } = await supabase
     .from('contacts')
@@ -288,9 +348,9 @@ export async function PUT(request: Request) {
     }
   }
 
-  // Back-fill email on any existing split participants with this name
+  // Propagate email change across all tagged records (splits, trip invitations, trip members)
   if (email) {
-    backfillSplitParticipants(supabase, user.id, name, email).catch(() => {})
+    backfillAllReferences(supabase, user.id, name, oldEmail, email).catch(() => {})
   }
 
   return NextResponse.json({
