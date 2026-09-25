@@ -4,6 +4,10 @@ import type { Transaction } from '@/types'
 // Gemini model used across the app (chat, insights, receipts, statements).
 // Overridable via GEMINI_MODEL env so the model can change without a code deploy.
 export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
+// Secondary model tried when the primary is overloaded (503) or unavailable (404).
+const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || 'gemini-2.5-flash'
+// Ordered, de-duped list of models to try in turn.
+const MODELS = [...new Set([GEMINI_MODEL, GEMINI_FALLBACK_MODEL])]
 // Generous cap: gemini-3.x flash is a thinking model that counts its internal
 // reasoning against this budget, so a small value can truncate the real output.
 const MAX_OUTPUT_TOKENS = 65536
@@ -16,26 +20,32 @@ function client() {
   return new GoogleGenAI({ apiKey })
 }
 
-// Retry transient Google errors (429 rate limit, 5xx / model overloaded).
-// gemini-3.x flash can return 503 "high demand" during spikes.
+// Try each model in turn, retrying transient errors (429 rate limit, 5xx /
+// "high demand") on the same model before falling through to the next one.
+// gemini-3.x flash can return 503 during demand spikes, so the fallback model
+// keeps chat/insights working when the primary is momentarily saturated.
 async function generate(contents: unknown, temperature: number): Promise<string> {
   const cfg = { temperature, maxOutputTokens: MAX_OUTPUT_TOKENS }
   let lastErr: unknown = null
-  for (let attempt = 0; attempt < 4; attempt++) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const res = await client().models.generateContent({ model: GEMINI_MODEL, contents: contents as any, config: cfg })
-      return res.text ?? ''
-    } catch (err) {
-      lastErr = err
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const status = (err as any)?.status ?? (err as any)?.code
-      const transient = status === 429 || status === 500 || status === 502 || status === 503 || status === 504
-      if (transient && attempt < 3) {
-        await new Promise(r => setTimeout(r, 800 * Math.pow(2, attempt))) // 0.8s, 1.6s, 3.2s
-        continue
+  for (const model of MODELS) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const res = await client().models.generateContent({ model, contents: contents as any, config: cfg })
+        return res.text ?? ''
+      } catch (err) {
+        lastErr = err
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const status = (err as any)?.status ?? (err as any)?.code
+        // Auth / bad-request errors won't be fixed by retrying or another model
+        if (status === 400 || status === 401 || status === 403) throw err
+        const transient = status === 429 || status === 500 || status === 502 || status === 503 || status === 504
+        if (transient && attempt < 1) {
+          await new Promise(r => setTimeout(r, 700)) // brief backoff, then retry same model
+          continue
+        }
+        break // exhausted this model (or 404 unavailable) → try the next one
       }
-      throw err
     }
   }
   throw lastErr

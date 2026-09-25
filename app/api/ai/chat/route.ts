@@ -2,6 +2,8 @@ import { createClient } from '@/lib/supabase/server'
 import { chatWithFinanceAI } from '@/lib/ai'
 import { NextResponse } from 'next/server'
 
+export const maxDuration = 30
+
 export async function POST(request: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
