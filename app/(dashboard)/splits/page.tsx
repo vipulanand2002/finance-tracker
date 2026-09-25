@@ -14,6 +14,7 @@ import { Plus, CheckCircle2, Circle, Trash2, Users, Mail, Loader2, Pencil, Paper
 import { formatCurrency } from '@/lib/utils'
 import { type EditingSplit } from '@/components/splits/SplitModal'
 const SplitModal = dynamic(() => import('@/components/splits/SplitModal'), { ssr: false })
+const TransactionModal = dynamic(() => import('@/components/transactions/TransactionModal'), { ssr: false })
 import type { Friend } from '@/types'
 
 interface Participant {
@@ -462,10 +463,19 @@ export default function SplitsPage() {
         </Tabs>
       )}
 
+      {/* New split → universal add popup, opening straight into the split editor */}
+      <TransactionModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onSaved={fetchSplits}
+        defaultSplitOpen
+      />
+
+      {/* Editing an existing split stays a direct split edit */}
       <SplitModal
-        open={modalOpen || !!editingSplit}
+        open={!!editingSplit}
         editingSplit={editingSplit}
-        onClose={() => { setModalOpen(false); setEditingSplit(null) }}
+        onClose={() => setEditingSplit(null)}
         onSaved={fetchSplits}
       />
     </div>

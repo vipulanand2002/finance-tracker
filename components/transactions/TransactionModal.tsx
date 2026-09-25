@@ -170,7 +170,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
     setAddContactKey(k => k + 1)
     setLinkedSplitId(transaction?.split_id ?? null)
     // Open the split editor straight away when launched from the Splits area
-    setSplitOpen(!transaction && !!defaultSplitOpen)
+    setSplitOpen(open && !transaction && !!defaultSplitOpen)
   }, [transaction, open, defaultTripId, defaultCardId, defaultSplitOpen])
 
   const categories = form.type === 'income'
@@ -713,7 +713,13 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         return (
           <SplitModal
             open={splitOpen}
-            onClose={() => setSplitOpen(false)}
+            onClose={() => {
+              setSplitOpen(false)
+              // Launched straight into the split editor (Splits page) and nothing
+              // was linked — close the whole modal instead of leaving the user on
+              // an empty transaction form.
+              if (defaultSplitOpen && !transaction && !linkedSplitId) onClose()
+            }}
             transactionId={transaction?.id ?? null}
             onSaved={async (splitId) => {
               setSplitOpen(false)
