@@ -1,10 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { NextResponse } from 'next/server'
-import Groq from 'groq-sdk'
+import { geminiVision } from '@/lib/ai'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
-
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY! })
 
 async function getValidAccessToken(userId: string): Promise<string> {
   const service = createServiceClient()
@@ -109,7 +107,7 @@ export async function POST(request: Request) {
 
     const allCategories = [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES].join(', ')
 
-    const prompt = `You are a bank statement parser. The following is base64-encoded PDF content from a bank statement. Extract ALL financial transactions.
+    const prompt = `You are a bank statement parser. This is a bank statement PDF. Extract ALL financial transactions.
 
 For each transaction return a JSON object with:
 - date: "YYYY-MM-DD" format
@@ -118,18 +116,10 @@ For each transaction return a JSON object with:
 - type: "income" for credits/deposits, "expense" for debits/withdrawals/payments
 - category: best match from: ${allCategories}
 
-Return ONLY a valid JSON array sorted by date descending. No explanation.
+Return ONLY a valid JSON array sorted by date descending. No explanation, no markdown, no code fences.`
 
-PDF content (base64): ${base64}`
-
-    const completion = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.1,
-      max_tokens: 8192,
-    })
-
-    const text = completion.choices[0]?.message?.content ?? ''
+    // Gemini reads the PDF bytes directly (real document understanding)
+    const text = await geminiVision(prompt, base64, 'application/pdf')
     const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
     const transactions = JSON.parse(clean)
 

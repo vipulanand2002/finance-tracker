@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { extractReceiptData } from '@/lib/groq'
+import { extractReceiptData } from '@/lib/ai'
 import { NextResponse } from 'next/server'
 
 export async function POST(request: Request) {

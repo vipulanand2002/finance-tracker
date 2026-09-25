@@ -1,18 +1,37 @@
-import Groq from 'groq-sdk'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 import type { Transaction } from '@/types'
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY! })
+// Single Gemini model used across the app (chat, insights, receipts, statements).
+export const GEMINI_MODEL = 'gemini-3.6-flash'
 
-const TEXT_MODEL = 'llama-3.3-70b-versatile'
-const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
+function client() {
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey) throw new Error('GEMINI_API_KEY is not configured')
+  return new GoogleGenerativeAI(apiKey)
+}
 
-async function chatText(prompt: string): Promise<string> {
-  const res = await groq.chat.completions.create({
-    model: TEXT_MODEL,
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.2,
+// Plain text prompt → text. maxOutputTokens is generous because gemini-3.6 counts
+// its internal reasoning against the output budget, which can truncate short replies.
+export async function geminiText(prompt: string, temperature = 0.2): Promise<string> {
+  const model = client().getGenerativeModel({
+    model: GEMINI_MODEL,
+    generationConfig: { temperature, maxOutputTokens: 65536 },
   })
-  return res.choices[0]?.message?.content ?? ''
+  const result = await model.generateContent(prompt)
+  return result.response.text()
+}
+
+// Multimodal prompt (image or PDF bytes + instructions) → text.
+export async function geminiVision(prompt: string, base64: string, mimeType: string, temperature = 0.1): Promise<string> {
+  const model = client().getGenerativeModel({
+    model: GEMINI_MODEL,
+    generationConfig: { temperature, maxOutputTokens: 65536 },
+  })
+  const result = await model.generateContent([
+    { inlineData: { data: base64, mimeType } },
+    { text: prompt },
+  ])
+  return result.response.text()
 }
 
 function buildTransactionSummary(transactions: Transaction[]): string {
@@ -64,7 +83,7 @@ Return a JSON array of insight strings. Each insight should be 1-2 sentences. Ex
 Return ONLY the JSON array, no other text.`
 
   try {
-    const text = await chatText(prompt)
+    const text = await geminiText(prompt)
     return JSON.parse(cleanJson(text))
   } catch {
     return ['Unable to generate insights at this time.']
@@ -86,7 +105,7 @@ Return a JSON array with "category" and "amount" (number, in INR). Only include 
 Return ONLY the JSON array, no other text.`
 
   try {
-    const text = await chatText(prompt)
+    const text = await geminiText(prompt)
     return JSON.parse(cleanJson(text))
   } catch {
     return []
@@ -108,7 +127,7 @@ USER QUESTION: ${message}
 
 Provide a clear, concise answer. Use specific numbers from the data when relevant. Keep it friendly and practical.`
 
-  return chatText(prompt)
+  return geminiText(prompt)
 }
 
 export async function extractReceiptData(
@@ -120,33 +139,16 @@ export async function extractReceiptData(
   category: string | null
   date: string | null
 }> {
-  const res = await groq.chat.completions.create({
-    model: VISION_MODEL,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'image_url',
-            image_url: { url: `data:${mimeType};base64,${base64Image}` },
-          },
-          {
-            type: 'text',
-            text: `Extract transaction details from this receipt. Return a JSON object with:
+  const prompt = `Extract transaction details from this receipt. Return a JSON object with:
 - amount: number (total amount, no currency symbol, null if not found)
 - description: string (merchant name or brief description, null if not found)
 - category: string (one of: Food & Dining, Transportation, Entertainment, Shopping, Health & Medical, Utilities, Rent & Housing, Education, Travel, Personal Care, Subscriptions, Other)
 - date: string (YYYY-MM-DD format, null if not visible)
 
-Return ONLY the JSON object, no other text.`,
-          },
-        ],
-      },
-    ],
-  })
+Return ONLY the JSON object, no other text.`
 
-  const text = res.choices[0]?.message?.content ?? ''
   try {
+    const text = await geminiVision(prompt, base64Image, mimeType)
     return JSON.parse(cleanJson(text))
   } catch {
     return { amount: null, description: null, category: null, date: null }

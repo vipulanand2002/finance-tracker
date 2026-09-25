@@ -7,7 +7,7 @@ export default function AIPage() {
       <div>
         <h1 className="text-2xl font-bold">AI Assistant</h1>
         <p className="text-muted-foreground text-sm">
-          Powered by Groq (Llama 3) — ask questions about your finances
+          Powered by Google Gemini — ask questions about your finances
         </p>
       </div>
 

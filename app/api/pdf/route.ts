@@ -1,81 +1,11 @@
 import { createClient } from '@/lib/supabase/server'
-import Groq from 'groq-sdk'
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { geminiText } from '@/lib/ai'
 import { NextResponse } from 'next/server'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY! })
-
-// ~3,000 tokens of input text per chunk.  Groq free tier caps many models at
-// 6,000 TPM; keeping input+output well under that lets us avoid rate limits.
-// 1 token ≈ 4 chars → 3,000 * 4 = 12,000 chars
+// ~3,000 tokens of input text per chunk keeps each Gemini call fast and the
+// output well within limits. 1 token ≈ 4 chars → 3,000 * 4 = 12,000 chars
 const MAX_CHUNK_CHARS = 12000
-
-// Prefer larger, newer chat/instruct models. Patterns ordered best→worst.
-// Verified working on Groq Aug 2026: qwen/qwen3.6-27b (produces output).
-// gpt-oss-120b and gpt-oss-20b consistently return empty — moved to bottom.
-const MODEL_PREFERENCE: RegExp[] = [
-  // Qwen — confirmed working (thinking blocks stripped by extractJsonArray)
-  /qwen/i,
-  // Llama 4
-  /llama-4.*maverick/i,
-  /llama-4.*scout/i,
-  /llama.*4.*\d+b/i,
-  // Llama 3.x 70B
-  /llama-3\.3-70b/i,
-  /llama.*3.*70b/i,
-  /llama.*70b/i,
-  // DeepSeek (also a reasoning model — thinking blocks handled)
-  /deepseek/i,
-  // Mixtral / Gemma
-  /mixtral.*8x7b/i,
-  /gemma.*27b/i,
-  // Groq compound
-  /groq\/compound(?!.*mini)/i,
-  // Smaller models
-  /llama.*8b.*instant/i,
-  /llama.*8b/i,
-  /gemma.*9b/i,
-  /groq\/compound/i,
-  // OpenAI OSS on Groq — returns empty content currently, last resort
-  /gpt-oss/i,
-]
-
-// Exclude non-chat model families and reasoning models that ignore /no_think on Groq.
-// Qwen3 floods its output with <think> blocks that exhaust max_tokens, leaving no JSON.
-const MODEL_EXCLUDE =
-  /whisper|guard|safeguard|tts|embed|vision|preview|orpheus|playai|speech|audio|distil-whisper|qwen/i
-
-// Cache the full ordered model list, not just one model, so we can iterate through fallbacks
-let modelsCache: { ordered: string[]; expiresAt: number } | null = null
-
-async function resolveModels(invalidate = false): Promise<string[]> {
-  if (invalidate) modelsCache = null
-  const now = Date.now()
-  if (modelsCache && now < modelsCache.expiresAt) return modelsCache.ordered
-
-  const page = await groq.models.list()
-  const ids: string[] = (page.data ?? []).map((m: any) => String(m.id))
-  const eligible = ids.filter(id => !MODEL_EXCLUDE.test(id))
-
-  console.log('[PDF] Groq models available:', ids.join(', '))
-  console.log('[PDF] Eligible (non-excluded):', eligible.join(', '))
-
-  // Sort by MODEL_PREFERENCE order; unmatched models go to the end
-  const ordered: string[] = []
-  for (const pattern of MODEL_PREFERENCE) {
-    for (const id of eligible) {
-      if (pattern.test(id) && !ordered.includes(id)) ordered.push(id)
-    }
-  }
-  for (const id of eligible) {
-    if (!ordered.includes(id)) ordered.push(id)
-  }
-
-  console.log('[PDF] Model priority order:', ordered.join(', '))
-  modelsCache = { ordered, expiresAt: now + 3_600_000 }
-  return ordered
-}
 
 async function extractPdfText(buffer: ArrayBuffer, password?: string): Promise<string> {
   // pdf-parse bundles its own pdfjs v2 which is Node.js-native (no browser APIs).
@@ -128,22 +58,6 @@ async function extractPdfText(buffer: ArrayBuffer, password?: string): Promise<s
   return lines.join('\n')
 }
 
-function isModelUnusable(err: any): boolean {
-  const msg = (err?.error?.error?.message ?? err?.message ?? '').toLowerCase()
-  return (
-    err?.status === 404 ||
-    err?.status === 410 ||
-    err?.status === 413 || // request too large for this model — try next
-    (err?.status === 400 && (
-      msg.includes('decommission') ||
-      msg.includes('deprecated') ||
-      msg.includes('no longer supported') ||
-      msg.includes('not supported') ||
-      msg.includes('terms') // terms not accepted (e.g. orpheus)
-    ))
-  )
-}
-
 // Some models emit JS object-literal syntax with unquoted keys: {date: "..."}.
 // This is valid JS but not valid JSON. Repair it before parsing.
 function repairJsonKeys(text: string): string {
@@ -192,33 +106,6 @@ function extractJsonArray(raw: string): any[] {
   return []
 }
 
-function getRetryAfterMs(err: any, defaultMs = 15_000): number {
-  // Groq may send retry-after as seconds in a header
-  const header =
-    err?.headers?.['retry-after'] ??
-    (typeof err?.headers?.get === 'function' ? err.headers.get('retry-after') : undefined)
-  const secs = header ? parseInt(String(header), 10) : NaN
-  return isNaN(secs) ? defaultMs : Math.min(secs * 1000, 30_000) // cap at 30 s
-}
-
-async function callGemini(prompt: string): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY
-  if (!apiKey) throw Object.assign(new Error('GEMINI_API_KEY not configured'), { skip: true })
-
-  const genai = new GoogleGenerativeAI(apiKey)
-  const model = genai.getGenerativeModel({
-    model: 'gemini-3.6-flash',
-    generationConfig: {
-      temperature: 0.1,
-      // 65536 ensures thinking tokens + full JSON output both fit.
-      // Gemini 3.6 counts internal reasoning against maxOutputTokens.
-      maxOutputTokens: 65536,
-    },
-  })
-  const result = await model.generateContent(prompt)
-  return result.response.text()
-}
-
 async function parseChunk(chunkText: string, categories: string, billingContext: string): Promise<any[]> {
   const prompt = `You are a precise bank statement parser. Extract ONLY actual debit/credit transactions from the text below. ${billingContext}
 
@@ -253,62 +140,30 @@ Categories: ${categories}
 Statement text:
 ${chunkText}`
 
-  // ── Primary: Gemini 2.0 Flash (1M TPM free tier, no thinking overhead) ──
-  try {
-    const raw = await callGemini(prompt)
-    console.log(`[PDF] gemini outLen=${raw.length} preview=${raw.slice(0, 100)}`)
-    if (raw.trim()) return extractJsonArray(raw)
-    console.warn('[PDF] Gemini returned empty — falling back to Groq')
-  } catch (err: any) {
-    if (err?.skip) {
-      console.log('[PDF] Gemini not configured — using Groq')
-    } else {
-      console.warn('[PDF] Gemini error, falling back to Groq:', err?.message ?? err)
-    }
-  }
-
-  // ── Fallback: iterate available Groq models ──
-  const models = await resolveModels()
-
-  for (const model of models) {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const completion = await groq.chat.completions.create({
-          model,
-          messages: [
-            { role: 'system', content: 'You are a JSON extraction tool. Output ONLY a raw JSON array. No explanation, no markdown, no code fences.' },
-            { role: 'user', content: `/no_think\n\n${prompt}` },
-          ],
-          temperature: 0.1,
-          max_tokens: 4096,
-        })
-
-        const raw = completion.choices[0]?.message?.content ?? ''
-        console.log(`[PDF] groq model=${model} outLen=${raw.length} preview=${raw.slice(0, 100)}`)
-
-        if (!raw.trim()) {
-          console.warn(`[PDF] ${model} returned empty — skipping`)
-          break
-        }
-        return extractJsonArray(raw)
-      } catch (err: any) {
-        if (err?.status === 429 && attempt < 2) {
-          const wait = getRetryAfterMs(err)
-          console.warn(`[PDF] Rate limited on ${model}. Waiting ${wait}ms (attempt ${attempt + 1}/3)`)
-          await new Promise(r => setTimeout(r, wait))
-          continue
-        }
-        if (isModelUnusable(err)) {
-          console.warn(`[PDF] ${model} unusable (${err?.status}) — skipping`)
-          break
-        }
-        throw err
+  // Gemini with a couple of retries for transient/rate-limit errors
+  let lastErr: any = null
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const raw = await geminiText(prompt, 0.1)
+      console.log(`[PDF] gemini outLen=${raw.length} preview=${raw.slice(0, 100)}`)
+      if (raw.trim()) return extractJsonArray(raw)
+      console.warn('[PDF] Gemini returned empty — retrying')
+    } catch (err: any) {
+      lastErr = err
+      const status = err?.status ?? err?.response?.status
+      const transient = status === 429 || status === 503 || (status >= 500 && status < 600)
+      if (transient && attempt < 2) {
+        const wait = 5000 * (attempt + 1)
+        console.warn(`[PDF] Gemini ${status} — waiting ${wait}ms (attempt ${attempt + 1}/3)`)
+        await new Promise(r => setTimeout(r, wait))
+        continue
       }
+      throw err
     }
   }
 
-  await resolveModels(true) // refresh for next request
-  throw new Error('All AI providers failed. Check Vercel logs for details.')
+  if (lastErr) throw lastErr
+  throw new Error('Gemini did not return any transactions. Check Vercel logs for details.')
 }
 
 // Normalize CR/+ credit markers so the AI reliably identifies them as income.
@@ -444,25 +299,26 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ transactions: result })
   } catch (err: any) {
-    // Surface the real Groq error for easier diagnosis
-    const groqMsg: string = err?.error?.error?.message ?? err?.message ?? ''
-    console.error('PDF parse error — status:', err?.status, '| message:', groqMsg)
+    // Surface the real Gemini error for easier diagnosis
+    const aiMsg: string = err?.error?.error?.message ?? err?.message ?? ''
+    const status = err?.status ?? err?.response?.status
+    console.error('PDF parse error — status:', status, '| message:', aiMsg)
 
-    if (err?.status === 429) {
+    if (status === 429) {
       return NextResponse.json(
         { error: 'AI rate limit hit. Please wait a minute and try again.' },
         { status: 429 }
       )
     }
-    if (err?.status === 401) {
+    if (status === 401 || status === 403 || /api key/i.test(aiMsg)) {
       return NextResponse.json(
-        { error: 'AI service authentication failed — check GROQ_API_KEY in environment variables.' },
+        { error: 'AI service authentication failed — check GEMINI_API_KEY in environment variables.' },
         { status: 500 }
       )
     }
 
     return NextResponse.json(
-      { error: groqMsg || 'Failed to parse PDF. Make sure it is a readable bank statement.' },
+      { error: aiMsg || 'Failed to parse PDF. Make sure it is a readable bank statement.' },
       { status: 500 }
     )
   }

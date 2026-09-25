@@ -133,7 +133,7 @@ const features = [
   { icon: Scale, title: 'Balances', desc: 'Net balance per friend across all splits and tagged transactions.', color: 'text-teal-500' },
   { icon: Plane, title: 'Trip Tracking', desc: 'Group travel with per-member spending, shared splits, and chat.', color: 'text-orange-500' },
   { icon: MessageCircle, title: 'Friends Chat', desc: 'Real-time chat — split cards auto-appear in conversations.', color: 'text-pink-500' },
-  { icon: Bot, title: 'AI Assistant', desc: 'Ask anything about your finances. Groq-powered spending insights.', color: 'text-amber-500' },
+  { icon: Bot, title: 'AI Assistant', desc: 'Ask anything about your finances. Gemini-powered spending insights.', color: 'text-amber-500' },
   { icon: Camera, title: 'Receipt Scanner', desc: 'Photograph a receipt — AI auto-fills amount, category, and date.', color: 'text-cyan-500' },
   { icon: CreditCard, title: 'Credit Card Tracking', desc: 'Tag any transaction with a card, track statements per cycle.', color: 'text-indigo-500' },
   { icon: Bell, title: 'Push Notifications', desc: 'Instant alerts when friends add you to a split or mark you paid.', color: 'text-red-500' },
@@ -525,7 +525,7 @@ function AISection() {
       <div className="px-4 py-3 border-b flex items-center gap-2 flex-wrap">
         <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
         <p className="font-semibold text-sm">AI Financial Assistant</p>
-        <span className="ml-auto text-xs rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400 px-2 py-0.5 shrink-0">Powered by Groq</span>
+        <span className="ml-auto text-xs rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400 px-2 py-0.5 shrink-0">Powered by Gemini</span>
       </div>
       <div className="px-3 sm:px-4 py-4 space-y-4">
         {aiChat.map((m, i) => (
@@ -622,7 +622,7 @@ export default function DemoPage() {
           <div className="flex flex-wrap justify-center gap-5 sm:gap-8 pt-2 text-sm text-muted-foreground">
             {[
               { val: '14 features', label: 'built in' },
-              { val: 'Groq AI', label: 'powered insights' },
+              { val: 'Gemini AI', label: 'powered insights' },
               { val: 'Real-time', label: 'split notifications' },
               { val: 'PWA', label: 'works offline' },
             ].map(({ val, label }) => (
@@ -710,7 +710,7 @@ export default function DemoPage() {
           <div className="flex items-center gap-1.5">
             <span>💰</span>
             <span className="font-semibold text-foreground">Finance Tracker</span>
-            <span>— built with Next.js, Supabase &amp; Groq</span>
+            <span>— built with Next.js, Supabase &amp; Gemini</span>
           </div>
           <div className="flex items-center gap-4">
             <Link href="/login" className="hover:text-foreground transition-colors">Sign In</Link>
