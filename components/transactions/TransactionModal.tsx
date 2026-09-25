@@ -9,8 +9,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
-import { EyeOff, Loader2, Settings2, Upload, X, SplitSquareVertical, CreditCard } from 'lucide-react'
+import { EyeOff, Loader2, Settings2, Upload, X, SplitSquareVertical, CreditCard, MapPin, Users } from 'lucide-react'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, TRIP_EXPENSE_CATEGORIES } from '@/lib/constants'
 import { ManageCategories } from '@/components/categories/ManageCategories'
 import SplitModal from '@/components/splits/SplitModal'
@@ -24,6 +26,9 @@ interface Props {
   transaction?: Transaction | null
   defaultTripId?: string | null
   defaultCardId?: string | null
+  // When true (and creating a new expense), the split editor opens immediately —
+  // used when launching this modal from the Splits area.
+  defaultSplitOpen?: boolean
 }
 
 const DATE_KEY = 'lastTransactionDate'
@@ -55,7 +60,7 @@ function buildEmptyForm(tripId?: string | null, cardId?: string | null) {
 interface CardStatement { id: string; cycle_start: string; cycle_end: string }
 interface CardInfo { id: string; card_name: string; last_four: string | null }
 
-export default function TransactionModal({ open, onClose, onSaved, transaction, defaultTripId, defaultCardId }: Props) {
+export default function TransactionModal({ open, onClose, onSaved, transaction, defaultTripId, defaultCardId, defaultSplitOpen }: Props) {
   const [form, setForm] = useState(() => buildEmptyForm(defaultTripId, defaultCardId))
   const [saving, setSaving] = useState(false)
   const [scanningReceipt, setScanningReceipt] = useState(false)
@@ -72,6 +77,13 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
   const [manageCatOpen, setManageCatOpen] = useState(false)
   // Incremented to remount the "add contact" Select after each pick, resetting to placeholder
   const [addContactKey, setAddContactKey] = useState(0)
+  // Whether trips / contacts / cards have all resolved — gates the options block so
+  // the toggle rows appear together instead of popping in one by one.
+  const [optionsLoaded, setOptionsLoaded] = useState(false)
+  // Progressive-disclosure toggles for the optional sections
+  const [tripEnabled, setTripEnabled] = useState(false)
+  const [cardEnabled, setCardEnabled] = useState(false)
+  const [friendsEnabled, setFriendsEnabled] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const originalFormRef = useRef<ReturnType<typeof buildEmptyForm> | null>(null)
 
@@ -92,9 +104,18 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
 
   useEffect(() => {
     if (!open) return
-    fetch('/api/trips').then(r => r.json()).then(d => setTrips(Array.isArray(d) ? d : [])).catch(() => {})
-    fetch('/api/contacts').then(r => r.json()).then(d => setContacts(Array.isArray(d) ? d : [])).catch(() => {})
-    fetch('/api/cards').then(r => r.json()).then(d => setCards(Array.isArray(d) ? d : [])).catch(() => {})
+    setOptionsLoaded(false)
+    // Fetch the option sources together so the toggle rows render in one pass
+    Promise.all([
+      fetch('/api/trips').then(r => r.json()).catch(() => []),
+      fetch('/api/contacts').then(r => r.json()).catch(() => []),
+      fetch('/api/cards').then(r => r.json()).catch(() => []),
+    ]).then(([t, c, cd]) => {
+      setTrips(Array.isArray(t) ? t : [])
+      setContacts(Array.isArray(c) ? c : [])
+      setCards(Array.isArray(cd) ? cd : [])
+      setOptionsLoaded(true)
+    })
     loadCategories()
     setSelectedCycleId('none')
     // Fetch current user for trip-split pre-population
@@ -135,14 +156,22 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       }
       setForm(populated)
       originalFormRef.current = populated
+      setTripEnabled(!!populated.trip_id)
+      setCardEnabled(!!populated.card_id)
+      setFriendsEnabled(populated.contact_ids.length > 0)
     } else {
       const empty = buildEmptyForm(defaultTripId, defaultCardId)
       setForm(empty)
       originalFormRef.current = empty
+      setTripEnabled(!!defaultTripId)
+      setCardEnabled(!!defaultCardId)
+      setFriendsEnabled(false)
     }
     setAddContactKey(k => k + 1)
     setLinkedSplitId(transaction?.split_id ?? null)
-  }, [transaction, open, defaultTripId, defaultCardId])
+    // Open the split editor straight away when launched from the Splits area
+    setSplitOpen(!transaction && !!defaultSplitOpen)
+  }, [transaction, open, defaultTripId, defaultCardId, defaultSplitOpen])
 
   const categories = form.type === 'income'
     ? incomeCategories
@@ -152,6 +181,31 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
 
   function set<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm(prev => ({ ...prev, [key]: value }))
+  }
+
+  function toggleTrip(on: boolean) {
+    setTripEnabled(on)
+    if (on) {
+      // Trips are expense-only; force type and reset a non-trip category
+      set('type', 'expense')
+      const tripCats = TRIP_EXPENSE_CATEGORIES as unknown as string[]
+      if (!tripCats.includes(form.category)) set('category', '')
+    } else {
+      setForm(prev => ({ ...prev, trip_id: null, is_discrete: false }))
+    }
+  }
+
+  function toggleCard(on: boolean) {
+    setCardEnabled(on)
+    if (!on) {
+      set('card_id', null)
+      setSelectedCycleId('none')
+    }
+  }
+
+  function toggleFriends(on: boolean) {
+    setFriendsEnabled(on)
+    if (!on) set('contact_ids', [])
   }
 
   async function handleReceiptUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -249,7 +303,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
           </DialogHeader>
 
           <form onSubmit={handleSubmit} className="space-y-4 py-2">
-            {!form.trip_id && (
+            {!tripEnabled && (
               <div className="flex gap-2">
                 {(['expense', 'income'] as const).map(t => (
                   <Button
@@ -284,7 +338,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
             <div className="space-y-1">
               <div className="flex items-center justify-between">
                 <Label>Category *</Label>
-                {!form.trip_id && (
+                {!tripEnabled && (
                   <Button
                     type="button"
                     variant="ghost"
@@ -320,43 +374,6 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
               />
             </div>
 
-            {/* Billing cycle picker — only when adding a card transaction */}
-            {cardStatements.length > 0 && (
-              <div className="space-y-1">
-                <Label>Billing Cycle <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
-                <Select
-                  value={selectedCycleId}
-                  onValueChange={v => {
-                    if (!v) return
-                    setSelectedCycleId(v)
-                    if (v !== 'none') {
-                      const stmt = cardStatements.find(s => s.id === v)
-                      if (stmt) set('date', stmt.cycle_end)
-                    }
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Add to a billing cycle" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No cycle</SelectItem>
-                    {cardStatements.map(s => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {format(new Date(s.cycle_start + 'T00:00:00'), 'dd MMM')}
-                        {' – '}
-                        {format(new Date(s.cycle_end + 'T00:00:00'), 'dd MMM yyyy')}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {selectedCycleId !== 'none' && (
-                  <p className="text-xs text-muted-foreground">
-                    Date set to cycle end — adjust if needed
-                  </p>
-                )}
-              </div>
-            )}
-
             <div className="space-y-1">
               <Label htmlFor="date">Date *</Label>
               <Input
@@ -368,154 +385,229 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
               />
             </div>
 
-            {/* Multi-contact picker */}
-            {contacts.length > 0 && (
-              <div className="space-y-1.5">
-                <Label>Friends <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
+            {/* ── Options: progressive disclosure ── */}
+            {!optionsLoaded ? (
+              <div className="space-y-2">
+                <Skeleton className="h-10 w-full rounded-lg" />
+                <Skeleton className="h-10 w-full rounded-lg" />
+              </div>
+            ) : (
+              <div className="space-y-3 rounded-lg border p-3">
+                {/* Split (expense only) */}
+                {form.type === 'expense' && (
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium flex items-center gap-2">
+                      <SplitSquareVertical className="w-4 h-4 text-muted-foreground" />
+                      Split this expense
+                    </span>
+                    {linkedSplitId ? (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs text-emerald-600 font-medium">Linked</span>
+                        <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setSplitOpen(true)}>
+                          Edit
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button type="button" variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => setSplitOpen(true)}>
+                        Add split
+                      </Button>
+                    )}
+                  </div>
+                )}
 
-                {/* Selected contact chips */}
-                {form.contact_ids.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {form.contact_ids.map(id => {
-                      const c = contacts.find(x => x.id === id)
-                      if (!c) return null
-                      return (
-                        <Badge key={id} variant="secondary" className="gap-1 pr-1.5 max-w-[200px]">
-                          <span className="truncate">{c.name}</span>
-                          <button
-                            type="button"
-                            className="shrink-0 hover:text-destructive transition-colors"
-                            onClick={() => set('contact_ids', form.contact_ids.filter(x => x !== id))}
+                {/* Trip toggle (expense only — trips can't hold income) */}
+                {trips.length > 0 && form.type === 'expense' && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium flex items-center gap-2">
+                        <MapPin className="w-4 h-4 text-muted-foreground" />
+                        Spent on a trip?
+                      </span>
+                      <Switch checked={tripEnabled} onCheckedChange={toggleTrip} />
+                    </div>
+                    {tripEnabled && (
+                      <>
+                        <Select
+                          value={form.trip_id ?? ''}
+                          onValueChange={v => {
+                            if (!v) return
+                            set('trip_id', v)
+                            const tripCats = TRIP_EXPENSE_CATEGORIES as unknown as string[]
+                            if (!tripCats.includes(form.category)) set('category', '')
+                          }}
+                        >
+                          <SelectTrigger>
+                            <span className="truncate text-sm">
+                              {form.trip_id
+                                ? (trips.find(t => t.id === form.trip_id)?.name ?? '…')
+                                : <span className="text-muted-foreground">Select a trip</span>}
+                            </span>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {trips.filter(t => !t.is_closed || t.id === form.trip_id).map(t => (
+                              <SelectItem key={t.id} value={t.id}>{t.name}{t.is_closed ? ' (closed)' : ''}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+
+                        {/* Private expense — only meaningful within a trip */}
+                        {form.trip_id && (
+                          <div className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 transition-colors ${form.is_discrete ? 'border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950' : 'border-muted'}`}>
+                            <input
+                              id="discrete"
+                              type="checkbox"
+                              className="w-4 h-4 rounded mt-0.5 accent-amber-500"
+                              checked={form.is_discrete}
+                              onChange={e => set('is_discrete', e.target.checked)}
+                            />
+                            <div>
+                              <Label htmlFor="discrete" className="cursor-pointer font-medium flex items-center gap-1.5">
+                                <EyeOff className="w-3.5 h-3.5 text-amber-600" />
+                                Private expense
+                              </Label>
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                Counts toward your personal budget only — hidden from other trip members.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* Card toggle */}
+                {cards.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium flex items-center gap-2">
+                        <CreditCard className="w-4 h-4 text-muted-foreground" />
+                        Paid with a card?
+                      </span>
+                      <Switch checked={cardEnabled} onCheckedChange={toggleCard} />
+                    </div>
+                    {cardEnabled && (
+                      <>
+                        <Select
+                          value={form.card_id ?? ''}
+                          onValueChange={v => {
+                            if (!v) return
+                            set('card_id', v)
+                            setSelectedCycleId('none')
+                          }}
+                        >
+                          <SelectTrigger>
+                            <span className="truncate text-sm">
+                              {form.card_id
+                                ? (() => { const c = cards.find(c => c.id === form.card_id); return c ? `${c.card_name}${c.last_four ? ` ••${c.last_four}` : ''}` : '…' })()
+                                : <span className="text-muted-foreground">Select a card</span>}
+                            </span>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {cards.map(c => (
+                              <SelectItem key={c.id} value={c.id}>
+                                {c.card_name}{c.last_four ? ` ••${c.last_four}` : ''}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+
+                        {/* Billing cycle picker — only when the card has cycles */}
+                        {cardStatements.length > 0 && (
+                          <div className="space-y-1">
+                            <Label className="text-xs text-muted-foreground">Billing cycle (optional)</Label>
+                            <Select
+                              value={selectedCycleId}
+                              onValueChange={v => {
+                                if (!v) return
+                                setSelectedCycleId(v)
+                                if (v !== 'none') {
+                                  const stmt = cardStatements.find(s => s.id === v)
+                                  if (stmt) set('date', stmt.cycle_end)
+                                }
+                              }}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Add to a billing cycle" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">No cycle</SelectItem>
+                                {cardStatements.map(s => (
+                                  <SelectItem key={s.id} value={s.id}>
+                                    {format(new Date(s.cycle_start + 'T00:00:00'), 'dd MMM')}
+                                    {' – '}
+                                    {format(new Date(s.cycle_end + 'T00:00:00'), 'dd MMM yyyy')}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {selectedCycleId !== 'none' && (
+                              <p className="text-xs text-muted-foreground">Date set to cycle end — adjust if needed</p>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* Friends toggle */}
+                {contacts.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium flex items-center gap-2">
+                        <Users className="w-4 h-4 text-muted-foreground" />
+                        Tag friends?
+                      </span>
+                      <Switch checked={friendsEnabled} onCheckedChange={toggleFriends} />
+                    </div>
+                    {friendsEnabled && (
+                      <div className="space-y-1.5">
+                        {form.contact_ids.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {form.contact_ids.map(id => {
+                              const c = contacts.find(x => x.id === id)
+                              if (!c) return null
+                              return (
+                                <Badge key={id} variant="secondary" className="gap-1 pr-1.5 max-w-[200px]">
+                                  <span className="truncate">{c.name}</span>
+                                  <button
+                                    type="button"
+                                    className="shrink-0 hover:text-destructive transition-colors"
+                                    onClick={() => set('contact_ids', form.contact_ids.filter(x => x !== id))}
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </Badge>
+                              )
+                            })}
+                          </div>
+                        )}
+                        {availableContacts.length > 0 && (
+                          <Select
+                            key={addContactKey}
+                            onValueChange={(v: string | null) => {
+                              if (!v || form.contact_ids.includes(v)) return
+                              set('contact_ids', [...form.contact_ids, v])
+                              setAddContactKey(k => k + 1)
+                            }}
                           >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </Badge>
-                      )
-                    })}
+                            <SelectTrigger>
+                              <SelectValue placeholder={form.contact_ids.length === 0 ? 'Tag a friend…' : 'Add another friend…'} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {availableContacts.map(c => (
+                                <SelectItem key={c.id} value={c.id}>
+                                  {c.name}{c.email ? ` (${c.email})` : ''}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
-
-                {/* Add contact dropdown — hidden when all contacts are already selected */}
-                {availableContacts.length > 0 && (
-                  <Select
-                    key={addContactKey}
-                    onValueChange={(v: string | null) => {
-                      if (!v || form.contact_ids.includes(v)) return
-                      set('contact_ids', [...form.contact_ids, v])
-                      setAddContactKey(k => k + 1)
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder={form.contact_ids.length === 0 ? 'Tag a friend…' : 'Add another friend…'} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableContacts.map(c => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.name}{c.email ? ` (${c.email})` : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
-            )}
-
-            {/* Split — always visible for expense transactions */}
-            {form.type === 'expense' && (
-              linkedSplitId ? (
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 flex items-center gap-1.5 text-xs text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-md px-3 py-2">
-                    <SplitSquareVertical className="w-3.5 h-3.5 shrink-0" />
-                    Split linked
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="text-xs text-muted-foreground h-8 px-2"
-                    onClick={() => setSplitOpen(true)}
-                  >
-                    Edit
-                  </Button>
-                </div>
-              ) : (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="w-full text-xs"
-                  onClick={() => setSplitOpen(true)}
-                >
-                  <SplitSquareVertical className="w-3.5 h-3.5 mr-1.5" />
-                  Split this expense
-                </Button>
-              )
-            )}
-
-            {trips.length > 0 && (
-              <div className="space-y-1">
-                <Label>Trip <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
-                <Select
-                  value={form.trip_id ?? 'none'}
-                  onValueChange={v => {
-                    const tripSelected = v !== 'none'
-                    set('trip_id', tripSelected ? v : null)
-                    if (tripSelected) {
-                      set('type', 'expense')
-                      const tripCats = TRIP_EXPENSE_CATEGORIES as unknown as string[]
-                      if (!tripCats.includes(form.category)) set('category', '')
-                    }
-                  }}
-                >
-                  <SelectTrigger>
-                    <span className="truncate text-sm">
-                      {form.trip_id
-                        ? (trips.find(t => t.id === form.trip_id)?.name ?? '…')
-                        : <span className="text-muted-foreground">No trip</span>}
-                    </span>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No trip</SelectItem>
-                    {trips.filter(t => !t.is_closed || t.id === form.trip_id).map(t => (
-                      <SelectItem key={t.id} value={t.id}>{t.name}{t.is_closed ? ' (closed)' : ''}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            {/* Card picker — visible whenever cards exist */}
-            {cards.length > 0 && (
-              <div className="space-y-1">
-                <Label>
-                  <span className="flex items-center gap-1.5">
-                    <CreditCard className="w-3.5 h-3.5" />
-                    Credit Card <span className="text-muted-foreground font-normal text-xs">(optional)</span>
-                  </span>
-                </Label>
-                <Select
-                  value={form.card_id ?? 'none'}
-                  onValueChange={v => {
-                    set('card_id', v === 'none' ? null : v)
-                    setSelectedCycleId('none')
-                  }}
-                >
-                  <SelectTrigger>
-                    <span className="truncate text-sm">
-                      {form.card_id
-                        ? (() => { const c = cards.find(c => c.id === form.card_id); return c ? `${c.card_name}${c.last_four ? ` ••${c.last_four}` : ''}` : '…' })()
-                        : <span className="text-muted-foreground">No card</span>}
-                    </span>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No card</SelectItem>
-                    {cards.map(c => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.card_name}{c.last_four ? ` ••${c.last_four}` : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
               </div>
             )}
 
@@ -532,27 +624,6 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
               </Label>
               {form.is_recurring && <Badge variant="secondary" className="text-xs">Monthly</Badge>}
             </div>
-
-            {form.trip_id && form.type === 'expense' && (
-              <div className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 transition-colors ${form.is_discrete ? 'border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950' : 'border-muted'}`}>
-                <input
-                  id="discrete"
-                  type="checkbox"
-                  className="w-4 h-4 rounded mt-0.5 accent-amber-500"
-                  checked={form.is_discrete}
-                  onChange={e => set('is_discrete', e.target.checked)}
-                />
-                <div>
-                  <Label htmlFor="discrete" className="cursor-pointer font-medium flex items-center gap-1.5">
-                    <EyeOff className="w-3.5 h-3.5 text-amber-600" />
-                    Private expense
-                  </Label>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Counts toward your personal budget only — hidden from other trip members.
-                  </p>
-                </div>
-              </div>
-            )}
 
             {form.type === 'expense' && (
               <div className="space-y-1">
