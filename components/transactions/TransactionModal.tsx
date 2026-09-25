@@ -209,6 +209,10 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       }
       localStorage.setItem(DATE_KEY, form.date)
       toast.success(transaction ? 'Transaction updated' : 'Transaction added')
+      // Notify trips page to refresh totals when a trip-linked transaction changes
+      if (form.trip_id) {
+        window.dispatchEvent(new CustomEvent('tripTransactionsChanged'))
+      }
       onSaved()
       onClose()
     } catch (err) {
@@ -644,13 +648,14 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
               setSplitOpen(false)
               if (!splitId) return
               setLinkedSplitId(splitId)
-              // If splitting from an existing transaction, the API already updated it (no duplicate)
               onSaved()
               onClose()
             }}
             defaultTitle={form.description || undefined}
             defaultAmount={form.amount || undefined}
             defaultDate={form.date}
+            defaultCategory={form.category || undefined}
+            defaultCardId={form.card_id}
             tripId={form.trip_id}
             contactId={form.contact_ids[0] ?? null}
             defaultParticipants={defaultParticipants}

@@ -136,6 +136,7 @@ export async function PATCH(request: Request) {
   const body = await request.json()
   const patch: Record<string, unknown> = {}
   if (body.split_id !== undefined) patch.split_id = body.split_id ?? null
+  if (body.trip_id !== undefined) patch.trip_id = body.trip_id ?? null
 
   if (Object.keys(patch).length === 0) return NextResponse.json({ error: 'Nothing to patch' }, { status: 400 })
 

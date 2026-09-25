@@ -61,6 +61,13 @@ export default function TripsPage() {
 
   useEffect(() => { fetchTrips() }, [fetchTrips])
 
+  // Re-fetch whenever a transaction is linked/unlinked from another page
+  useEffect(() => {
+    const handler = () => fetchTrips()
+    window.addEventListener('tripTransactionsChanged', handler)
+    return () => window.removeEventListener('tripTransactionsChanged', handler)
+  }, [fetchTrips])
+
   async function deleteTrip(id: string, e: React.MouseEvent) {
     e.stopPropagation()
     if (!confirm('Delete this trip? Linked transactions will be unlinked.')) return

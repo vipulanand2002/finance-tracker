@@ -201,7 +201,7 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
       await Promise.all(
         [...selectedLink].map(id =>
           fetch(`/api/transactions?id=${id}`, {
-            method: 'PUT',
+            method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ trip_id: trip.id }),
           })
@@ -221,7 +221,7 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
   async function unlinkTransaction(id: string) {
     try {
       await fetch(`/api/transactions?id=${id}`, {
-        method: 'PUT',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ trip_id: null }),
       })

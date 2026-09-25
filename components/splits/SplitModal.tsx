@@ -46,13 +46,15 @@ interface Props {
   contactId?: string | null
   defaultParticipants?: { name: string; email: string }[]
   defaultDate?: string
+  defaultCategory?: string
+  defaultCardId?: string | null
   editingSplit?: EditingSplit | null
   transactionId?: string | null
 }
 
 const emptyParticipant = (): Participant => ({ name: '', email: '', amount: '' })
 
-export default function SplitModal({ open, onClose, onSaved, defaultTitle, defaultAmount, defaultDate, tripId, contactId, defaultParticipants, editingSplit, transactionId }: Props) {
+export default function SplitModal({ open, onClose, onSaved, defaultTitle, defaultAmount, defaultDate, tripId, contactId, defaultParticipants, defaultCategory, defaultCardId, editingSplit, transactionId }: Props) {
   const [title, setTitle] = useState('')
   const [totalAmount, setTotalAmount] = useState('')
   const [category, setCategory] = useState('Food & Dining')
@@ -146,7 +148,8 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         // Create mode
         const initTitle = defaultTitle ?? ''
         const initAmount = defaultAmount != null ? String(defaultAmount) : ''
-        const initCategory = 'Food & Dining'
+        const initCategory = defaultCategory ?? 'Food & Dining'
+        const initCardId = defaultCardId ?? null
         const initDate = defaultDate ?? format(new Date(), 'yyyy-MM-dd')
         const initTripId = tripId ?? null
         let initParticipants: Participant[]
@@ -162,7 +165,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         setCategory(initCategory)
         setDescription('')
         setSelectedTripId(initTripId)
-        setSelectedCardId(null)
+        setSelectedCardId(initCardId)
         setReceiptUrl('')
         setReceiptName('')
         setReceiptUrl2('')
@@ -177,7 +180,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
           description: '',
           date: initDate,
           selectedTripId: initTripId,
-          selectedCardId: null,
+          selectedCardId: initCardId,
           receiptUrl: '',
           receiptUrl2: '',
           receiptCustomName: '',
@@ -186,7 +189,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
         }
       }
     }
-  }, [open, editingSplit, defaultTitle, defaultAmount, defaultDate, defaultParticipants, tripId])
+  }, [open, editingSplit, defaultTitle, defaultAmount, defaultDate, defaultParticipants, defaultCategory, defaultCardId, tripId])
 
   function reset() {
     setTitle(''); setTotalAmount(''); setCategory('Food & Dining')
