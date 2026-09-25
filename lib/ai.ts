@@ -3,14 +3,15 @@ import type { Transaction } from '@/types'
 
 // Gemini model used across the app (chat, insights, receipts, statements).
 // Overridable via GEMINI_MODEL env so the model can change without a code deploy.
-export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
-// Secondary model tried when the primary is overloaded (503) or unavailable (404).
-const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || 'gemini-2.5-flash'
+// Primary: Flash-Lite — ~500 free requests/day, high-throughput, less prone to
+// 503 "high demand" than full Flash (~20/day). "-latest" alias never 404s on
+// model retirement. Fallback to full Flash if Flash-Lite isn't provisioned.
+export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-lite-latest'
+const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || 'gemini-3.8-flash'
 // Ordered, de-duped list of models to try in turn.
 const MODELS = [...new Set([GEMINI_MODEL, GEMINI_FALLBACK_MODEL])]
-// Generous cap: gemini-3.x flash is a thinking model that counts its internal
-// reasoning against this budget, so a small value can truncate the real output.
-const MAX_OUTPUT_TOKENS = 65536
+// 8192 is safe across all flash / flash-lite variants; our outputs are small.
+const MAX_OUTPUT_TOKENS = 8192
 
 // Uses the current @google/genai SDK, which supports both legacy "AIza" keys and
 // the newer "AQ." auth keys that Google AI Studio now issues.
