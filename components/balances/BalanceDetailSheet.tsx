@@ -139,7 +139,7 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
           {loading ? (
             <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
           ) : (
-            <div className="space-y-5 py-2">
+            <div className="space-y-5 px-4 pb-8 pt-1">
               {/* Net summary */}
               <div className={`rounded-xl p-4 border ${net > 0 ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-800' : net < 0 ? 'bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800' : 'bg-muted'}`}>
                 <p className="text-xs text-muted-foreground">

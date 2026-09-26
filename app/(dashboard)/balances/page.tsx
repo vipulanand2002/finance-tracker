@@ -191,24 +191,39 @@ export default function BalancesPage() {
     setClosing(friend.key)
     setConfirmClose(null)
     try {
-      const res = await fetch('/api/splits?type=close_balance', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contact_email: friend.email, contact_name: friend.name }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      toast.success(
-        data.markedPaid > 0
-          ? `Settled ${data.markedPaid} split share${data.markedPaid !== 1 ? 's' : ''} with ${friend.name}`
-          : `No open splits found for ${friend.name}`
-      )
-      // Refresh balances
-      setBalances(prev => prev.filter(b => {
-        if (b.key !== friend.key) return true
-        // Keep if they still have txn-only balance
-        return b.txnOwed > 0 || b.txnReceived > 0
-      }).map(b => b.key === friend.key ? { ...b, splitOwed: 0, net: b.txnOwed - b.txnReceived } : b))
+      // 1. Mark this person's outstanding split shares as paid (if any)
+      if (friend.splitOwed > 0) {
+        const res = await fetch('/api/splits?type=close_balance', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contact_email: friend.email, contact_name: friend.name }),
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error)
+      }
+
+      // 2. Settle the remaining (non-split) amount they owe — e.g. tagged expenses —
+      //    by recording a settlement income tagged to them.
+      const remaining = Math.round((friend.net - friend.splitOwed) * 100) / 100
+      if (remaining > 0.009 && friend.id) {
+        const res = await fetch('/api/transactions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount: remaining,
+            type: 'income',
+            category: 'Other',
+            description: `Settled balance with ${friend.name}`,
+            date: new Date().toISOString().split('T')[0],
+            contact_id: friend.id,
+            contact_ids: [friend.id],
+          }),
+        })
+        if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error ?? 'Failed to settle') }
+      }
+
+      toast.success(`Settled up with ${friend.name}`)
+      await load()
     } catch {
       toast.error('Failed to close balance')
     } finally {
@@ -362,7 +377,7 @@ export default function BalancesPage() {
                       Remind
                     </Button>
                   )}
-                  {b.splitOwed > 0 && (
+                  {b.net > 0 && (
                     <Button size="sm" variant="outline"
                       className="h-8 px-3 text-xs gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
                       disabled={closing === b.key} onClick={() => setConfirmClose(b.key)}>
@@ -377,7 +392,7 @@ export default function BalancesPage() {
               {confirmClose === b.key && (
                 <div className="flex items-center justify-between gap-2 flex-wrap pt-1 border-t">
                   <p className="text-xs text-muted-foreground">
-                    Mark all splits with <span className="font-medium text-foreground">{b.name}</span> as paid?
+                    Settle your balance with <span className="font-medium text-foreground">{b.name}</span>? Marks their splits paid and records the rest as settled.
                   </p>
                   <div className="flex gap-2">
                     <Button size="sm" variant="ghost" className="h-8 px-3 text-xs gap-1" onClick={() => setConfirmClose(null)}>
