@@ -11,10 +11,12 @@ async function getUser() {
 type SupaClient = Awaited<ReturnType<typeof createClient>>
 interface AuthUser { id: string; email?: string | null }
 
-// When an INCOME is tagged to contacts, create a shared "you paid me" record for
-// each tagged contact whose email maps to a registered user, so it shows up in
-// THEIR account. Safe no-op if the tagged_payments table doesn't exist yet.
-async function syncTaggedPaymentsForIncome(
+// When a transaction is tagged to contacts, mirror it into each tagged contact's
+// account (if they're a registered user) so the balance reconciles on both sides:
+//   income  → kind 'payment' (they paid you → reduces what they owe you)
+//   expense → kind 'charge'  (you paid for them → increases what they owe you)
+// Safe no-op if the tagged_payments table / kind column aren't migrated yet.
+async function syncTaggedTransactions(
   supabase: SupaClient,
   user: AuthUser,
   tx: { id: string; amount: number; description: string | null; date: string; type: string },
@@ -23,7 +25,13 @@ async function syncTaggedPaymentsForIncome(
   try {
     // Always clear any prior records for this transaction first (edit/re-sync)
     await supabase.from('tagged_payments').delete().eq('transaction_id', tx.id).eq('from_user_id', user.id)
-    if (tx.type !== 'income' || contactIds.length === 0) return
+    if ((tx.type !== 'income' && tx.type !== 'expense') || contactIds.length === 0) return
+
+    // Does the direction column exist? (added in migration 041)
+    const probe = await supabase.from('tagged_payments').select('kind').limit(1)
+    const hasKind = !probe.error
+    // Pre-041 we can only represent "payment" (income). Skip expenses until migrated.
+    if (tx.type === 'expense' && !hasKind) return
 
     const { data: contacts } = await supabase
       .from('contacts').select('id, name, email').in('id', contactIds).eq('user_id', user.id)
@@ -39,6 +47,7 @@ async function syncTaggedPaymentsForIncome(
     // Sender display name
     const { data: myProfile } = await supabase.from('profiles').select('full_name').eq('id', user.id).single()
     const fromName = myProfile?.full_name || user.email?.split('@')[0] || 'A friend'
+    const kind = tx.type === 'income' ? 'payment' : 'charge'
 
     const rows = (contacts ?? [])
       .filter((c: { email: string | null }) => c.email && byEmail.has(c.email.toLowerCase()))
@@ -53,6 +62,7 @@ async function syncTaggedPaymentsForIncome(
         date: tx.date,
         transaction_id: tx.id,
         status: 'pending',
+        ...(hasKind ? { kind } : {}),
       }))
     if (rows.length > 0) await supabase.from('tagged_payments').insert(rows)
   } catch {
@@ -140,7 +150,7 @@ export async function POST(request: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   const contactIds = [...new Set([...(body.contact_id ? [body.contact_id] : []), ...(Array.isArray(body.contact_ids) ? body.contact_ids : [])].filter(Boolean))] as string[]
-  await syncTaggedPaymentsForIncome(supabase, user, data, contactIds)
+  await syncTaggedTransactions(supabase, user, data, contactIds)
 
   return NextResponse.json(data, { status: 201 })
 }
@@ -181,7 +191,7 @@ export async function PUT(request: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   const contactIds = [...new Set([...(body.contact_id ? [body.contact_id] : []), ...(Array.isArray(body.contact_ids) ? body.contact_ids : [])].filter(Boolean))] as string[]
-  await syncTaggedPaymentsForIncome(supabase, user, data, contactIds)
+  await syncTaggedTransactions(supabase, user, data, contactIds)
 
   return NextResponse.json(data)
 }

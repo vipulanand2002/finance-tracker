@@ -32,6 +32,7 @@ interface TaggedPayment {
   description: string | null
   date: string
   status: string         // pending | added | dismissed
+  kind?: string          // 'payment' (they paid you) | 'charge' (you paid for them)
 }
 
 interface FriendBalance {
@@ -44,6 +45,7 @@ interface FriendBalance {
   txnOwed: number        // expense tagged to them
   txnReceived: number    // income tagged from them
   paidToThem: number     // payments THEY recorded that you made to them (reduces what you owe)
+  chargedToThem: number  // charges THEY recorded that you owe them (they paid for you)
   net: number            // positive = they owe you, negative = you owe them
 }
 
@@ -88,7 +90,7 @@ export default function BalancesPage() {
           const key = keyOf(email, name)
           let cp = map.get(key)
           if (!cp) {
-            cp = { key, id: id ?? null, name, email: email ?? null, splitOwed: 0, splitYouOwe: 0, txnOwed: 0, txnReceived: 0, paidToThem: 0, net: 0 }
+            cp = { key, id: id ?? null, name, email: email ?? null, splitOwed: 0, splitYouOwe: 0, txnOwed: 0, txnReceived: 0, paidToThem: 0, chargedToThem: 0, net: 0 }
             map.set(key, cp)
           } else {
             if (!cp.id && id) cp.id = id
@@ -124,10 +126,14 @@ export default function BalancesPage() {
           }
         }
 
-        // Payments the friend recorded that I made to them → reduces what I owe them.
-        // (All statuses count; status only controls the notification, per design.)
+        // Records the friend created from transactions they tagged to me:
+        //   'payment' → I paid them (reduces what I owe)
+        //   'charge'  → they paid for me (increases what I owe)
+        // (All statuses count; status only controls the notification banner.)
         for (const pay of payList) {
-          ensure(pay.from_name ?? pay.from_email ?? 'Friend', pay.from_email ?? null).paidToThem += pay.amount
+          const cp = ensure(pay.from_name ?? pay.from_email ?? 'Friend', pay.from_email ?? null)
+          if (pay.kind === 'charge') cp.chargedToThem += pay.amount
+          else cp.paidToThem += pay.amount
         }
         setPayments(payList.filter(p => p.status === 'pending'))
 
@@ -148,12 +154,12 @@ export default function BalancesPage() {
 
         const result = [...map.values()].map(cp => ({
           ...cp,
-          net: cp.splitOwed + cp.txnOwed + cp.paidToThem - cp.splitYouOwe - cp.txnReceived,
+          net: cp.splitOwed + cp.txnOwed + cp.paidToThem - cp.splitYouOwe - cp.txnReceived - cp.chargedToThem,
         }))
 
         setBalances(
           result
-            .filter(b => Math.abs(b.net) > 0.001 || b.splitOwed > 0 || b.splitYouOwe > 0 || b.txnOwed > 0 || b.txnReceived > 0 || b.paidToThem > 0)
+            .filter(b => Math.abs(b.net) > 0.001 || b.splitOwed > 0 || b.splitYouOwe > 0 || b.txnOwed > 0 || b.txnReceived > 0 || b.paidToThem > 0 || b.chargedToThem > 0)
             .sort((a, b) => b.net - a.net)
         )
       } finally {
@@ -242,8 +248,10 @@ export default function BalancesPage() {
             <div key={p.id} className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 p-3 flex items-center gap-3 flex-wrap">
               <div className="flex-1 min-w-0">
                 <p className="text-sm">
-                  <span className="font-medium">{p.from_name ?? p.from_email}</span> recorded that you paid them{' '}
+                  <span className="font-medium">{p.from_name ?? p.from_email}</span>{' '}
+                  {p.kind === 'charge' ? 'recorded that you owe them' : 'recorded that you paid them'}{' '}
                   <span className="font-semibold">{formatCurrency(p.amount)}</span>
+                  {p.kind === 'charge' && <span className="text-muted-foreground"> (they paid for you)</span>}
                 </p>
                 {p.description && <p className="text-xs text-muted-foreground truncate">{p.description}</p>}
                 <p className="text-[11px] text-muted-foreground mt-0.5">Already counted in your balance below.</p>
@@ -323,13 +331,14 @@ export default function BalancesPage() {
               </div>
 
               {/* Row 2: breakdown chips */}
-              {(b.splitOwed > 0 || b.splitYouOwe > 0 || b.txnOwed > 0 || b.txnReceived > 0 || b.paidToThem > 0) && (
+              {(b.splitOwed > 0 || b.splitYouOwe > 0 || b.txnOwed > 0 || b.txnReceived > 0 || b.paidToThem > 0 || b.chargedToThem > 0) && (
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                  {b.splitOwed    > 0 && <span>They owe (splits): <span className="font-medium text-foreground">{formatCurrency(b.splitOwed)}</span></span>}
-                  {b.splitYouOwe  > 0 && <span>You owe (splits): <span className="font-medium text-foreground">{formatCurrency(b.splitYouOwe)}</span></span>}
-                  {b.paidToThem   > 0 && <span>You paid: <span className="font-medium text-foreground">{formatCurrency(b.paidToThem)}</span></span>}
-                  {b.txnOwed      > 0 && <span>Expenses: <span className="font-medium text-foreground">{formatCurrency(b.txnOwed)}</span></span>}
-                  {b.txnReceived  > 0 && <span>Received: <span className="font-medium text-foreground">{formatCurrency(b.txnReceived)}</span></span>}
+                  {b.splitOwed     > 0 && <span>They owe (splits): <span className="font-medium text-foreground">{formatCurrency(b.splitOwed)}</span></span>}
+                  {b.splitYouOwe   > 0 && <span>You owe (splits): <span className="font-medium text-foreground">{formatCurrency(b.splitYouOwe)}</span></span>}
+                  {b.paidToThem    > 0 && <span>You paid: <span className="font-medium text-foreground">{formatCurrency(b.paidToThem)}</span></span>}
+                  {b.chargedToThem > 0 && <span>They paid for you: <span className="font-medium text-foreground">{formatCurrency(b.chargedToThem)}</span></span>}
+                  {b.txnOwed       > 0 && <span>Expenses: <span className="font-medium text-foreground">{formatCurrency(b.txnOwed)}</span></span>}
+                  {b.txnReceived   > 0 && <span>Received: <span className="font-medium text-foreground">{formatCurrency(b.txnReceived)}</span></span>}
                 </div>
               )}
 
