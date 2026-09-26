@@ -16,6 +16,8 @@ import {
 } from 'lucide-react'
 import { cn, formatCurrency } from '@/lib/utils'
 const TransactionModal = dynamic(() => import('@/components/transactions/TransactionModal'), { ssr: false })
+const BalanceDetailSheet = dynamic(() => import('@/components/balances/BalanceDetailSheet'), { ssr: false })
+import { ChevronRight } from 'lucide-react'
 import type { Message } from '@/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -93,6 +95,7 @@ export default function FriendsPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Friend | null>(null)
+  const [balanceOpen, setBalanceOpen] = useState(false)
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list')
 
   // Add / Edit form
@@ -624,116 +627,50 @@ export default function FriendsPage() {
             {/* ── Splits panel (all friends, or "splits" tab for connected) ── */}
             {(!selected.connected || chatTab === 'splits') && (
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {/* Balance summary */}
-                {!loadingSplits && (splits.length > 0 || taggedTxns.length > 0) && (
-                  <div className={cn(
-                    'rounded-xl p-4',
-                    netBalance > 0 ? 'bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800'
-                    : netBalance < 0 ? 'bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800'
-                    : 'bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800'
-                  )}>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs text-muted-foreground">
-                          {netBalance > 0 ? `${selected.name} owes you`
-                            : netBalance < 0 ? `You owe ${selected.name}`
-                            : 'All settled up'}
-                        </p>
-                        {netBalance !== 0 && (
-                          <p className={cn('text-xl font-bold', netBalance > 0 ? 'text-amber-600' : 'text-blue-600')}>
-                            {formatCurrency(Math.abs(netBalance))}
-                          </p>
-                        )}
-                      </div>
-                      {selected.email && netBalance > 0 && (
-                        <Button size="sm" variant="outline" onClick={() => sendReminder(selected)} disabled={sendingReminder}>
-                          {sendingReminder ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Mail className="w-3.5 h-3.5 mr-1.5" />}
-                          Remind
-                        </Button>
-                      )}
-                    </div>
-                    {(splitOwed > 0 || txnOwed > 0 || txnReceived > 0) && (
-                      <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
-                        {splitOwed > 0 && <span>Splits: <span className="font-medium text-amber-600">{formatCurrency(splitOwed)}</span></span>}
-                        {txnOwed > 0 && <span>Expenses: <span className="font-medium text-amber-600">{formatCurrency(txnOwed)}</span></span>}
-                        {txnReceived > 0 && <span>Received: <span className="font-medium text-emerald-600">−{formatCurrency(txnReceived)}</span></span>}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold">Splits with {selected.name}</p>
-                  <Button size="sm" variant="outline" onClick={() => setSplitOpen(true)}>
-                    <SplitSquareVertical className="w-3.5 h-3.5 mr-1.5" />New Split
-                  </Button>
-                </div>
-
                 {loadingSplits ? (
                   <div className="flex justify-center py-8">
                     <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
                   </div>
-                ) : splits.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-6 gap-2 text-muted-foreground text-sm">
-                    <SplitSquareVertical className="w-8 h-8 opacity-20" />
-                    No splits with {selected.name} yet.
-                  </div>
                 ) : (
-                  <div className="space-y-3">
-                    {splits.map(s => {
-                      const relevant = selectedEmailLower
-                        ? (s.split_participants ?? []).filter(p => p.participant_email?.toLowerCase() === selectedEmailLower)
-                        : []
-                      const unpaid = relevant.filter(p => !p.is_paid)
-                      const owed = unpaid.reduce((a, p) => a + p.amount_owed, 0)
-                      const settled = relevant.length > 0 && relevant.every(p => p.is_paid)
-                      return (
-                        <div key={s.id} className="p-4 rounded-xl border bg-card space-y-1.5">
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="font-medium text-sm">{s.title}</p>
-                            <span className={cn('text-sm font-semibold shrink-0', settled ? 'text-emerald-600' : owed > 0 ? 'text-amber-600' : 'text-muted-foreground')}>
-                              {settled ? 'Settled' : owed > 0 ? formatCurrency(owed) : formatCurrency(s.total_amount)}
-                            </span>
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            {format(new Date(s.date + 'T00:00:00'), 'dd MMM yyyy')} · {s.category} · Total {formatCurrency(s.total_amount)}
-                          </p>
-                          {relevant.length === 0 && !selectedEmailLower && (
-                            <p className="text-xs text-muted-foreground italic">Add email to see individual share</p>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-
-                {/* Tagged transactions */}
-                {taggedTxns.length > 0 && (
                   <>
-                    <p className="text-sm font-semibold pt-1">Tagged Transactions</p>
-                    <div className="space-y-3">
-                      {taggedTxns.map(t => (
-                        <div key={t.id} className="p-4 rounded-xl border bg-card space-y-1.5">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <Receipt className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
-                              <p className="font-medium text-sm truncate">{t.description}</p>
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <span className={cn('text-sm font-semibold', t.type === 'income' ? 'text-emerald-600' : 'text-amber-600')}>
-                                {t.type === 'income' ? '+' : ''}{formatCurrency(t.amount)}
-                              </span>
-                              <span className={cn('text-[10px] px-1.5 py-0.5 rounded font-medium', t.type === 'income' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40' : 'bg-amber-50 text-amber-700 dark:bg-amber-950/40')}>
-                                {t.type === 'income' ? 'Received' : 'Owed'}
-                              </span>
-                            </div>
-                          </div>
+                    {/* Openable balance card (same detail as the Balances tab) */}
+                    <button
+                      onClick={() => setBalanceOpen(true)}
+                      className={cn(
+                        'w-full text-left rounded-xl p-4 border transition-colors hover:brightness-95',
+                        netBalance > 0 ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800'
+                        : netBalance < 0 ? 'bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800'
+                        : 'bg-muted border-border'
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
                           <p className="text-xs text-muted-foreground">
-                            {format(new Date(t.date + 'T00:00:00'), 'dd MMM yyyy')} · {t.category}
+                            {netBalance > 0 ? `${selected.name} owes you`
+                              : netBalance < 0 ? `You owe ${selected.name}`
+                              : 'All settled up'}
                           </p>
+                          {netBalance !== 0 && (
+                            <p className={cn('text-xl font-bold', netBalance > 0 ? 'text-emerald-600' : 'text-blue-600')}>
+                              {formatCurrency(Math.abs(netBalance))}
+                            </p>
+                          )}
+                          {(splitOwed > 0 || txnOwed > 0 || txnReceived > 0) && (
+                            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                              {splitOwed > 0 && <span>Splits: <span className="font-medium text-foreground">{formatCurrency(splitOwed)}</span></span>}
+                              {txnOwed > 0 && <span>Expenses: <span className="font-medium text-foreground">{formatCurrency(txnOwed)}</span></span>}
+                              {txnReceived > 0 && <span>Received: <span className="font-medium text-foreground">{formatCurrency(txnReceived)}</span></span>}
+                            </div>
+                          )}
+                          <p className="text-[11px] text-muted-foreground mt-1.5">Tap to view &amp; edit splits and transactions</p>
                         </div>
-                      ))}
-                    </div>
+                        <ChevronRight className="w-5 h-5 text-muted-foreground shrink-0" />
+                      </div>
+                    </button>
+
+                    <Button size="sm" variant="outline" className="w-full" onClick={() => setSplitOpen(true)}>
+                      <SplitSquareVertical className="w-3.5 h-3.5 mr-1.5" />New Split with {selected.name}
+                    </Button>
                   </>
                 )}
               </div>
@@ -781,6 +718,16 @@ export default function FriendsPage() {
           onSaved={() => { setSplitOpen(false); loadSplits(selected) }}
           defaultSplitOpen
           defaultSplitParticipants={[{ name: selected.name, email: selected.email ?? '' }]}
+        />
+      )}
+
+      {/* ══ Openable balance detail (splits + transactions, editable) ══ */}
+      {selected && (
+        <BalanceDetailSheet
+          open={balanceOpen}
+          counterparty={{ name: selected.name, email: selected.email, contactId: selected.id }}
+          onClose={() => setBalanceOpen(false)}
+          onChanged={() => { loadSplits(selected); loadTaggedTxns(selected) }}
         />
       )}
     </div>

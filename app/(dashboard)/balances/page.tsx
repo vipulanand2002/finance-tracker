@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 
 const TransactionModal = dynamic(() => import('@/components/transactions/TransactionModal'), { ssr: false })
+const BalanceDetailSheet = dynamic(() => import('@/components/balances/BalanceDetailSheet'), { ssr: false })
+import type { BalanceCounterparty } from '@/components/balances/BalanceDetailSheet'
 
 interface Participant {
   participant_name: string
@@ -56,6 +58,7 @@ export default function BalancesPage() {
   const [confirmClose, setConfirmClose] = useState<string | null>(null)  // contact id pending confirmation
   const [closing, setClosing] = useState<string | null>(null)
   const [addExpenseFor, setAddExpenseFor] = useState<FriendBalance | null>(null)
+  const [detailFor, setDetailFor] = useState<BalanceCounterparty | null>(null)  // open balance detail
   const [payments, setPayments] = useState<TaggedPayment[]>([])   // pending "you paid X" notifications
   const [addPayment, setAddPayment] = useState<TaggedPayment | null>(null)  // one being added to my expenses
   const [actingPayment, setActingPayment] = useState<string | null>(null)
@@ -298,13 +301,14 @@ export default function BalancesPage() {
           {balances.map(b => (
             <div key={b.key} className="rounded-xl border bg-card p-4 space-y-3">
 
-              {/* Row 1: avatar + name (left)  |  net amount (right) */}
-              <div className="flex items-center gap-3">
+              {/* Row 1: avatar + name (left)  |  net amount (right) — tap to open detail */}
+              <div className="flex items-center gap-3 cursor-pointer" role="button" tabIndex={0}
+                onClick={() => setDetailFor({ name: b.name, email: b.email, contactId: b.id })}>
                 <span className="w-9 h-9 rounded-full bg-muted flex items-center justify-center font-semibold text-sm shrink-0">
                   {b.name.charAt(0).toUpperCase()}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-sm leading-tight">{b.name}</p>
+                  <p className="font-semibold text-sm leading-tight hover:underline">{b.name}</p>
                   {b.email && <p className="text-xs text-muted-foreground truncate mt-0.5">{b.email}</p>}
                 </div>
                 <div className="shrink-0 text-right">
@@ -419,6 +423,13 @@ export default function BalancesPage() {
         defaultType="expense"
         defaultAmount={addPayment?.amount}
         defaultDescription={addPayment ? `Paid ${addPayment.from_name ?? addPayment.from_email ?? ''}`.trim() : undefined}
+      />
+
+      <BalanceDetailSheet
+        open={!!detailFor}
+        counterparty={detailFor}
+        onClose={() => setDetailFor(null)}
+        onChanged={load}
       />
     </div>
   )
