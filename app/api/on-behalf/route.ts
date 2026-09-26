@@ -27,8 +27,21 @@ async function resolveFriendUserId(
   return { friendId: profile.id, email }
 }
 
+// Is the friend a member of this trip (owner / invitation / member)?
+async function friendInTrip(tripId: string, friendId: string, friendEmail: string): Promise<boolean> {
+  const svc = service()
+  const { data: trip } = await svc.from('trips').select('user_id').eq('id', tripId).single()
+  if (!trip) return false
+  if (trip.user_id === friendId) return true
+  const { data: inv } = await svc.from('trip_invitations').select('id').eq('trip_id', tripId).eq('invitee_email', friendEmail).neq('status', 'declined').limit(1)
+  if (inv?.length) return true
+  const { data: mem } = await svc.from('trip_members').select('id').eq('trip_id', tripId).eq('email', friendEmail).limit(1)
+  return !!mem?.length
+}
+
 // POST /api/on-behalf — create a transaction in a friend's account, authored by me.
-// Body: { on_behalf_of: contactId, amount, type, category, description?, date, receipt_url? }
+// Body: { on_behalf_of, amount, type, category, description?, date, receipt_url?,
+//         trip_id?, split?: { title, participants: [{name,email?,amount}] } }
 export async function POST(request: Request) {
   const { supabase, user } = await getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -41,6 +54,11 @@ export async function POST(request: Request) {
 
   const { data: myProfile } = await supabase.from('profiles').select('full_name').eq('id', user.id).single()
   const authorName = myProfile?.full_name || user.email?.split('@')[0] || 'A friend'
+  const svc = service()
+
+  // Only keep the trip if the friend is actually part of it
+  let tripId: string | null = null
+  if (body.trip_id && await friendInTrip(body.trip_id, resolved.friendId, resolved.email)) tripId = body.trip_id
 
   const payload: Record<string, unknown> = {
     user_id: resolved.friendId,
@@ -53,11 +71,42 @@ export async function POST(request: Request) {
     is_recurring: false,
     is_discrete: false,
     receipt_url: body.receipt_url ?? null,
+    trip_id: tripId,
   }
 
-  const { data, error } = await service().from('transactions').insert(payload).select().single()
+  const { data: tx, error } = await svc.from('transactions').insert(payload).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data, { status: 201 })
+
+  // Optional split, authored by me, linked to the friend's transaction
+  const parts = body.split?.participants as { name: string; email?: string; amount: number }[] | undefined
+  if (parts?.length) {
+    const { data: split, error: splitErr } = await svc.from('expense_splits').insert({
+      title: body.split.title || body.description || body.category,
+      total_amount: body.amount,
+      category: body.category,
+      description: body.description ?? null,
+      date: body.date,
+      trip_id: tripId,
+      created_by: user.id,
+    }).select().single()
+    if (!splitErr && split) {
+      const creatorEmail = (user.email ?? '').toLowerCase()
+      await svc.from('split_participants').insert(parts.filter(p => p.name?.trim() && p.amount > 0).map(p => {
+        const isCreator = !!p.email && p.email.toLowerCase() === creatorEmail
+        return {
+          split_id: split.id,
+          participant_name: p.name.trim(),
+          participant_email: p.email?.toLowerCase() ?? null,
+          amount_owed: p.amount,
+          is_paid: isCreator,
+          paid_at: isCreator ? new Date().toISOString() : null,
+        }
+      }))
+      await svc.from('transactions').update({ split_id: split.id }).eq('id', tx.id)
+    }
+  }
+
+  return NextResponse.json(tx, { status: 201 })
 }
 
 // PUT /api/on-behalf?id=xxx — edit a transaction I authored for someone else.

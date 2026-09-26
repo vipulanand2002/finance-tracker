@@ -46,6 +46,7 @@ interface Props {
   // saves it to /api/on-behalf. `onBehalfContactId` is one of your contact ids.
   onBehalfContactId?: string | null
   onBehalfName?: string
+  onBehalfEmail?: string | null
 }
 
 const DATE_KEY = 'lastTransactionDate'
@@ -106,7 +107,7 @@ function buildEmptyForm(tripId?: string | null, cardId?: string | null) {
 interface CardStatement { id: string; cycle_start: string; cycle_end: string }
 interface CardInfo { id: string; card_name: string; last_four: string | null }
 
-export default function TransactionModal({ open, onClose, onSaved, transaction, defaultTripId, defaultCardId, defaultSplitOpen, defaultAmount, defaultDescription, defaultSplitParticipants, defaultContactIds, defaultType, onBehalfContactId, onBehalfName }: Props) {
+export default function TransactionModal({ open, onClose, onSaved, transaction, defaultTripId, defaultCardId, defaultSplitOpen, defaultAmount, defaultDescription, defaultSplitParticipants, defaultContactIds, defaultType, onBehalfContactId, onBehalfName, onBehalfEmail }: Props) {
   const [form, setForm] = useState(() => buildEmptyForm(defaultTripId, defaultCardId))
   const [saving, setSaving] = useState(false)
   const [scanningReceipt, setScanningReceipt] = useState(false)
@@ -405,6 +406,15 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
     }
   }
 
+  // For on-behalf: only trips the friend is part of are valid
+  const friendEmailLower = onBehalfEmail?.toLowerCase()
+  function tripSharedWithFriend(t: Trip) {
+    if (!friendEmailLower) return true
+    const inInv = (t.trip_invitations ?? []).some(i => i.invitee_email?.toLowerCase() === friendEmailLower && i.status !== 'declined')
+    const inMem = (t.trip_members ?? []).some(m => m.email?.toLowerCase() === friendEmailLower)
+    return inInv || inMem
+  }
+
   const splitTotal = parseFloat(form.amount) || 0
   const computedAmounts = amountsFor(splitMode, participants, splitTotal)
   const allocatedTotal = round2(computedAmounts.reduce((s, a) => s + a, 0))
@@ -418,8 +428,19 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       return
     }
 
-    // "On behalf of a friend" — create a plain transaction in their account
+    // "On behalf of a friend" — create a transaction in their account (optionally
+    // linked to a shared trip and/or a split), authored by me.
     if (onBehalfContactId && !transaction) {
+      let obSplit: { title?: string; participants: { name: string; email?: string; amount: number }[] } | undefined
+      if (splitEnabled && form.type === 'expense') {
+        const amts = amountsFor(splitMode, participants, parseFloat(form.amount) || 0)
+        const rows = participants
+          .map((p, i) => ({ name: p.name.trim(), email: p.email.trim() || undefined, amount: round2(amts[i] || 0) }))
+          .filter(r => r.name && r.amount > 0)
+        if (rows.length === 0) { toast.warning('Add at least one participant with an amount, or turn off Split'); return }
+        if (splitMode === 'percent' && Math.abs(percentSum - 100) > 0.01) { toast.warning(`Percentages add up to ${percentSum}% — they must total 100%`); return }
+        obSplit = { title: form.description || form.category, participants: rows }
+      }
       setSaving(true)
       try {
         const res = await fetch('/api/on-behalf', {
@@ -433,12 +454,15 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
             description: form.description || null,
             date: form.date,
             receipt_url: form.receipt_url || null,
+            trip_id: form.trip_id || null,
+            split: obSplit,
           }),
         })
         const data = await res.json().catch(() => ({}))
         if (!res.ok) throw new Error(data.error ?? 'Failed to add')
         localStorage.setItem(DATE_KEY, form.date)
         toast.success(`Added for ${onBehalfName ?? 'your friend'}`)
+        if (form.trip_id) window.dispatchEvent(new CustomEvent('tripTransactionsChanged'))
         onSaved()
         onClose()
       } catch (err) {
@@ -652,8 +676,8 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
               />
             </div>
 
-            {/* ── Options: progressive disclosure (hidden when adding for a friend) ── */}
-            {!onBehalfContactId && (!optionsLoaded ? (
+            {/* ── Options: progressive disclosure ── */}
+            {!optionsLoaded ? (
               <div className="space-y-2">
                 <Skeleton className="h-10 w-full rounded-lg" />
                 <Skeleton className="h-10 w-full rounded-lg" />
@@ -825,7 +849,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                             </span>
                           </SelectTrigger>
                           <SelectContent>
-                            {trips.filter(t => !t.is_closed || t.id === form.trip_id).map(t => (
+                            {trips.filter(t => (!t.is_closed || t.id === form.trip_id) && (!onBehalfContactId || tripSharedWithFriend(t))).map(t => (
                               <SelectItem key={t.id} value={t.id}>{t.name}{t.is_closed ? ' (closed)' : ''}</SelectItem>
                             ))}
                           </SelectContent>
@@ -857,8 +881,8 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                   </div>
                 )}
 
-                {/* Card toggle */}
-                {cards.length > 0 && (
+                {/* Card toggle (not shown when adding for a friend) */}
+                {!onBehalfContactId && cards.length > 0 && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium flex items-center gap-2">
@@ -932,8 +956,8 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                   </div>
                 )}
 
-                {/* Friends toggle — mutually exclusive with Split */}
-                {contacts.length > 0 && (
+                {/* Friends toggle — mutually exclusive with Split (hidden when adding for a friend) */}
+                {!onBehalfContactId && contacts.length > 0 && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium flex items-center gap-2">
@@ -990,7 +1014,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                   </div>
                 )}
               </div>
-            ))}
+            )}
 
             {!onBehalfContactId && (
               <div className="flex items-center gap-2">
