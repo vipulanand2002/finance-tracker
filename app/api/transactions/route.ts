@@ -165,6 +165,14 @@ export async function PUT(request: Request) {
 
   const body = await request.json()
 
+  // A transaction someone else added on your behalf can only be edited by its author.
+  try {
+    const { data: existing } = await supabase.from('transactions').select('created_by').eq('id', id).single()
+    if (existing?.created_by && existing.created_by !== user.id) {
+      return NextResponse.json({ error: 'Only the person who added this can edit it.' }, { status: 403 })
+    }
+  } catch { /* created_by column not migrated yet — ignore */ }
+
   const patch: Record<string, unknown> = {
     amount: body.amount,
     type: body.type,
@@ -231,6 +239,14 @@ export async function DELETE(request: Request) {
 
   const id = searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+
+  // Only the author can delete a transaction added on your behalf.
+  try {
+    const { data: existing } = await supabase.from('transactions').select('created_by').eq('id', id).single()
+    if (existing?.created_by && existing.created_by !== user.id) {
+      return NextResponse.json({ error: 'Only the person who added this can delete it.' }, { status: 403 })
+    }
+  } catch { /* created_by column not migrated yet — ignore */ }
 
   const { error } = await supabase
     .from('transactions')

@@ -41,6 +41,11 @@ interface Props {
   defaultContactIds?: string[]
   // Default transaction type for a new transaction ('expense' unless set).
   defaultType?: 'income' | 'expense'
+  // Create a plain transaction in a friend's account on their behalf. When set,
+  // the popup collects a simple transaction (no trip/card/split/tagging) and
+  // saves it to /api/on-behalf. `onBehalfContactId` is one of your contact ids.
+  onBehalfContactId?: string | null
+  onBehalfName?: string
 }
 
 const DATE_KEY = 'lastTransactionDate'
@@ -101,7 +106,7 @@ function buildEmptyForm(tripId?: string | null, cardId?: string | null) {
 interface CardStatement { id: string; cycle_start: string; cycle_end: string }
 interface CardInfo { id: string; card_name: string; last_four: string | null }
 
-export default function TransactionModal({ open, onClose, onSaved, transaction, defaultTripId, defaultCardId, defaultSplitOpen, defaultAmount, defaultDescription, defaultSplitParticipants, defaultContactIds, defaultType }: Props) {
+export default function TransactionModal({ open, onClose, onSaved, transaction, defaultTripId, defaultCardId, defaultSplitOpen, defaultAmount, defaultDescription, defaultSplitParticipants, defaultContactIds, defaultType, onBehalfContactId, onBehalfName }: Props) {
   const [form, setForm] = useState(() => buildEmptyForm(defaultTripId, defaultCardId))
   const [saving, setSaving] = useState(false)
   const [scanningReceipt, setScanningReceipt] = useState(false)
@@ -412,6 +417,38 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       toast.warning('Please fill in amount, category, and date to save')
       return
     }
+
+    // "On behalf of a friend" — create a plain transaction in their account
+    if (onBehalfContactId && !transaction) {
+      setSaving(true)
+      try {
+        const res = await fetch('/api/on-behalf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            on_behalf_of: onBehalfContactId,
+            amount: parseFloat(form.amount),
+            type: form.type,
+            category: form.category,
+            description: form.description || null,
+            date: form.date,
+            receipt_url: form.receipt_url || null,
+          }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(data.error ?? 'Failed to add')
+        localStorage.setItem(DATE_KEY, form.date)
+        toast.success(`Added for ${onBehalfName ?? 'your friend'}`)
+        onSaved()
+        onClose()
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Failed to add')
+      } finally {
+        setSaving(false)
+      }
+      return
+    }
+
     // Validate inline split before touching the network
     let splitRows: { name: string; email: string; amount: number }[] = []
     if (splitEnabled && !linkedSplitId && form.type === 'expense') {
@@ -528,6 +565,11 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
           </DialogHeader>
 
           <form onSubmit={handleSubmit} className="space-y-4 py-2">
+            {onBehalfContactId && (
+              <div className="rounded-lg bg-primary/8 border border-primary/20 px-3 py-2 text-xs text-primary">
+                Adding on behalf of <span className="font-semibold">{onBehalfName ?? 'your friend'}</span> — saved to their account; only you can edit it.
+              </div>
+            )}
             {!tripEnabled && (
               <div className="flex gap-2">
                 {(['expense', 'income'] as const).map(t => (
@@ -610,8 +652,8 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
               />
             </div>
 
-            {/* ── Options: progressive disclosure ── */}
-            {!optionsLoaded ? (
+            {/* ── Options: progressive disclosure (hidden when adding for a friend) ── */}
+            {!onBehalfContactId && (!optionsLoaded ? (
               <div className="space-y-2">
                 <Skeleton className="h-10 w-full rounded-lg" />
                 <Skeleton className="h-10 w-full rounded-lg" />
@@ -948,21 +990,23 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                   </div>
                 )}
               </div>
-            )}
+            ))}
 
-            <div className="flex items-center gap-2">
-              <input
-                id="recurring"
-                type="checkbox"
-                className="w-4 h-4 rounded"
-                checked={form.is_recurring}
-                onChange={e => set('is_recurring', e.target.checked)}
-              />
-              <Label htmlFor="recurring" className="cursor-pointer font-normal">
-                Recurring transaction
-              </Label>
-              {form.is_recurring && <Badge variant="secondary" className="text-xs">Monthly</Badge>}
-            </div>
+            {!onBehalfContactId && (
+              <div className="flex items-center gap-2">
+                <input
+                  id="recurring"
+                  type="checkbox"
+                  className="w-4 h-4 rounded"
+                  checked={form.is_recurring}
+                  onChange={e => set('is_recurring', e.target.checked)}
+                />
+                <Label htmlFor="recurring" className="cursor-pointer font-normal">
+                  Recurring transaction
+                </Label>
+                {form.is_recurring && <Badge variant="secondary" className="text-xs">Monthly</Badge>}
+              </div>
+            )}
 
             {form.type === 'expense' && (
               <div className="space-y-1">

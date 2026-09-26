@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useRouter } from 'next/navigation'
 import { Plus, CheckCircle2, Circle, Trash2, Users, Mail, Loader2, Pencil, Paperclip, Scale } from 'lucide-react'
@@ -221,6 +222,8 @@ export default function SplitsPage() {
   const [myEmail, setMyEmail] = useState('')
   const [myDisplayName, setMyDisplayName] = useState('')
   const [friends, setFriends] = useState<Friend[]>([])
+  const [pickFriend, setPickFriend] = useState(false)
+  const [onBehalf, setOnBehalf] = useState<{ friend: Friend; mode: 'transaction' | 'split' } | null>(null)
 
   // Load user info, splits, and friends in parallel
   useEffect(() => {
@@ -388,9 +391,12 @@ export default function SplitsPage() {
           <h1 className="text-2xl font-bold">Splits</h1>
           <p className="text-muted-foreground text-sm">Split expenses with friends and family</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           <Button variant="outline" onClick={() => router.push('/balances')}>
             <Scale className="w-4 h-4 mr-1" /> Balances
+          </Button>
+          <Button variant="outline" onClick={() => setPickFriend(true)}>
+            <Users className="w-4 h-4 mr-1" /> For a friend
           </Button>
           <Button onClick={() => setModalOpen(true)}>
             <Plus className="w-4 h-4 mr-1" /> New Split
@@ -503,6 +509,55 @@ export default function SplitsPage() {
         onClose={() => setEditingSplit(null)}
         onSaved={fetchSplits}
       />
+
+      {/* Add on behalf of a friend — pick who, then transaction or split */}
+      <Dialog open={pickFriend} onOpenChange={v => { if (!v) setPickFriend(false) }}>
+        <DialogContent className="sm:max-w-sm max-h-[80vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Add for a friend</DialogTitle></DialogHeader>
+          <p className="text-xs text-muted-foreground">
+            Add a transaction to their account, or a split with them. Only you can edit what you create.
+          </p>
+          <div className="space-y-1.5 mt-1">
+            {friends.filter(f => f.email).length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">Add a friend with an email first.</p>
+            ) : friends.filter(f => f.email).map(f => (
+              <div key={f.id} className="flex items-center justify-between gap-2 rounded-lg border p-2">
+                <div className="min-w-0">
+                  <p className="text-sm truncate">{f.name}</p>
+                  <p className="text-xs text-muted-foreground truncate">{f.email}</p>
+                </div>
+                <div className="flex gap-1.5 shrink-0">
+                  <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => { setPickFriend(false); setOnBehalf({ friend: f, mode: 'transaction' }) }}>Transaction</Button>
+                  <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => { setPickFriend(false); setOnBehalf({ friend: f, mode: 'split' }) }}>Split</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* On-behalf transaction → saved to the friend's account */}
+      {onBehalf?.mode === 'transaction' && (
+        <TransactionModal
+          open
+          onClose={() => setOnBehalf(null)}
+          onSaved={() => { setOnBehalf(null); fetchSplits() }}
+          defaultType="expense"
+          onBehalfContactId={onBehalf.friend.id}
+          onBehalfName={onBehalf.friend.name}
+        />
+      )}
+
+      {/* On-behalf split → a split including the friend (edit-locked to you) */}
+      {onBehalf?.mode === 'split' && (
+        <TransactionModal
+          open
+          onClose={() => setOnBehalf(null)}
+          onSaved={() => { setOnBehalf(null); fetchSplits() }}
+          defaultSplitOpen
+          defaultSplitParticipants={[{ name: onBehalf.friend.name, email: onBehalf.friend.email ?? '' }]}
+        />
+      )}
     </div>
   )
 }
