@@ -90,16 +90,19 @@ export async function POST(request: Request) {
       created_by: user.id,
     }).select().single()
     if (!splitErr && split) {
-      const creatorEmail = (user.email ?? '').toLowerCase()
+      // The friend paid this bill (it's on their behalf), so THEIR share is
+      // marked paid; you and everyone else still owe your shares.
+      const payerEmail = resolved.email.toLowerCase()
       await svc.from('split_participants').insert(parts.filter(p => p.name?.trim() && p.amount > 0).map(p => {
-        const isCreator = !!p.email && p.email.toLowerCase() === creatorEmail
+        const isPayer = !!p.email && p.email.toLowerCase() === payerEmail
         return {
           split_id: split.id,
           participant_name: p.name.trim(),
           participant_email: p.email?.toLowerCase() ?? null,
+          participant_user_id: isPayer ? resolved.friendId : null,
           amount_owed: p.amount,
-          is_paid: isCreator,
-          paid_at: isCreator ? new Date().toISOString() : null,
+          is_paid: isPayer,
+          paid_at: isPayer ? new Date().toISOString() : null,
         }
       }))
       await svc.from('transactions').update({ split_id: split.id }).eq('id', tx.id)

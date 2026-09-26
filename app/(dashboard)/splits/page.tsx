@@ -544,6 +544,7 @@ export default function SplitsPage() {
           onBehalfContactId={onBehalf.id}
           onBehalfName={onBehalf.name}
           onBehalfEmail={onBehalf.email}
+          defaultSplitParticipants={[{ name: onBehalf.name, email: onBehalf.email ?? '' }]}
         />
       )}
     </div>
