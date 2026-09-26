@@ -10,7 +10,8 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Plus, CheckCircle2, Circle, Trash2, Users, Mail, Loader2, Pencil, Paperclip } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Plus, CheckCircle2, Circle, Trash2, Users, Mail, Loader2, Pencil, Paperclip, Scale } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import { type EditingSplit } from '@/components/splits/SplitModal'
 const SplitModal = dynamic(() => import('@/components/splits/SplitModal'), { ssr: false })
@@ -210,6 +211,7 @@ const SplitCard = memo(function SplitCard({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function SplitsPage() {
+  const router = useRouter()
   const [splits, setSplits] = useState<Split[]>([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
@@ -386,9 +388,14 @@ export default function SplitsPage() {
           <h1 className="text-2xl font-bold">Splits</h1>
           <p className="text-muted-foreground text-sm">Split expenses with friends and family</p>
         </div>
-        <Button onClick={() => setModalOpen(true)}>
-          <Plus className="w-4 h-4 mr-1" /> New Split
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => router.push('/balances')}>
+            <Scale className="w-4 h-4 mr-1" /> Balances
+          </Button>
+          <Button onClick={() => setModalOpen(true)}>
+            <Plus className="w-4 h-4 mr-1" /> New Split
+          </Button>
+        </div>
       </div>
 
       {active.length > 0 && (
