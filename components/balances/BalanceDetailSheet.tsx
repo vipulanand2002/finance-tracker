@@ -71,6 +71,10 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
     return false
   }, [emailLower, nameLower])
 
+  const isSelf = useCallback((p: Participant) =>
+    (!!p.participant_user_id && p.participant_user_id === myId) ||
+    (!!myEmail && p.participant_email?.toLowerCase() === myEmail), [myId, myEmail])
+
   const load = useCallback(async () => {
     if (!counterparty) return
     setLoading(true)
@@ -169,7 +173,18 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
                 {splits.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No splits with {counterparty?.name}.</p>
                 ) : splits.map(s => {
-                  const share = s.split_participants.filter(matchesCp).reduce((a, p) => a + (p.is_paid ? 0 : p.amount_owed), 0)
+                  const iCreated = s.created_by === myId
+                  // Show the amount that flows between the two of you for this split:
+                  //  - I created it → what the other person still owes me
+                  //  - they created it → what I (the viewer) still owe them (my contribution)
+                  let amt = 0
+                  if (iCreated) {
+                    amt = s.split_participants.filter(matchesCp).reduce((a, p) => a + (p.is_paid ? 0 : p.amount_owed), 0)
+                  } else {
+                    const mine = s.split_participants.find(isSelf)
+                    amt = mine && !mine.is_paid ? mine.amount_owed : 0
+                  }
+                  const label = iCreated ? 'they owe' : 'your share'
                   return (
                     <div key={s.id} className="rounded-lg border p-3">
                       <div className="flex items-start justify-between gap-2">
@@ -178,10 +193,13 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
                           <p className="text-xs text-muted-foreground">{format(new Date(s.date + 'T00:00:00'), 'dd MMM yyyy')} · {s.category} · Total {formatCurrency(s.total_amount)}</p>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
-                          <span className={`text-sm font-semibold ${s.is_settled ? 'text-emerald-600' : 'text-amber-600'}`}>
-                            {s.is_settled ? 'Settled' : formatCurrency(share)}
-                          </span>
-                          {s.created_by === myId && !s.is_settled && (
+                          <div className="text-right">
+                            <span className={`text-sm font-semibold ${s.is_settled || amt === 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                              {s.is_settled ? 'Settled' : formatCurrency(amt)}
+                            </span>
+                            {!s.is_settled && amt > 0 && <p className="text-[10px] text-muted-foreground leading-tight">{label}</p>}
+                          </div>
+                          {iCreated && !s.is_settled && (
                             <button onClick={() => editSplit(s)} className="text-muted-foreground hover:text-foreground"><Pencil className="w-3.5 h-3.5" /></button>
                           )}
                         </div>
