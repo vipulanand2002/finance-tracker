@@ -23,6 +23,17 @@ interface SplitRow {
   split_participants: Participant[]
 }
 
+interface TaggedPayment {
+  id: string
+  from_user_id: string
+  from_name: string | null
+  from_email: string | null
+  amount: number
+  description: string | null
+  date: string
+  status: string         // pending | added | dismissed
+}
+
 interface FriendBalance {
   key: string            // stable unique id for React/state (contact id, else email/name)
   id: string | null      // contact id if this counterparty is a saved friend
@@ -32,6 +43,7 @@ interface FriendBalance {
   splitYouOwe: number    // you owe them (splits they created)
   txnOwed: number        // expense tagged to them
   txnReceived: number    // income tagged from them
+  paidToThem: number     // payments THEY recorded that you made to them (reduces what you owe)
   net: number            // positive = they owe you, negative = you owe them
 }
 
@@ -42,6 +54,9 @@ export default function BalancesPage() {
   const [confirmClose, setConfirmClose] = useState<string | null>(null)  // contact id pending confirmation
   const [closing, setClosing] = useState<string | null>(null)
   const [addExpenseFor, setAddExpenseFor] = useState<FriendBalance | null>(null)
+  const [payments, setPayments] = useState<TaggedPayment[]>([])   // pending "you paid X" notifications
+  const [addPayment, setAddPayment] = useState<TaggedPayment | null>(null)  // one being added to my expenses
+  const [actingPayment, setActingPayment] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     {
@@ -52,14 +67,17 @@ export default function BalancesPage() {
         const myId = user?.id ?? ''
         const myEmail = (user?.email ?? '').toLowerCase()
 
-        const [friendsRes, splitsRes] = await Promise.all([
+        const [friendsRes, splitsRes, payRes] = await Promise.all([
           fetch('/api/friends'),
           fetch('/api/splits'),
+          fetch('/api/tagged-payments'),
         ])
         const friends = await friendsRes.json()
         const splits = await splitsRes.json()
+        const paymentsData = payRes.ok ? await payRes.json() : []
         const friendList: { id: string; name: string; email: string | null }[] = Array.isArray(friends) ? friends : []
         const splitList: SplitRow[] = Array.isArray(splits) ? splits : []
+        const payList: TaggedPayment[] = Array.isArray(paymentsData) ? paymentsData : []
 
         // Build counterparties keyed by email (or name when no email), pulling from
         // both the friends list and every split participant/creator.
@@ -70,7 +88,7 @@ export default function BalancesPage() {
           const key = keyOf(email, name)
           let cp = map.get(key)
           if (!cp) {
-            cp = { key, id: id ?? null, name, email: email ?? null, splitOwed: 0, splitYouOwe: 0, txnOwed: 0, txnReceived: 0, net: 0 }
+            cp = { key, id: id ?? null, name, email: email ?? null, splitOwed: 0, splitYouOwe: 0, txnOwed: 0, txnReceived: 0, paidToThem: 0, net: 0 }
             map.set(key, cp)
           } else {
             if (!cp.id && id) cp.id = id
@@ -106,6 +124,13 @@ export default function BalancesPage() {
           }
         }
 
+        // Payments the friend recorded that I made to them → reduces what I owe them.
+        // (All statuses count; status only controls the notification, per design.)
+        for (const pay of payList) {
+          ensure(pay.from_name ?? pay.from_email ?? 'Friend', pay.from_email ?? null).paidToThem += pay.amount
+        }
+        setPayments(payList.filter(p => p.status === 'pending'))
+
         // Tagged (non-split) transactions only exist for saved friends (need contact_id)
         await Promise.all(
           [...map.values()].filter(cp => cp.id).map(async cp => {
@@ -123,12 +148,12 @@ export default function BalancesPage() {
 
         const result = [...map.values()].map(cp => ({
           ...cp,
-          net: cp.splitOwed + cp.txnOwed - cp.splitYouOwe - cp.txnReceived,
+          net: cp.splitOwed + cp.txnOwed + cp.paidToThem - cp.splitYouOwe - cp.txnReceived,
         }))
 
         setBalances(
           result
-            .filter(b => Math.abs(b.net) > 0.001 || b.splitOwed > 0 || b.splitYouOwe > 0 || b.txnOwed > 0 || b.txnReceived > 0)
+            .filter(b => Math.abs(b.net) > 0.001 || b.splitOwed > 0 || b.splitYouOwe > 0 || b.txnOwed > 0 || b.txnReceived > 0 || b.paidToThem > 0)
             .sort((a, b) => b.net - a.net)
         )
       } finally {
@@ -138,6 +163,20 @@ export default function BalancesPage() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  async function dismissPayment(p: TaggedPayment) {
+    setActingPayment(p.id)
+    try {
+      await fetch(`/api/tagged-payments?id=${p.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'dismissed' }),
+      })
+      setPayments(prev => prev.filter(x => x.id !== p.id))
+    } catch {
+      toast.error('Failed to dismiss')
+    } finally {
+      setActingPayment(null)
+    }
+  }
 
   async function closeBalance(friend: FriendBalance) {
     setClosing(friend.key)
@@ -195,6 +234,32 @@ export default function BalancesPage() {
         <h1 className="text-2xl font-bold">Balances</h1>
         <p className="text-sm text-muted-foreground">Net amounts across splits and tagged transactions</p>
       </div>
+
+      {/* Payments a friend recorded that YOU made to them */}
+      {payments.length > 0 && (
+        <div className="space-y-2">
+          {payments.map(p => (
+            <div key={p.id} className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 p-3 flex items-center gap-3 flex-wrap">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm">
+                  <span className="font-medium">{p.from_name ?? p.from_email}</span> recorded that you paid them{' '}
+                  <span className="font-semibold">{formatCurrency(p.amount)}</span>
+                </p>
+                {p.description && <p className="text-xs text-muted-foreground truncate">{p.description}</p>}
+                <p className="text-[11px] text-muted-foreground mt-0.5">Already counted in your balance below.</p>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <Button size="sm" variant="outline" className="h-8 px-3 text-xs" disabled={actingPayment === p.id} onClick={() => setAddPayment(p)}>
+                  Add to my expenses
+                </Button>
+                <Button size="sm" variant="ghost" className="h-8 px-3 text-xs" disabled={actingPayment === p.id} onClick={() => dismissPayment(p)}>
+                  {actingPayment === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Dismiss'}
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Summary strip */}
       {!loading && balances.length > 0 && (
@@ -258,10 +323,11 @@ export default function BalancesPage() {
               </div>
 
               {/* Row 2: breakdown chips */}
-              {(b.splitOwed > 0 || b.splitYouOwe > 0 || b.txnOwed > 0 || b.txnReceived > 0) && (
+              {(b.splitOwed > 0 || b.splitYouOwe > 0 || b.txnOwed > 0 || b.txnReceived > 0 || b.paidToThem > 0) && (
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                   {b.splitOwed    > 0 && <span>They owe (splits): <span className="font-medium text-foreground">{formatCurrency(b.splitOwed)}</span></span>}
                   {b.splitYouOwe  > 0 && <span>You owe (splits): <span className="font-medium text-foreground">{formatCurrency(b.splitYouOwe)}</span></span>}
+                  {b.paidToThem   > 0 && <span>You paid: <span className="font-medium text-foreground">{formatCurrency(b.paidToThem)}</span></span>}
                   {b.txnOwed      > 0 && <span>Expenses: <span className="font-medium text-foreground">{formatCurrency(b.txnOwed)}</span></span>}
                   {b.txnReceived  > 0 && <span>Received: <span className="font-medium text-foreground">{formatCurrency(b.txnReceived)}</span></span>}
                 </div>
@@ -323,6 +389,27 @@ export default function BalancesPage() {
         onSaved={() => { setAddExpenseFor(null); load() }}
         defaultType="expense"
         defaultContactIds={addExpenseFor?.id ? [addExpenseFor.id] : undefined}
+      />
+
+      {/* Add a "you paid them" record into my own expense ledger (untagged, so it
+          doesn't double-count the balance which is already driven by the record) */}
+      <TransactionModal
+        open={!!addPayment}
+        onClose={() => setAddPayment(null)}
+        onSaved={async () => {
+          if (addPayment) {
+            try {
+              await fetch(`/api/tagged-payments?id=${addPayment.id}`, {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'added' }),
+              })
+            } catch { /* ignore */ }
+          }
+          setAddPayment(null)
+          load()
+        }}
+        defaultType="expense"
+        defaultAmount={addPayment?.amount}
+        defaultDescription={addPayment ? `Paid ${addPayment.from_name ?? addPayment.from_email ?? ''}`.trim() : undefined}
       />
     </div>
   )

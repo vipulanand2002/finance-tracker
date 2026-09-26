@@ -1,10 +1,63 @@
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 
 async function getUser() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   return { supabase, user }
+}
+
+type SupaClient = Awaited<ReturnType<typeof createClient>>
+interface AuthUser { id: string; email?: string | null }
+
+// When an INCOME is tagged to contacts, create a shared "you paid me" record for
+// each tagged contact whose email maps to a registered user, so it shows up in
+// THEIR account. Safe no-op if the tagged_payments table doesn't exist yet.
+async function syncTaggedPaymentsForIncome(
+  supabase: SupaClient,
+  user: AuthUser,
+  tx: { id: string; amount: number; description: string | null; date: string; type: string },
+  contactIds: string[],
+) {
+  try {
+    // Always clear any prior records for this transaction first (edit/re-sync)
+    await supabase.from('tagged_payments').delete().eq('transaction_id', tx.id).eq('from_user_id', user.id)
+    if (tx.type !== 'income' || contactIds.length === 0) return
+
+    const { data: contacts } = await supabase
+      .from('contacts').select('id, name, email').in('id', contactIds).eq('user_id', user.id)
+    const emails = (contacts ?? []).map((c: { email: string | null }) => c.email).filter(Boolean) as string[]
+    if (emails.length === 0) return
+
+    // Resolve which emails belong to registered users
+    const service = createServiceClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+    const { data: profiles } = await service
+      .from('profiles').select('id, email, full_name').in('email', emails.map(e => e.toLowerCase()))
+    const byEmail = new Map<string, { id: string }>((profiles ?? []).map((p: { id: string; email: string }) => [p.email.toLowerCase(), p]))
+
+    // Sender display name
+    const { data: myProfile } = await supabase.from('profiles').select('full_name').eq('id', user.id).single()
+    const fromName = myProfile?.full_name || user.email?.split('@')[0] || 'A friend'
+
+    const rows = (contacts ?? [])
+      .filter((c: { email: string | null }) => c.email && byEmail.has(c.email.toLowerCase()))
+      .map((c: { email: string | null }) => ({
+        from_user_id: user.id,
+        from_name: fromName,
+        from_email: user.email ?? null,
+        to_email: c.email!.toLowerCase(),
+        to_user_id: byEmail.get(c.email!.toLowerCase())!.id,
+        amount: tx.amount,
+        description: tx.description,
+        date: tx.date,
+        transaction_id: tx.id,
+        status: 'pending',
+      }))
+    if (rows.length > 0) await supabase.from('tagged_payments').insert(rows)
+  } catch {
+    // tagged_payments table not migrated yet — ignore
+  }
 }
 
 export async function GET(request: Request) {
@@ -85,6 +138,10 @@ export async function POST(request: Request) {
   }
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  const contactIds = [...new Set([...(body.contact_id ? [body.contact_id] : []), ...(Array.isArray(body.contact_ids) ? body.contact_ids : [])].filter(Boolean))] as string[]
+  await syncTaggedPaymentsForIncome(supabase, user, data, contactIds)
+
   return NextResponse.json(data, { status: 201 })
 }
 
@@ -122,6 +179,10 @@ export async function PUT(request: Request) {
   }
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  const contactIds = [...new Set([...(body.contact_id ? [body.contact_id] : []), ...(Array.isArray(body.contact_ids) ? body.contact_ids : [])].filter(Boolean))] as string[]
+  await syncTaggedPaymentsForIncome(supabase, user, data, contactIds)
+
   return NextResponse.json(data)
 }
 
@@ -168,5 +229,7 @@ export async function DELETE(request: Request) {
     .eq('user_id', user.id)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  // Remove any cross-user "you paid me" records tied to this transaction
+  try { await supabase.from('tagged_payments').delete().eq('transaction_id', id).eq('from_user_id', user.id) } catch { /* table not migrated */ }
   return NextResponse.json({ success: true })
 }
