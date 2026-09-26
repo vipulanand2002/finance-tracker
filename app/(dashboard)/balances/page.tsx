@@ -1,10 +1,13 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import { formatCurrency } from '@/lib/utils'
-import { ArrowUpRight, ArrowDownLeft, CheckCircle2, Loader2, Send, X } from 'lucide-react'
+import { ArrowUpRight, ArrowDownLeft, CheckCircle2, Loader2, Send, X, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
+
+const TransactionModal = dynamic(() => import('@/components/transactions/TransactionModal'), { ssr: false })
 
 interface Participant {
   participant_name: string
@@ -38,9 +41,10 @@ export default function BalancesPage() {
   const [reminding, setReminding] = useState<string | null>(null)
   const [confirmClose, setConfirmClose] = useState<string | null>(null)  // contact id pending confirmation
   const [closing, setClosing] = useState<string | null>(null)
+  const [addExpenseFor, setAddExpenseFor] = useState<FriendBalance | null>(null)
 
-  useEffect(() => {
-    async function load() {
+  const load = useCallback(async () => {
+    {
       setLoading(true)
       try {
         const { createClient } = require('@/lib/supabase/client') as typeof import('@/lib/supabase/client')
@@ -131,8 +135,9 @@ export default function BalancesPage() {
         setLoading(false)
       }
     }
-    load()
   }, [])
+
+  useEffect(() => { load() }, [load])
 
   async function closeBalance(friend: FriendBalance) {
     setClosing(friend.key)
@@ -263,8 +268,14 @@ export default function BalancesPage() {
               )}
 
               {/* Row 3: action buttons */}
-              {(b.net > 0 || b.splitOwed > 0) && confirmClose !== b.key && (
-                <div className="flex gap-2 justify-end pt-1 border-t">
+              {(b.net > 0 || b.splitOwed > 0 || !!b.id) && confirmClose !== b.key && (
+                <div className="flex gap-2 justify-end pt-1 border-t flex-wrap">
+                  {b.id && (
+                    <Button size="sm" variant="outline" className="h-8 px-3 text-xs gap-1.5"
+                      onClick={() => setAddExpenseFor(b)}>
+                      <Plus className="w-3 h-3" />Add expense
+                    </Button>
+                  )}
                   {b.net > 0 && (
                     <Button size="sm" variant="outline" className="h-8 px-3 text-xs gap-1.5"
                       disabled={reminding === b.key || !b.email} onClick={() => remind(b)}>
@@ -304,6 +315,15 @@ export default function BalancesPage() {
           ))}
         </div>
       )}
+
+      {/* Quick "add expense tagged to this friend" via the global popup */}
+      <TransactionModal
+        open={!!addExpenseFor}
+        onClose={() => setAddExpenseFor(null)}
+        onSaved={() => { setAddExpenseFor(null); load() }}
+        defaultType="expense"
+        defaultContactIds={addExpenseFor?.id ? [addExpenseFor.id] : undefined}
+      />
     </div>
   )
 }

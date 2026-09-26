@@ -37,6 +37,10 @@ interface Props {
   defaultDescription?: string
   // Seed the inline split participant list (e.g. a friend, or all trip members).
   defaultSplitParticipants?: { name: string; email: string }[]
+  // Pre-tag these contacts and open the "Tag friends" section (new transactions).
+  defaultContactIds?: string[]
+  // Default transaction type for a new transaction ('expense' unless set).
+  defaultType?: 'income' | 'expense'
 }
 
 const DATE_KEY = 'lastTransactionDate'
@@ -97,7 +101,7 @@ function buildEmptyForm(tripId?: string | null, cardId?: string | null) {
 interface CardStatement { id: string; cycle_start: string; cycle_end: string }
 interface CardInfo { id: string; card_name: string; last_four: string | null }
 
-export default function TransactionModal({ open, onClose, onSaved, transaction, defaultTripId, defaultCardId, defaultSplitOpen, defaultAmount, defaultDescription, defaultSplitParticipants }: Props) {
+export default function TransactionModal({ open, onClose, onSaved, transaction, defaultTripId, defaultCardId, defaultSplitOpen, defaultAmount, defaultDescription, defaultSplitParticipants, defaultContactIds, defaultType }: Props) {
   const [form, setForm] = useState(() => buildEmptyForm(defaultTripId, defaultCardId))
   const [saving, setSaving] = useState(false)
   const [scanningReceipt, setScanningReceipt] = useState(false)
@@ -226,13 +230,16 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       const empty = buildEmptyForm(defaultTripId, defaultCardId)
       if (defaultAmount != null && String(defaultAmount) !== '') empty.amount = String(defaultAmount)
       if (defaultDescription) empty.description = defaultDescription
+      if (defaultType) empty.type = defaultType
+      const preTagged = defaultContactIds?.filter(Boolean) ?? []
+      if (preTagged.length > 0) empty.contact_ids = preTagged
       const wantSplit = !!defaultSplitOpen
       setForm(empty)
       originalFormRef.current = empty
       setTripEnabled(!!defaultTripId)
       setCardEnabled(!!defaultCardId)
       setSplitEnabled(wantSplit)
-      setFriendsEnabled(false)
+      setFriendsEnabled(!wantSplit && preTagged.length > 0)
       setParticipants(initialParticipants())
     }
     setAddContactKey(k => k + 1)
