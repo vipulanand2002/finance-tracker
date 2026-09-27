@@ -24,6 +24,7 @@ import { CATEGORY_COLORS } from '@/lib/constants'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import TripChat from './TripChat'
 import { formatCurrency } from '@/lib/utils'
+import { fetchProfileNames } from '@/lib/profile-names'
 import { EXPENSE_CATEGORIES } from '@/lib/constants'
 import type { Trip, Transaction } from '@/types'
 import TransactionModal from '@/components/transactions/TransactionModal'
@@ -111,6 +112,7 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
   const [savingBudget, setSavingBudget] = useState(false)
   const myBudgetRef = useRef<HTMLInputElement>(null)
   const [tripSplits, setTripSplits] = useState<TripSplit[]>([])
+  const [profileNames, setProfileNames] = useState<Map<string, string>>(new Map())
   const [editingTripSplit, setEditingTripSplit] = useState<EditingSplit | null>(null)
   const [sendingSplitReminder, setSendingSplitReminder] = useState<string | null>(null)
   const [txExpanded, setTxExpanded] = useState(true)
@@ -160,7 +162,9 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
     try {
       const res = await fetch(`/api/splits?trip_id=${trip.id}`)
       const data: TripSplit[] = await res.json()
-      setTripSplits(Array.isArray(data) ? data : [])
+      const list = Array.isArray(data) ? data : []
+      setTripSplits(list)
+      fetchProfileNames(list.flatMap(s => (s.split_participants ?? []).map(p => p.participant_email))).then(setProfileNames)
     } catch { /* silent */ }
   }, [trip])
 
@@ -879,16 +883,18 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                           </div>
                         </div>
                         <div className="space-y-1.5 border-t pt-2">
-                          {s.split_participants.map(p => (
+                          {s.split_participants.map(p => {
+                            const pName = (p.participant_email && profileNames.get(p.participant_email.toLowerCase())) || p.participant_name
+                            return (
                             <div key={p.id} className="flex items-center justify-between text-xs gap-2">
                               <div className="flex items-center gap-1.5 min-w-0">
                                 <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0 ${
                                   p.is_paid ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300' : 'bg-muted text-muted-foreground'
                                 }`}>
-                                  {p.participant_name.charAt(0).toUpperCase()}
+                                  {pName.charAt(0).toUpperCase()}
                                 </span>
                                 <span className={`truncate ${p.is_paid ? 'text-muted-foreground line-through' : ''}`}>
-                                  {p.participant_name}
+                                  {pName}
                                 </span>
                                 {p.is_paid && (
                                   <span className="shrink-0 text-emerald-600 bg-emerald-50 dark:bg-emerald-950 rounded px-1 py-0.5 text-[10px] font-medium">
@@ -900,7 +906,7 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                                 {formatCurrency(p.amount_owed)}
                               </span>
                             </div>
-                          ))}
+                          )})}
                         </div>
                         {s.created_by === currentUserId && !s.is_settled && s.split_participants.some(p => !p.is_paid && p.participant_email) && (
                           <div className="border-t pt-2">

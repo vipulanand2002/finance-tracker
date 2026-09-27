@@ -14,6 +14,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useRouter } from 'next/navigation'
 import { Plus, CheckCircle2, Circle, Trash2, Users, Mail, Loader2, Pencil, Paperclip, Scale } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
+import { fetchProfileNames } from '@/lib/profile-names'
 import { type EditingSplit } from '@/components/splits/SplitModal'
 const SplitModal = dynamic(() => import('@/components/splits/SplitModal'), { ssr: false })
 const TransactionModal = dynamic(() => import('@/components/transactions/TransactionModal'), { ssr: false })
@@ -63,11 +64,12 @@ interface SplitCardProps {
   onDelete: (id: string) => void
   onSendReminder: (splitId: string, participantCount: number) => void
   onEdit: (split: Split) => void
+  profileNames: Map<string, string>
 }
 
 const SplitCard = memo(function SplitCard({
   split, myId, myEmail, myDisplayName, friendByEmail,
-  sendingReminder, onTogglePaid, onSettle, onDelete, onSendReminder, onEdit,
+  sendingReminder, onTogglePaid, onSettle, onDelete, onSendReminder, onEdit, profileNames,
 }: SplitCardProps) {
   const paid = split.split_participants.filter(p => p.is_paid).length
   const total = split.split_participants.length
@@ -122,9 +124,11 @@ const SplitCard = memo(function SplitCard({
             const isMe = !!emailLower && emailLower === myEmail
             const friend = emailLower ? friendByEmail.get(emailLower) : undefined
 
+            // Show my own nickname for them, else their own profile name, else the stored name
             const displayName = isMe
               ? (myDisplayName || p.participant_name)
-              : friend ? friend.name : p.participant_name
+              : friend ? friend.name
+              : (emailLower && profileNames.get(emailLower)) || p.participant_name
 
             const showEmail = isCreator ? !!p.participant_email : !!friend?.email
             const displayEmail = friend?.email ?? p.participant_email
@@ -224,6 +228,7 @@ export default function SplitsPage() {
   const [friends, setFriends] = useState<Friend[]>([])
   const [pickFriend, setPickFriend] = useState(false)
   const [onBehalf, setOnBehalf] = useState<Friend | null>(null)
+  const [profileNames, setProfileNames] = useState<Map<string, string>>(new Map())
 
   // Load user info, splits, and friends in parallel
   useEffect(() => {
@@ -319,6 +324,8 @@ export default function SplitsPage() {
       const res = await fetch(`/api/splits?id=${id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error()
       toast.success('Split deleted')
+      // The linked transaction is removed too — refresh trip totals if open
+      window.dispatchEvent(new CustomEvent('tripTransactionsChanged'))
     } catch {
       if (snapshot) setSplits(prev => [snapshot, ...prev.filter(s => s.id !== id)])
       toast.error('Failed to delete split')
@@ -354,6 +361,12 @@ export default function SplitsPage() {
   const handleEdit = useCallback((split: Split) => {
     setEditingSplit(split as EditingSplit)
   }, [])
+
+  // Resolve each participant's own profile name (fallback when I don't have them saved)
+  useEffect(() => {
+    const emails = splits.flatMap(s => (s.split_participants ?? []).map(p => p.participant_email))
+    if (emails.some(Boolean)) fetchProfileNames(emails).then(setProfileNames)
+  }, [splits])
 
   // Build email → friend map once; only recompute when friends list changes
   const friendByEmail = React.useMemo(
@@ -461,6 +474,7 @@ export default function SplitsPage() {
                     onDelete={deleteSplit}
                     onSendReminder={sendReminder}
                     onEdit={handleEdit}
+                    profileNames={profileNames}
                   />
                 ))}
               </div>
@@ -486,6 +500,7 @@ export default function SplitsPage() {
                     onDelete={deleteSplit}
                     onSendReminder={sendReminder}
                     onEdit={handleEdit}
+                    profileNames={profileNames}
                   />
                 ))}
               </div>

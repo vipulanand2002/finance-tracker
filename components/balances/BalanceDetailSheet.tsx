@@ -9,6 +9,7 @@ import { Loader2, Pencil, Eye, SplitSquareVertical, Receipt, ArrowUpRight, Arrow
 import { format } from 'date-fns'
 import { formatCurrency } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
+import { fetchProfileNames } from '@/lib/profile-names'
 import SplitModal, { type EditingSplit } from '@/components/splits/SplitModal'
 import TransactionModal from '@/components/transactions/TransactionModal'
 import type { Transaction } from '@/types'
@@ -64,6 +65,7 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
   const [viewSplit, setViewSplit] = useState<SplitRow | null>(null)
   const [viewTx, setViewTx] = useState<Transaction | null>(null)
+  const [profileNames, setProfileNames] = useState<Map<string, string>>(new Map())
 
   const emailLower = counterparty?.email?.toLowerCase() ?? ''
   const nameLower = counterparty?.name?.toLowerCase() ?? ''
@@ -96,7 +98,9 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
       ])
 
       const allSplits: SplitRow[] = Array.isArray(splitsRes) ? splitsRes : []
-      setSplits(allSplits.filter(s => (s.split_participants ?? []).some(matchesCp)))
+      const mine = allSplits.filter(s => (s.split_participants ?? []).some(matchesCp))
+      setSplits(mine)
+      fetchProfileNames(mine.flatMap(s => (s.split_participants ?? []).map(p => p.participant_email))).then(setProfileNames)
 
       const txList: Transaction[] = Array.isArray(txnRes) ? txnRes : (txnRes.transactions ?? [])
       setTxns(txList.filter(t => !t.split_id))
@@ -290,7 +294,7 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
                 <p className="text-xs font-medium text-muted-foreground">Participants</p>
                 {viewSplit.split_participants.map((p, i) => (
                   <div key={i} className="flex items-center justify-between gap-2 text-sm">
-                    <span className="truncate">{p.participant_name}{p.participant_email ? '' : ''}</span>
+                    <span className="truncate">{(p.participant_email && profileNames.get(p.participant_email.toLowerCase())) || p.participant_name}</span>
                     <span className="flex items-center gap-2 shrink-0">
                       <span className="font-medium tabular-nums">{formatCurrency(p.amount_owed)}</span>
                       <Badge variant={p.is_paid ? 'secondary' : 'outline'} className="text-[10px]">{p.is_paid ? 'Paid' : 'Pending'}</Badge>
