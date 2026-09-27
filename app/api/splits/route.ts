@@ -404,6 +404,15 @@ export async function DELETE(request: Request) {
   const { searchParams } = new URL(request.url)
   const id = searchParams.get('id')
 
+  // Only the creator can delete the split
+  const { data: split } = await supabase.from('expense_splits').select('id').eq('id', id!).eq('created_by', user.id).maybeSingle()
+  if (!split) return NextResponse.json({ error: 'Not found or not yours to delete' }, { status: 403 })
+
+  // Remove the transaction(s) linked to this split so it stops counting in
+  // trip totals / dashboards. Service role covers on-behalf txns owned by others.
+  const svc = createServiceClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+  await svc.from('transactions').delete().eq('split_id', id!)
+
   const { error } = await supabase
     .from('expense_splits')
     .delete()
