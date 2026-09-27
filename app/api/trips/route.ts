@@ -68,20 +68,43 @@ export async function GET() {
   const { supabase, user } = await getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { data: trips, error } = await supabase
+  const svcGet = createServiceClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+  const myEmail = (user.email ?? '').toLowerCase()
+
+  // Trips I own (RLS)
+  const { data: ownedTrips, error } = await supabase
     .from('trips')
     .select('*, trip_budgets(*), transactions(amount, type, is_discrete)')
     .order('created_at', { ascending: false })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  const tripIds = (trips ?? []).map(t => t.id as string)
+  // Trips I'm a member of via an accepted invitation or a legacy trip_members row
+  const [{ data: myInvites }, { data: myMemberships }] = await Promise.all([
+    svcGet.from('trip_invitations').select('trip_id').eq('invitee_email', myEmail).eq('status', 'accepted'),
+    svcGet.from('trip_members').select('trip_id').eq('email', myEmail),
+  ])
+  const ownedIds = new Set((ownedTrips ?? []).map(t => t.id as string))
+  const memberTripIds = [...new Set([
+    ...(myInvites ?? []).map((r: { trip_id: string }) => r.trip_id),
+    ...(myMemberships ?? []).map((r: { trip_id: string }) => r.trip_id),
+  ])].filter(id => !ownedIds.has(id))
 
-  // Use service client to read trip_members and trip_invitations without RLS restrictions
-  const svcGet = createServiceClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  )
+  let memberTrips: Record<string, unknown>[] = []
+  if (memberTripIds.length > 0) {
+    const { data } = await svcGet
+      .from('trips')
+      .select('*, trip_budgets(*), transactions(amount, type, is_discrete)')
+      .in('id', memberTripIds)
+    memberTrips = data ?? []
+  }
+
+  const trips = [...(ownedTrips ?? []), ...memberTrips]
+  const tripIds = trips.map(t => t.id as string)
+
   const [{ data: allMembers }, { data: allInvitations }] = await Promise.all([
     tripIds.length > 0 ? svcGet.from('trip_members').select('*').in('trip_id', tripIds) : Promise.resolve({ data: [] }),
     tripIds.length > 0 ? svcGet.from('trip_invitations').select('*').in('trip_id', tripIds) : Promise.resolve({ data: [] }),

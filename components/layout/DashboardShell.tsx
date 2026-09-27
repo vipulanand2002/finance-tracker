@@ -1,8 +1,10 @@
 'use client'
 
 import { useState } from 'react'
+import dynamic from 'next/dynamic'
 import Sidebar from './Sidebar'
 import NotificationBell from './NotificationBell'
+const TripInvitationNotifier = dynamic(() => import('@/components/trips/TripInvitationNotifier'), { ssr: false })
 import { PushNotificationToggle } from '@/components/PushNotificationToggle'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
@@ -58,6 +60,7 @@ export default function DashboardShell({
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 md:p-6">
+          <TripInvitationNotifier />
           {children}
         </main>
       </div>

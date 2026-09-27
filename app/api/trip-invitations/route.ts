@@ -15,7 +15,7 @@ export async function GET() {
   const { data, error } = await supabase
     .from('trip_invitations')
     .select('*')
-    .eq('invitee_email', user.email ?? '')
+    .eq('invitee_email', (user.email ?? '').toLowerCase())
     .eq('status', 'pending')
     .order('created_at', { ascending: false })
 
@@ -71,7 +71,7 @@ export async function PATCH(request: Request) {
     .from('trip_invitations')
     .update({ status, responded_at: new Date().toISOString() })
     .eq('id', id)
-    .eq('invitee_email', user.email ?? '')
+    .eq('invitee_email', (user.email ?? '').toLowerCase())
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ success: true })
