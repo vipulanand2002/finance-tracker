@@ -79,11 +79,15 @@ export async function POST(request: Request) {
   const tagEmails: string[] = Array.isArray(body.tag_emails)
     ? [...new Set((body.tag_emails as string[]).map(e => e?.toLowerCase()).filter(Boolean))]
     : []
+  const registeredTags: { email: string; userId: string }[] = []  // tagged people who have accounts
   if (tagEmails.length > 0) {
     // Prefer each person's OWN profile name for the contact created in the
     // friend's account, so the friend sees real names (not my nicknames).
-    const { data: profs } = await svc.from('profiles').select('email, full_name').in('email', tagEmails)
+    const { data: profs } = await svc.from('profiles').select('id, email, full_name').in('email', tagEmails)
     const profileName = new Map<string, string>((profs ?? []).filter((p: { full_name: string | null }) => !!p.full_name).map((p: { email: string; full_name: string }) => [p.email.toLowerCase(), p.full_name]))
+    for (const p of (profs ?? []) as { id: string; email: string }[]) {
+      if (p.email.toLowerCase() !== resolved.email) registeredTags.push({ email: p.email.toLowerCase(), userId: p.id })
+    }
 
     const friendContactIds: string[] = []
     for (const email of tagEmails) {
@@ -138,6 +142,31 @@ export async function POST(request: Request) {
       }))
       await svc.from('transactions').update({ split_id: split.id }).eq('id', tx.id)
     }
+  } else if (registeredTags.length > 0) {
+    // Plain (non-split) tagged transaction → mirror to each tagged person's
+    // balance with the friend, just like a normal tagged transaction would.
+    // income → 'payment' (they paid), expense → 'charge' (friend paid for them).
+    try {
+      const probe = await svc.from('tagged_payments').select('kind').limit(1)
+      const hasKind = !probe.error
+      const kind = body.type === 'income' ? 'payment' : 'charge'
+      const { data: aProfile } = await svc.from('profiles').select('full_name').eq('id', resolved.friendId).single()
+      const aName = aProfile?.full_name || resolved.email.split('@')[0]
+      const rows = registeredTags.map(t => ({
+        from_user_id: resolved.friendId,
+        from_name: aName,
+        from_email: resolved.email,
+        to_email: t.email,
+        to_user_id: t.userId,
+        amount: body.amount,
+        description: body.description ?? null,
+        date: body.date,
+        transaction_id: tx.id,
+        status: 'pending',
+        ...(hasKind ? { kind } : {}),
+      }))
+      if (rows.length > 0) await svc.from('tagged_payments').insert(rows)
+    } catch { /* tagged_payments not migrated — ignore */ }
   }
 
   return NextResponse.json(tx, { status: 201 })
