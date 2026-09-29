@@ -275,23 +275,23 @@ export default function BalancesPage() {
       {payments.length > 0 && (
         <div className="space-y-2">
           {payments.map(p => (
-            <div key={p.id} className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 p-3 flex items-center gap-3 flex-wrap">
-              <div className="flex-1 min-w-0">
+            <div key={p.id} className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 p-3 flex flex-col gap-2">
+              <div className="min-w-0">
                 <p className="text-sm">
                   <span className="font-medium">{p.from_name ?? p.from_email}</span>{' '}
                   {p.kind === 'charge' ? 'recorded that you owe them' : 'recorded that you paid them'}{' '}
-                  <span className="font-semibold">{formatCurrency(p.amount)}</span>
+                  <span className="font-semibold whitespace-nowrap">{formatCurrency(p.amount)}</span>
                   {p.kind === 'charge' && <span className="text-muted-foreground"> (they paid for you)</span>}
                 </p>
                 {p.description && <p className="text-xs text-muted-foreground truncate">{p.description}</p>}
                 <p className="text-[11px] text-muted-foreground mt-0.5">Already counted in your balance below.</p>
               </div>
-              <div className="flex gap-2 shrink-0">
-                <Button size="sm" variant="outline" className="h-8 px-3 text-xs" disabled={actingPayment === p.id} onClick={() => setAddPayment(p)}>
-                  Add to my expenses
-                </Button>
+              <div className="flex gap-2 justify-end">
                 <Button size="sm" variant="ghost" className="h-8 px-3 text-xs" disabled={actingPayment === p.id} onClick={() => dismissPayment(p)}>
                   {actingPayment === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Dismiss'}
+                </Button>
+                <Button size="sm" variant="outline" className="h-8 px-3 text-xs" disabled={actingPayment === p.id} onClick={() => setAddPayment(p)}>
+                  Add to my expenses
                 </Button>
               </div>
             </div>
