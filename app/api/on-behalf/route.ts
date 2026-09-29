@@ -115,15 +115,23 @@ export async function POST(request: Request) {
   // Optional split, authored by me, linked to the friend's transaction
   const parts = body.split?.participants as { name: string; email?: string; amount: number }[] | undefined
   if (parts?.length) {
-    const { data: split, error: splitErr } = await svc.from('expense_splits').insert({
+    const splitBase = {
       title: body.split.title || body.description || body.category,
       total_amount: body.amount,
       category: body.category,
       description: body.description ?? null,
       date: body.date,
       trip_id: tripId,
-      created_by: user.id,
-    }).select().single()
+      created_by: user.id,          // author (edit rights)
+      paid_by: resolved.friendId,   // the friend paid this bill (they're owed)
+    }
+    let { data: split, error: splitErr } = await svc.from('expense_splits').insert(splitBase).select().single()
+    if (splitErr?.message?.includes('paid_by')) {
+      // Column not migrated yet — create without it (balance falls back to created_by)
+      const { paid_by, ...withoutPaidBy } = splitBase
+      void paid_by
+      ;({ data: split, error: splitErr } = await svc.from('expense_splits').insert(withoutPaidBy).select().single())
+    }
     if (!splitErr && split) {
       // The friend paid this bill (it's on their behalf), so THEIR share is
       // marked paid; you and everyone else still owe your shares.

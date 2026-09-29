@@ -36,6 +36,7 @@ interface SplitRow {
   date: string
   is_settled: boolean
   created_by: string
+  paid_by?: string | null
   trip_id?: string | null
   contact_id?: string | null
   receipt_url?: string | null
@@ -118,7 +119,8 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
   let splitTheyOwe = 0, splitYouOwe = 0
   for (const s of splits) {
     if (s.is_settled) continue
-    if (s.created_by === myId) {
+    const creditorId = s.paid_by || s.created_by
+    if (creditorId === myId) {
       for (const p of s.split_participants) if (!p.is_paid && matchesCp(p)) splitTheyOwe += p.amount_owed
     } else {
       const mine = s.split_participants.find(p =>
@@ -180,18 +182,18 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
                 {splits.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No splits with {counterparty?.name}.</p>
                 ) : splits.map(s => {
-                  const iCreated = s.created_by === myId
+                  const iAmPayer = (s.paid_by || s.created_by) === myId
                   // Show the amount that flows between the two of you for this split:
-                  //  - I created it → what the other person still owes me
-                  //  - they created it → what I (the viewer) still owe them (my contribution)
+                  //  - I paid → what the other person still owes me
+                  //  - they paid → what I (the viewer) still owe them (my contribution)
                   let amt = 0
-                  if (iCreated) {
+                  if (iAmPayer) {
                     amt = s.split_participants.filter(matchesCp).reduce((a, p) => a + (p.is_paid ? 0 : p.amount_owed), 0)
                   } else {
                     const mine = s.split_participants.find(isSelf)
                     amt = mine && !mine.is_paid ? mine.amount_owed : 0
                   }
-                  const label = iCreated ? 'they owe' : 'your share'
+                  const label = iAmPayer ? 'they owe' : 'your share'
                   return (
                     <div key={s.id} className="rounded-lg border p-3">
                       <div className="flex items-start justify-between gap-2">
@@ -207,7 +209,7 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
                             {!s.is_settled && amt > 0 && <p className="text-[10px] text-muted-foreground leading-tight">{label}</p>}
                           </div>
                           <button onClick={() => setViewSplit(s)} title="View" className="text-muted-foreground hover:text-foreground"><Eye className="w-3.5 h-3.5" /></button>
-                          {iCreated && !s.is_settled && (
+                          {s.created_by === myId && !s.is_settled && (
                             <button onClick={() => editSplit(s)} title="Edit" className="text-muted-foreground hover:text-foreground"><Pencil className="w-3.5 h-3.5" /></button>
                           )}
                         </div>

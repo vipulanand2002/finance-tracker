@@ -22,6 +22,7 @@ interface Participant {
 
 interface SplitRow {
   created_by: string
+  paid_by?: string | null
   is_settled: boolean
   split_participants: Participant[]
 }
@@ -109,19 +110,21 @@ export default function BalancesPage() {
 
         for (const sp of splitList) {
           if (sp.is_settled) continue
-          const iAmCreator = !!myId && sp.created_by === myId
-          if (iAmCreator) {
+          // The person who PAID the bill is the creditor (may differ from author)
+          const creditorId = sp.paid_by || sp.created_by
+          const iAmCreditor = !!myId && creditorId === myId
+          if (iAmCreditor) {
             // Everyone else's unpaid share is owed TO me
             for (const p of sp.split_participants ?? []) {
               if (p.is_paid || isSelf(p)) continue
               ensure(p.participant_name, p.participant_email).splitOwed += p.amount_owed
             }
           } else {
-            // I only participate → my unpaid share is what I owe the creator
+            // I only participate → my unpaid share is what I owe the payer
             const myRow = (sp.split_participants ?? []).find(isSelf)
             if (myRow && !myRow.is_paid) {
-              const creator = (sp.split_participants ?? []).find(p => p.participant_user_id === sp.created_by)
-              ensure(creator?.participant_name ?? 'Split creator', creator?.participant_email ?? null)
+              const payer = (sp.split_participants ?? []).find(p => p.participant_user_id === creditorId)
+              ensure(payer?.participant_name ?? 'Split payer', payer?.participant_email ?? null)
                 .splitYouOwe += myRow.amount_owed
             }
           }

@@ -33,6 +33,7 @@ interface Participant {
 interface Split {
   id: string
   created_by: string
+  paid_by?: string | null
   title: string
   total_amount: number
   category: string
@@ -385,14 +386,17 @@ export default function SplitsPage() {
   // Perspective matters:
   //  - Splits I created → others' unpaid shares are owed TO me.
   //  - Splits I only participate in → only MY unpaid share is what I owe.
+  // The payer (paid_by) is the creditor; falls back to the author for normal splits
+  const iAmPayer = (s: Split) => !!myId && (s.paid_by || s.created_by) === myId
+
   const owedToYou = active
-    .filter(s => !!myId && s.created_by === myId)
+    .filter(iAmPayer)
     .reduce((sum, s) => sum + s.split_participants
       .filter(p => !p.is_paid && !isMe(p))
       .reduce((a, p) => a + p.amount_owed, 0), 0)
 
   const youOwe = active
-    .filter(s => !(myId && s.created_by === myId))
+    .filter(s => !iAmPayer(s))
     .reduce((sum, s) => sum + s.split_participants
       .filter(p => !p.is_paid && isMe(p))
       .reduce((a, p) => a + p.amount_owed, 0), 0)
