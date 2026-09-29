@@ -80,18 +80,21 @@ export async function POST(request: Request) {
     ? [...new Set((body.tag_emails as string[]).map(e => e?.toLowerCase()).filter(Boolean))]
     : []
   if (tagEmails.length > 0) {
-    const { data: myProfileName } = await supabase.from('profiles').select('full_name').eq('id', user.id).single()
+    // Prefer each person's OWN profile name for the contact created in the
+    // friend's account, so the friend sees real names (not my nicknames).
+    const { data: profs } = await svc.from('profiles').select('email, full_name').in('email', tagEmails)
+    const profileName = new Map<string, string>((profs ?? []).filter((p: { full_name: string | null }) => !!p.full_name).map((p: { email: string; full_name: string }) => [p.email.toLowerCase(), p.full_name]))
+
     const friendContactIds: string[] = []
     for (const email of tagEmails) {
       if (email === resolved.email) continue // never tag the friend themselves
       const { data: existing } = await svc.from('contacts').select('id').eq('user_id', resolved.friendId).eq('email', email).maybeSingle()
       if (existing?.id) { friendContactIds.push(existing.id); continue }
-      // Name: my name if it's me, else my contact's name, else email prefix
-      let name = email.split('@')[0]
-      if (email === (user.email ?? '').toLowerCase()) name = myProfileName?.full_name || name
-      else {
+      let name = profileName.get(email)
+      if (!name) {
+        // Fall back to my contact's name, then the email prefix
         const { data: myContact } = await supabase.from('contacts').select('name').eq('user_id', user.id).eq('email', email).maybeSingle()
-        if (myContact?.name) name = myContact.name
+        name = myContact?.name || email.split('@')[0]
       }
       const { data: created } = await svc.from('contacts').insert({ user_id: resolved.friendId, name, email }).select('id').single()
       if (created?.id) friendContactIds.push(created.id)

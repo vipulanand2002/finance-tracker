@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import { formatCurrency } from '@/lib/utils'
+import { fetchProfileNames } from '@/lib/profile-names'
 import { ArrowUpRight, ArrowDownLeft, CheckCircle2, Loader2, Send, X, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
@@ -154,6 +155,17 @@ export default function BalancesPage() {
               .reduce((s: number, t: { amount: number }) => s + t.amount, 0)
           })
         )
+
+        // Resolve display names: keep my own nickname for saved contacts; for
+        // everyone else fall back to the person's own profile name over the
+        // creator-typed name that came from a split/payment.
+        const names = await fetchProfileNames([...map.values()].map(cp => cp.email))
+        for (const cp of map.values()) {
+          if (!cp.id && cp.email) {
+            const pn = names.get(cp.email.toLowerCase())
+            if (pn) cp.name = pn
+          }
+        }
 
         const result = [...map.values()].map(cp => ({
           ...cp,
