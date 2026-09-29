@@ -73,8 +73,34 @@ export async function POST(request: Request) {
     receipt_url: body.receipt_url ?? null,
     trip_id: tripId,
   }
-  if (body.contact_id !== undefined) payload.contact_id = body.contact_id ?? null
-  if (body.contact_ids !== undefined) payload.contact_ids = body.contact_ids ?? []
+
+  // Tags: resolve each email to a contact in the FRIEND's account (create if
+  // missing), so tagged people resolve on the friend's side. "Me" = the author.
+  const tagEmails: string[] = Array.isArray(body.tag_emails)
+    ? [...new Set((body.tag_emails as string[]).map(e => e?.toLowerCase()).filter(Boolean))]
+    : []
+  if (tagEmails.length > 0) {
+    const { data: myProfileName } = await supabase.from('profiles').select('full_name').eq('id', user.id).single()
+    const friendContactIds: string[] = []
+    for (const email of tagEmails) {
+      if (email === resolved.email) continue // never tag the friend themselves
+      const { data: existing } = await svc.from('contacts').select('id').eq('user_id', resolved.friendId).eq('email', email).maybeSingle()
+      if (existing?.id) { friendContactIds.push(existing.id); continue }
+      // Name: my name if it's me, else my contact's name, else email prefix
+      let name = email.split('@')[0]
+      if (email === (user.email ?? '').toLowerCase()) name = myProfileName?.full_name || name
+      else {
+        const { data: myContact } = await supabase.from('contacts').select('name').eq('user_id', user.id).eq('email', email).maybeSingle()
+        if (myContact?.name) name = myContact.name
+      }
+      const { data: created } = await svc.from('contacts').insert({ user_id: resolved.friendId, name, email }).select('id').single()
+      if (created?.id) friendContactIds.push(created.id)
+    }
+    if (friendContactIds.length > 0) {
+      payload.contact_id = friendContactIds[0]
+      payload.contact_ids = friendContactIds
+    }
+  }
 
   const { data: tx, error } = await svc.from('transactions').insert(payload).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

@@ -455,8 +455,11 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
             date: form.date,
             receipt_url: form.receipt_url || null,
             trip_id: form.trip_id || null,
-            contact_id: form.contact_ids[0] ?? null,
-            contact_ids: form.contact_ids,
+            // Tags resolved to emails (Me → your email); the API maps them to the
+            // friend's own contacts so they resolve in the friend's account.
+            tag_emails: form.contact_ids
+              .map(id => id === ME_TAG ? currentUser?.email : taggable.find(t => t.id === id)?.email)
+              .filter((e): e is string => !!e),
             split: obSplit,
           }),
         })
@@ -574,7 +577,16 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
     onClose()
   }
 
-  const availableContacts = contacts.filter(c => !form.contact_ids.includes(c.id))
+  // Taggable people. For on-behalf: your contacts + "Me", minus the friend A.
+  const ME_TAG = '__me__'
+  const obEmailLower = (onBehalfEmail ?? '').toLowerCase()
+  const taggable: { id: string; name: string; email: string | null }[] = onBehalfContactId
+    ? [
+        ...(currentUser?.email ? [{ id: ME_TAG, name: `${currentUser.name} (You)`, email: currentUser.email }] : []),
+        ...contacts.filter(c => c.id !== onBehalfContactId && (c.email?.toLowerCase() ?? '') !== obEmailLower),
+      ]
+    : contacts
+  const availableContacts = taggable.filter(c => !form.contact_ids.includes(c.id))
 
   return (
     <>
@@ -973,7 +985,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                         {form.contact_ids.length > 0 && (
                           <div className="flex flex-wrap gap-1.5">
                             {form.contact_ids.map(id => {
-                              const c = contacts.find(x => x.id === id)
+                              const c = taggable.find(x => x.id === id)
                               if (!c) return null
                               return (
                                 <Badge key={id} variant="secondary" className="gap-1 pr-1.5 max-w-[200px]">
