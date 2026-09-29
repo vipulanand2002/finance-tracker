@@ -60,9 +60,6 @@ export default function BalancesPage() {
   const [closing, setClosing] = useState<string | null>(null)
   const [addExpenseFor, setAddExpenseFor] = useState<FriendBalance | null>(null)
   const [detailFor, setDetailFor] = useState<BalanceCounterparty | null>(null)  // open balance detail
-  const [payments, setPayments] = useState<TaggedPayment[]>([])   // pending "you paid X" notifications
-  const [addPayment, setAddPayment] = useState<TaggedPayment | null>(null)  // one being added to my expenses
-  const [actingPayment, setActingPayment] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     {
@@ -139,7 +136,6 @@ export default function BalancesPage() {
           if (pay.kind === 'charge') cp.chargedToThem += pay.amount
           else cp.paidToThem += pay.amount
         }
-        setPayments(payList.filter(p => p.status === 'pending'))
 
         // Tagged (non-split) transactions only exist for saved friends (need contact_id)
         await Promise.all(
@@ -184,20 +180,6 @@ export default function BalancesPage() {
   }, [])
 
   useEffect(() => { load() }, [load])
-
-  async function dismissPayment(p: TaggedPayment) {
-    setActingPayment(p.id)
-    try {
-      await fetch(`/api/tagged-payments?id=${p.id}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'dismissed' }),
-      })
-      setPayments(prev => prev.filter(x => x.id !== p.id))
-    } catch {
-      toast.error('Failed to dismiss')
-    } finally {
-      setActingPayment(null)
-    }
-  }
 
   async function closeBalance(friend: FriendBalance) {
     setClosing(friend.key)
@@ -270,34 +252,6 @@ export default function BalancesPage() {
         <h1 className="text-2xl font-bold">Balances</h1>
         <p className="text-sm text-muted-foreground">Net amounts across splits and tagged transactions</p>
       </div>
-
-      {/* Payments a friend recorded that YOU made to them */}
-      {payments.length > 0 && (
-        <div className="space-y-2">
-          {payments.map(p => (
-            <div key={p.id} className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 p-3 flex flex-col gap-2">
-              <div className="min-w-0">
-                <p className="text-sm">
-                  <span className="font-medium">{p.from_name ?? p.from_email}</span>{' '}
-                  {p.kind === 'charge' ? 'recorded that you owe them' : 'recorded that you paid them'}{' '}
-                  <span className="font-semibold whitespace-nowrap">{formatCurrency(p.amount)}</span>
-                  {p.kind === 'charge' && <span className="text-muted-foreground"> (they paid for you)</span>}
-                </p>
-                {p.description && <p className="text-xs text-muted-foreground truncate">{p.description}</p>}
-                <p className="text-[11px] text-muted-foreground mt-0.5">Already counted in your balance below.</p>
-              </div>
-              <div className="flex gap-2 justify-end">
-                <Button size="sm" variant="ghost" className="h-8 px-3 text-xs" disabled={actingPayment === p.id} onClick={() => dismissPayment(p)}>
-                  {actingPayment === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Dismiss'}
-                </Button>
-                <Button size="sm" variant="outline" className="h-8 px-3 text-xs" disabled={actingPayment === p.id} onClick={() => setAddPayment(p)}>
-                  Add to my expenses
-                </Button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* Summary strip */}
       {!loading && balances.length > 0 && (
@@ -429,27 +383,6 @@ export default function BalancesPage() {
         onSaved={() => { setAddExpenseFor(null); load() }}
         defaultType="expense"
         defaultContactIds={addExpenseFor?.id ? [addExpenseFor.id] : undefined}
-      />
-
-      {/* Add a "you paid them" record into my own expense ledger (untagged, so it
-          doesn't double-count the balance which is already driven by the record) */}
-      <TransactionModal
-        open={!!addPayment}
-        onClose={() => setAddPayment(null)}
-        onSaved={async () => {
-          if (addPayment) {
-            try {
-              await fetch(`/api/tagged-payments?id=${addPayment.id}`, {
-                method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'added' }),
-              })
-            } catch { /* ignore */ }
-          }
-          setAddPayment(null)
-          load()
-        }}
-        defaultType="expense"
-        defaultAmount={addPayment?.amount}
-        defaultDescription={addPayment ? `Paid ${addPayment.from_name ?? addPayment.from_email ?? ''}`.trim() : undefined}
       />
 
       <BalanceDetailSheet

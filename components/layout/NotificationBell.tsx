@@ -1,13 +1,28 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase/client'
-import { Bell, Check, X, UserCheck, UserX, Loader2 } from 'lucide-react'
+import { Bell, Check, X, UserCheck, UserX, Loader2, IndianRupee } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { toast } from 'sonner'
 import { formatDistanceToNow } from 'date-fns'
+import { formatCurrency } from '@/lib/utils'
+const TransactionModal = dynamic(() => import('@/components/transactions/TransactionModal'), { ssr: false })
+
+interface TaggedPayment {
+  id: string
+  from_name: string | null
+  from_email: string | null
+  amount: number
+  description: string | null
+  date: string
+  status: string
+  kind?: string
+  created_at: string
+}
 
 interface FriendRequest {
   id: string
@@ -32,11 +47,13 @@ function initials(name: string) {
 export default function NotificationBell() {
   const [requests, setRequests] = useState<FriendRequest[]>([])
   const [notifs, setNotifs] = useState<AppNotification[]>([])
+  const [payments, setPayments] = useState<TaggedPayment[]>([])
+  const [addPayment, setAddPayment] = useState<TaggedPayment | null>(null)
   const [open, setOpen] = useState(false)
   const [processing, setProcessing] = useState<string | null>(null)
   const [userId, setUserId] = useState<string>('')
 
-  const unreadCount = requests.length + notifs.filter(n => !n.read).length
+  const unreadCount = requests.length + notifs.filter(n => !n.read).length + payments.length
 
   const loadData = useCallback(async () => {
     const supabase = createClient()
@@ -61,7 +78,23 @@ export default function NotificationBell() {
 
     setRequests(reqs ?? [])
     setNotifs(ns ?? [])
+
+    // Cross-user "you paid / you owe" records addressed to me
+    try {
+      const pays = await fetch('/api/tagged-payments').then(r => r.ok ? r.json() : [])
+      setPayments(Array.isArray(pays) ? pays.filter((p: TaggedPayment) => p.status === 'pending') : [])
+    } catch { /* ignore */ }
   }, [])
+
+  async function dismissPayment(p: TaggedPayment) {
+    setProcessing(p.id)
+    try {
+      await fetch(`/api/tagged-payments?id=${p.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'dismissed' }),
+      })
+      setPayments(prev => prev.filter(x => x.id !== p.id))
+    } catch { toast.error('Failed to dismiss') } finally { setProcessing(null) }
+  }
 
   useEffect(() => {
     loadData()
@@ -81,6 +114,10 @@ export default function NotificationBell() {
         .on('postgres_changes', {
           event: 'INSERT', schema: 'public', table: 'notifications',
           filter: `user_id=eq.${user.id}`,
+        }, () => loadData())
+        .on('postgres_changes', {
+          event: 'INSERT', schema: 'public', table: 'tagged_payments',
+          filter: `to_user_id=eq.${user.id}`,
         }, () => loadData())
         .subscribe()
       return () => { supabase.removeChannel(channel) }
@@ -112,9 +149,10 @@ export default function NotificationBell() {
     setNotifs(prev => prev.map(n => ({ ...n, read: true })))
   }
 
-  const isEmpty = requests.length === 0 && notifs.length === 0
+  const isEmpty = requests.length === 0 && notifs.length === 0 && payments.length === 0
 
   return (
+    <>
     <Sheet open={open} onOpenChange={o => { setOpen(o); if (o) loadData() }}>
       <SheetTrigger className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" aria-label="Notifications">
         <Bell className="w-4 h-4" />
@@ -143,6 +181,42 @@ export default function NotificationBell() {
             </div>
           ) : (
             <div className="divide-y">
+              {/* ── Payment records (you paid / you owe) ── */}
+              {payments.length > 0 && (
+                <div>
+                  <p className="px-4 py-2 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide bg-muted/40">
+                    Payments
+                  </p>
+                  {payments.map(p => (
+                    <div key={p.id} className="px-4 py-3 flex items-start gap-3">
+                      <div className="mt-0.5 w-8 h-8 rounded-full flex items-center justify-center shrink-0 bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400">
+                        <IndianRupee className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm leading-snug">
+                          <span className="font-medium">{p.from_name ?? p.from_email}</span>{' '}
+                          {p.kind === 'charge' ? 'recorded that you owe them' : 'recorded that you paid them'}{' '}
+                          <span className="font-semibold whitespace-nowrap">{formatCurrency(p.amount)}</span>
+                          {p.kind === 'charge' && <span className="text-muted-foreground"> (they paid for you)</span>}
+                        </p>
+                        {p.description && <p className="text-xs text-muted-foreground truncate">{p.description}</p>}
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Counted in your balance · {formatDistanceToNow(new Date(p.created_at), { addSuffix: true })}
+                        </p>
+                        <div className="flex gap-2 mt-2">
+                          <Button size="sm" variant="outline" className="h-7 text-xs" disabled={processing === p.id} onClick={() => dismissPayment(p)}>
+                            {processing === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Dismiss'}
+                          </Button>
+                          <Button size="sm" className="h-7 text-xs" disabled={processing === p.id} onClick={() => { setAddPayment(p); setOpen(false) }}>
+                            Add to my expenses
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* ── Incoming friend requests ── */}
               {requests.length > 0 && (
                 <div>
@@ -241,5 +315,26 @@ export default function NotificationBell() {
         </div>
       </SheetContent>
     </Sheet>
+
+    {/* Add a "you paid / you owe" record into my own expense ledger */}
+    <TransactionModal
+      open={!!addPayment}
+      onClose={() => setAddPayment(null)}
+      onSaved={async () => {
+        if (addPayment) {
+          try {
+            await fetch(`/api/tagged-payments?id=${addPayment.id}`, {
+              method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'added' }),
+            })
+          } catch { /* ignore */ }
+        }
+        setAddPayment(null)
+        loadData()
+      }}
+      defaultType="expense"
+      defaultAmount={addPayment?.amount}
+      defaultDescription={addPayment ? `Paid ${addPayment.from_name ?? addPayment.from_email ?? ''}`.trim() : undefined}
+    />
+    </>
   )
 }
