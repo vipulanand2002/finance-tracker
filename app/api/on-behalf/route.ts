@@ -73,6 +73,8 @@ export async function POST(request: Request) {
     receipt_url: body.receipt_url ?? null,
     trip_id: tripId,
   }
+  if (body.contact_id !== undefined) payload.contact_id = body.contact_id ?? null
+  if (body.contact_ids !== undefined) payload.contact_ids = body.contact_ids ?? []
 
   const { data: tx, error } = await svc.from('transactions').insert(payload).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

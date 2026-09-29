@@ -455,6 +455,8 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
             date: form.date,
             receipt_url: form.receipt_url || null,
             trip_id: form.trip_id || null,
+            contact_id: form.contact_ids[0] ?? null,
+            contact_ids: form.contact_ids,
             split: obSplit,
           }),
         })
@@ -956,8 +958,8 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                   </div>
                 )}
 
-                {/* Friends toggle — mutually exclusive with Split (hidden when adding for a friend) */}
-                {!onBehalfContactId && contacts.length > 0 && (
+                {/* Friends toggle — mutually exclusive with Split */}
+                {contacts.length > 0 && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium flex items-center gap-2">
