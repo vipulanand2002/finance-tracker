@@ -11,6 +11,7 @@ import { Progress } from '@/components/ui/progress'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
   Calendar, MapPin, Receipt, Wallet, TrendingDown, Plus,
   Users, Link2, CheckSquare, Square, ArrowDownCircle, ChevronDown,
@@ -117,6 +118,8 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
   const [sendingSplitReminder, setSendingSplitReminder] = useState<string | null>(null)
   const [txExpanded, setTxExpanded] = useState(true)
   const [txViewMode, setTxViewMode] = useState<'all' | 'category' | 'member'>('all')
+  const [viewTx, setViewTx] = useState<Transaction | null>(null)          // read-only transaction detail
+  const [collapsedMembers, setCollapsedMembers] = useState<Set<string>>(new Set())
   const [sendingReminders, setSendingReminders] = useState(false)
 
   const fetchTransactions = useCallback(async () => {
@@ -360,6 +363,19 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
   const expenses = transactions
     .filter(t => t.type === 'expense')
     .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '') || (b.created_at ?? '').localeCompare(a.created_at ?? ''))
+
+  // Resolve a member's email from the best available source
+  function memberEmail(userId: string): string | undefined {
+    if (userId === currentUserId) return currentUserEmail
+    const pb = personalBudgets.find(b => b.user_id === userId)
+    if (pb) return pb.user_email
+    for (const s of tripSplits) {
+      for (const p of s.split_participants) {
+        if (p.participant_user_id === userId && p.participant_email) return p.participant_email
+      }
+    }
+    return undefined
+  }
   // Discrete expenses are private — excluded from trip totals and category breakdown
   const publicExpenses = expenses.filter(t => !t.is_discrete)
   const totalSpent = publicExpenses.reduce((s, t) => s + t.amount, 0)
@@ -1391,20 +1407,32 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                         const isMe = userId === currentUserId
                         const email = userEmailMap.get(userId)
                         const label = isMe ? 'Me' : (email?.split('@')[0] ?? 'Member')
+                        const collapsed = collapsedMembers.has(userId)
                         return (
                           <div key={userId} className="rounded-lg border overflow-hidden">
-                            <div className="flex items-center justify-between px-3 py-2 bg-muted/50">
-                              <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setCollapsedMembers(prev => {
+                                const next = new Set(prev)
+                                if (next.has(userId)) next.delete(userId); else next.add(userId)
+                                return next
+                              })}
+                              className="w-full flex items-center justify-between px-3 py-2 bg-muted/50 hover:bg-muted transition-colors"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground shrink-0 transition-transform duration-200 ${collapsed ? '-rotate-90' : ''}`} />
                                 <span className="w-5 h-5 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[10px] font-bold shrink-0">
                                   {label.charAt(0).toUpperCase()}
                                 </span>
-                                <span className="text-sm font-medium">{label}</span>
+                                <span className="text-sm font-medium truncate">{label}</span>
+                                <span className="text-xs text-muted-foreground shrink-0">· {txs.length}</span>
                               </div>
-                              <span className="text-sm font-semibold text-red-600">-{formatCurrency(memberTotal)}</span>
-                            </div>
+                              <span className="text-sm font-semibold text-red-600 shrink-0 tabular-nums">-{formatCurrency(memberTotal)}</span>
+                            </button>
+                            {!collapsed && (
                             <div className="divide-y">
                               {txs.map(t => (
-                                <div key={t.id} className={`flex items-center gap-2 py-2 px-3 group ${t.is_discrete ? 'opacity-75' : ''}`}>
+                                <div key={t.id} onClick={() => setViewTx(t)}
+                                  className={`flex items-center gap-2 py-2 px-3 group cursor-pointer hover:bg-muted/40 transition-colors ${t.is_discrete ? 'opacity-75' : ''}`}>
                                   <span className="text-xs text-muted-foreground w-12 shrink-0">{format(parseISO(t.date), 'd MMM')}</span>
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-1.5">
@@ -1418,15 +1446,15 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                                     </div>
                                     <p className="text-xs text-muted-foreground">{t.category}</p>
                                   </div>
-                                  <span className="text-sm font-semibold shrink-0 text-red-600">-{formatCurrency(t.amount)}</span>
+                                  <span className="text-sm font-semibold shrink-0 text-red-600 tabular-nums">-{formatCurrency(t.amount)}</span>
                                   {t.user_id === currentUserId && (
-                                    <button onClick={() => setEditingTx(t)} title="Edit transaction"
+                                    <button onClick={e => { e.stopPropagation(); setEditingTx(t) }} title="Edit transaction"
                                       className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity shrink-0">
                                       <Pencil className="w-3.5 h-3.5" />
                                     </button>
                                   )}
                                   {!trip.is_closed && (
-                                    <button onClick={() => unlinkTransaction(t.id)} title="Unlink from trip"
+                                    <button onClick={e => { e.stopPropagation(); unlinkTransaction(t.id) }} title="Unlink from trip"
                                       className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity shrink-0">
                                       <Link2 className="w-3.5 h-3.5" />
                                     </button>
@@ -1434,6 +1462,7 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                                 </div>
                               ))}
                             </div>
+                            )}
                           </div>
                         )
                       })
@@ -1448,6 +1477,38 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
 
   const _modals = (
     <>
+      {/* Read-only transaction detail (any trip member can view) */}
+      <Dialog open={!!viewTx} onOpenChange={v => { if (!v) setViewTx(null) }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>{viewTx?.description ?? viewTx?.category}</DialogTitle></DialogHeader>
+          {viewTx && (
+            <div className="space-y-3 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-2xl font-bold text-red-600 tabular-nums">-{formatCurrency(viewTx.amount)}</span>
+                {viewTx.is_discrete && (
+                  <span className="flex items-center gap-0.5 text-[11px] text-amber-600 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-700 rounded px-1.5 py-0.5">
+                    <EyeOff className="w-3 h-3" /> Private
+                  </span>
+                )}
+              </div>
+              <div className="space-y-1 text-xs text-muted-foreground">
+                <p>Category: <span className="text-foreground">{viewTx.category}</span></p>
+                <p>Date: <span className="text-foreground">{format(parseISO(viewTx.date), 'EEE, d MMM yyyy')}</span></p>
+                <p>Spent by: <span className="text-foreground">{viewTx.user_id === currentUserId ? 'Me' : (memberEmail(viewTx.user_id)?.split('@')[0] ?? 'Member')}</span></p>
+              </div>
+              {viewTx.receipt_url && (
+                <a href={viewTx.receipt_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-primary hover:underline"><Paperclip className="w-3.5 h-3.5" />Receipt</a>
+              )}
+              {viewTx.user_id === currentUserId && !trip.is_closed && (
+                <Button size="sm" variant="outline" className="w-full" onClick={() => { const t = viewTx; setViewTx(null); setEditingTx(t) }}>
+                  <Pencil className="w-3.5 h-3.5 mr-1.5" />Edit transaction
+                </Button>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       <TransactionModal
         open={addExpenseOpen}
         onClose={() => setAddExpenseOpen(false)}
