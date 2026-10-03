@@ -250,7 +250,7 @@ export default function BalancesPage() {
   const totalYouOwe = balances.filter(b => b.net < 0).reduce((s, b) => s + Math.abs(b.net), 0)
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
+    <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Balances</h1>
         <p className="text-sm text-muted-foreground">Net amounts across splits and tagged transactions</p>
@@ -258,7 +258,7 @@ export default function BalancesPage() {
 
       {/* Summary strip */}
       {!loading && balances.length > 0 && (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 sm:max-w-xl">
           <div className="rounded-xl border bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 px-4 py-3">
             <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">Friends owe you</p>
             <p className="text-xl font-bold text-emerald-700 dark:text-emerald-300 mt-0.5">{formatCurrency(totalOwedToYou)}</p>
@@ -281,7 +281,7 @@ export default function BalancesPage() {
           <p className="text-sm mt-1">No outstanding balances with any friends</p>
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
           {balances.map(b => (
             <div key={b.key} className="rounded-xl border bg-card p-4 space-y-3">
 
