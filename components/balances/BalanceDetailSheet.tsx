@@ -5,7 +5,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, Pencil, Eye, SplitSquareVertical, Receipt, ArrowUpRight, ArrowDownLeft, CheckCircle2, Paperclip } from 'lucide-react'
+import { Loader2, Pencil, SplitSquareVertical, Receipt, ArrowUpRight, ArrowDownLeft, CheckCircle2, Paperclip } from 'lucide-react'
 import { format } from 'date-fns'
 import { formatCurrency } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
@@ -195,7 +195,8 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
                   }
                   const label = iAmPayer ? 'they owe' : 'your share'
                   return (
-                    <div key={s.id} className="rounded-lg border p-3">
+                    <div key={s.id} onClick={() => setViewSplit(s)}
+                      className="rounded-lg border p-3 cursor-pointer hover:bg-muted/40 transition-colors">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="text-sm font-medium truncate">{s.title}</p>
@@ -208,9 +209,8 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
                             </span>
                             {!s.is_settled && amt > 0 && <p className="text-[10px] text-muted-foreground leading-tight">{label}</p>}
                           </div>
-                          <button onClick={() => setViewSplit(s)} title="View" className="text-muted-foreground hover:text-foreground"><Eye className="w-3.5 h-3.5" /></button>
                           {s.created_by === myId && !s.is_settled && (
-                            <button onClick={() => editSplit(s)} title="Edit" className="text-muted-foreground hover:text-foreground"><Pencil className="w-3.5 h-3.5" /></button>
+                            <button onClick={e => { e.stopPropagation(); editSplit(s) }} title="Edit" className="text-muted-foreground hover:text-foreground"><Pencil className="w-3.5 h-3.5" /></button>
                           )}
                         </div>
                       </div>
@@ -224,7 +224,8 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
                 <div className="space-y-2">
                   <p className="text-sm font-semibold flex items-center gap-1.5"><Receipt className="w-4 h-4 text-muted-foreground" /> Tagged transactions</p>
                   {txns.map(t => (
-                    <div key={t.id} className="rounded-lg border p-3">
+                    <div key={t.id} onClick={() => setViewTx(t)}
+                      className="rounded-lg border p-3 cursor-pointer hover:bg-muted/40 transition-colors">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="text-sm font-medium truncate">{t.description ?? t.category}</p>
@@ -234,8 +235,7 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
                           <span className={`text-sm font-semibold ${t.type === 'income' ? 'text-emerald-600' : 'text-amber-600'}`}>
                             {t.type === 'income' ? '+' : ''}{formatCurrency(t.amount)}
                           </span>
-                          <button onClick={() => setViewTx(t)} title="View" className="text-muted-foreground hover:text-foreground"><Eye className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => setEditingTx(t)} title="Edit" className="text-muted-foreground hover:text-foreground"><Pencil className="w-3.5 h-3.5" /></button>
+                          <button onClick={e => { e.stopPropagation(); setEditingTx(t) }} title="Edit" className="text-muted-foreground hover:text-foreground"><Pencil className="w-3.5 h-3.5" /></button>
                         </div>
                       </div>
                     </div>
