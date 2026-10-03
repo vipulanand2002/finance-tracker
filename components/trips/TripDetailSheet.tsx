@@ -357,7 +357,9 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
   if (!trip) return null
 
   // Trips only track expenses — income is irrelevant in trip context
-  const expenses = transactions.filter(t => t.type === 'expense')
+  const expenses = transactions
+    .filter(t => t.type === 'expense')
+    .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '') || (b.created_at ?? '').localeCompare(a.created_at ?? ''))
   // Discrete expenses are private — excluded from trip totals and category breakdown
   const publicExpenses = expenses.filter(t => !t.is_discrete)
   const totalSpent = publicExpenses.reduce((s, t) => s + t.amount, 0)
@@ -1247,38 +1249,58 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
               ) : expenses.length === 0 ? (
                 <p className="text-sm text-muted-foreground py-2">No expenses yet. Add one or link existing.</p>
               ) : txViewMode === 'all' ? (
-                /* ── All: flat list ── */
-                <div className="divide-y border rounded-lg overflow-hidden">
-                  {expenses.map(t => (
-                    <div key={t.id} className={`flex items-center gap-2 py-2.5 px-3 group ${t.is_discrete ? 'opacity-75' : ''}`}>
-                      <span className="text-xs text-muted-foreground w-14 shrink-0">{format(parseISO(t.date), 'd MMM')}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <p className="text-sm truncate">{t.description ?? t.category}</p>
-                          {t.is_discrete && (
-                            <span className="flex items-center gap-0.5 text-[10px] text-amber-600 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-700 rounded px-1 py-0.5 shrink-0">
-                              <EyeOff className="w-2.5 h-2.5" /> Private
-                            </span>
-                          )}
-                          {t.receipt_url && <Paperclip className="w-3 h-3 text-muted-foreground shrink-0" />}
+                /* ── All: grouped by date (newest first) ── */
+                <div className="space-y-3">
+                  {(() => {
+                    const groups = new Map<string, typeof expenses>()
+                    for (const t of expenses) {
+                      if (!groups.has(t.date)) groups.set(t.date, [])
+                      groups.get(t.date)!.push(t)
+                    }
+                    return [...groups.entries()].map(([date, txs]) => (
+                      <div key={date} className="rounded-xl border overflow-hidden">
+                        <div className="flex items-center justify-between px-3 py-2 bg-muted/60">
+                          <span className="text-xs font-semibold">{format(parseISO(date), 'EEE, d MMM yyyy')}</span>
+                          <span className="text-xs font-medium text-muted-foreground tabular-nums">
+                            {formatCurrency(txs.filter(t => !t.is_discrete).reduce((s, t) => s + t.amount, 0))}
+                          </span>
                         </div>
-                        <p className="text-xs text-muted-foreground">{t.category}</p>
+                        <div className="divide-y">
+                          {txs.map(t => (
+                            <div key={t.id} className={`flex items-center gap-3 py-2.5 px-3 group ${t.is_discrete ? 'opacity-70' : ''}`}>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <p className="text-sm font-medium truncate">{t.description ?? t.category}</p>
+                                  {t.is_discrete && (
+                                    <span className="flex items-center gap-0.5 text-[10px] text-amber-600 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-700 rounded px-1 py-0.5 shrink-0">
+                                      <EyeOff className="w-2.5 h-2.5" /> Private
+                                    </span>
+                                  )}
+                                  {t.receipt_url && <Paperclip className="w-3 h-3 text-muted-foreground shrink-0" />}
+                                </div>
+                                <p className="text-xs text-muted-foreground truncate">{t.category}</p>
+                              </div>
+                              <span className="text-sm font-semibold shrink-0 text-red-600 tabular-nums">-{formatCurrency(t.amount)}</span>
+                              <div className="flex items-center gap-1 shrink-0 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                                {t.user_id === currentUserId && (
+                                  <button onClick={() => setEditingTx(t)} title="Edit transaction"
+                                    className="p-1 text-muted-foreground hover:text-foreground">
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                {!trip.is_closed && (
+                                  <button onClick={() => unlinkTransaction(t.id)} title="Unlink from trip"
+                                    className="p-1 text-muted-foreground hover:text-destructive">
+                                    <Link2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                      <span className="text-sm font-semibold shrink-0 text-red-600">-{formatCurrency(t.amount)}</span>
-                      {t.user_id === currentUserId && (
-                        <button onClick={() => setEditingTx(t)} title="Edit transaction"
-                          className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity shrink-0">
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      {!trip.is_closed && (
-                        <button onClick={() => unlinkTransaction(t.id)} title="Unlink from trip"
-                          className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity shrink-0">
-                          <Link2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                    ))
+                  })()}
                 </div>
               ) : txViewMode === 'category' ? (
                 /* ── Category view: grouped by category ── */
@@ -1320,13 +1342,13 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                                   <span className="text-sm font-semibold shrink-0 text-red-600">-{formatCurrency(t.amount)}</span>
                                   {t.user_id === currentUserId && (
                                     <button onClick={() => setEditingTx(t)} title="Edit transaction"
-                                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity shrink-0">
+                                      className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity shrink-0">
                                       <Pencil className="w-3.5 h-3.5" />
                                     </button>
                                   )}
                                   {!trip.is_closed && (
                                     <button onClick={() => unlinkTransaction(t.id)} title="Unlink from trip"
-                                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity shrink-0">
+                                      className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity shrink-0">
                                       <Link2 className="w-3.5 h-3.5" />
                                     </button>
                                   )}
@@ -1399,13 +1421,13 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                                   <span className="text-sm font-semibold shrink-0 text-red-600">-{formatCurrency(t.amount)}</span>
                                   {t.user_id === currentUserId && (
                                     <button onClick={() => setEditingTx(t)} title="Edit transaction"
-                                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity shrink-0">
+                                      className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity shrink-0">
                                       <Pencil className="w-3.5 h-3.5" />
                                     </button>
                                   )}
                                   {!trip.is_closed && (
                                     <button onClick={() => unlinkTransaction(t.id)} title="Unlink from trip"
-                                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity shrink-0">
+                                      className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity shrink-0">
                                       <Link2 className="w-3.5 h-3.5" />
                                     </button>
                                   )}
