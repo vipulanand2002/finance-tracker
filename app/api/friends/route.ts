@@ -164,31 +164,49 @@ async function backfillAllReferences(
     await run('tagged_payments(from)', svc.from('tagged_payments').update(fromPatch).eq('to_user_id', userId).eq('from_email', oldEmail))
   }
 
-  // The remaining tables have NOT NULL email columns — only updatable to a real
-  // new email (can't be nulled). When the email is cleared we still propagate a rename.
-  if (oldEmail && (newEmail || nameChanged)) {
+  // The remaining tables have NOT NULL email columns (no-email people are stored
+  // with a `_nomail_…@local` placeholder, not null). We match rows two ways: by the
+  // old email, and — when adding/changing an email on a name-only member — by name
+  // against the placeholder. Email is only ever set to a real new email (can't null).
+  const byOldEmail = !!oldEmail && (newEmail || nameChanged)
+  const byName = !!newEmail && !!oldName
+  if (byOldEmail || byName) {
     // ── trip_invitations sent by this user
-    const invPatch: Record<string, unknown> = {}
-    if (newEmail) invPatch.invitee_email = newEmail
-    if (nameChanged) invPatch.invitee_name = newName
-    await run('trip_invitations', svc.from('trip_invitations').update(invPatch).eq('inviter_id', userId).eq('invitee_email', oldEmail))
+    if (byOldEmail) {
+      const p: Record<string, unknown> = {}
+      if (newEmail) p.invitee_email = newEmail
+      if (nameChanged) p.invitee_name = newName
+      await run('trip_invitations', svc.from('trip_invitations').update(p).eq('inviter_id', userId).eq('invitee_email', oldEmail))
+    }
+    if (byName) {
+      const p: Record<string, unknown> = { invitee_email: newEmail }
+      if (nameChanged) p.invitee_name = newName
+      await run('trip_invitations(name)', svc.from('trip_invitations').update(p).eq('inviter_id', userId).ilike('invitee_name', oldName!).like('invitee_email', '_nomail_%'))
+    }
 
     // ── trips owned by this user → trip_members (+ trip_personal_budgets)
     const { data: userTrips } = await svc.from('trips').select('id').eq('user_id', userId)
     const tripIds = (userTrips ?? []).map((t: { id: string }) => t.id)
     if (tripIds.length > 0) {
       // UNIQUE(trip_id,email) / UNIQUE(trip_id,user_id) can collide → tolerate
-      const tmPatch: Record<string, unknown> = {}
-      if (newEmail) tmPatch.email = newEmail
-      if (nameChanged) tmPatch.name = newName
-      await run('trip_members', svc.from('trip_members').update(tmPatch).in('trip_id', tripIds).eq('email', oldEmail))
-      if (newEmail) {
+      if (byOldEmail) {
+        const p: Record<string, unknown> = {}
+        if (newEmail) p.email = newEmail
+        if (nameChanged) p.name = newName
+        await run('trip_members', svc.from('trip_members').update(p).in('trip_id', tripIds).eq('email', oldEmail))
+      }
+      if (byName) {
+        const p: Record<string, unknown> = { email: newEmail }
+        if (nameChanged) p.name = newName
+        await run('trip_members(name)', svc.from('trip_members').update(p).in('trip_id', tripIds).ilike('name', oldName!).like('email', '_nomail_%'))
+      }
+      if (oldEmail && newEmail) {
         await run('trip_personal_budgets', svc.from('trip_personal_budgets').update({ user_email: newEmail, user_id: newAccountId }).in('trip_id', tripIds).eq('user_email', oldEmail))
       }
     }
 
     // ── split_notifications created by this user
-    if (newEmail) {
+    if (oldEmail && newEmail) {
       await run('split_notifications', svc.from('split_notifications').update({ invitee_email: newEmail }).eq('creator_email', userEmail).eq('invitee_email', oldEmail))
     }
   }
