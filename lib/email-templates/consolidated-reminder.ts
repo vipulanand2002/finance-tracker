@@ -212,8 +212,10 @@ export function buildConsolidatedReminderEmail(opts: {
                   <!-- Greeting -->
                   <p style="margin:0 0 6px;font-size:14px;font-weight:600;color:#1e293b;">Dear ${displayRecipient},</p>
                   <p style="margin:0 0 24px;font-size:13px;color:#64748b;line-height:1.7;">
-                    You have ${splitCount === 1 ? 'a pending payment' : `<strong style="color:#1e293b;">${splitCount} pending payments</strong>`} for shared expenses. Please review each item below and settle at your earliest convenience.
+                    You have ${splitCount === 1 ? 'a pending payment' : `<strong style="color:#1e293b;">${splitCount} pending payments</strong>`} for shared expenses. Here's what you owe — the itemised breakdown follows below.
                   </p>
+
+                  ${oweBlock}
 
                   <!-- Split cards -->
                   ${splitCards}
@@ -235,8 +237,6 @@ export function buildConsolidatedReminderEmail(opts: {
                     </tr>
                   </table>
                   ` : ''}
-
-                  ${oweBlock}
 
                 </td>
               </tr>
