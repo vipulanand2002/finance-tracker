@@ -46,8 +46,9 @@ export function buildConsolidatedReminderEmail(opts: {
   creatorName: string
   splits: ConsolidatedSplitItem[]
   appUrl: string
+  oweByPerson?: { name: string; amount: number }[]
 }): { subject: string; html: string } {
-  const { recipientName, creatorName, splits, appUrl } = opts
+  const { recipientName, creatorName, splits, appUrl, oweByPerson = [] } = opts
 
   const displayCreator = capitalize(creatorName)
   const displayRecipient = capitalize(recipientName.split(' ')[0])
@@ -61,6 +62,34 @@ export function buildConsolidatedReminderEmail(opts: {
   const subject = splitCount === 1
     ? `${reminderLabel}Payment Reminder: ${splits[0].title} — ${fmt(splits[0].amountOwed)} due`
     : `${reminderLabel}Payment Reminder: ${fmt(totalOwed)} due across ${splitCount} expenses`
+
+  // "Who you owe" tally — the recipient's outstanding shares grouped by the
+  // person who paid each bill. Shown below the expenses so they know exactly
+  // how much to send to each member.
+  const oweTally = oweByPerson.filter(o => o.amount > 0.009)
+  const oweBlock = oweTally.length === 0 ? '' : `
+                  <!-- Who you owe -->
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:8px;">
+                    <tr>
+                      <td style="padding:16px 18px;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;">
+                        <div style="font-size:10px;font-weight:700;color:#9a3412;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">
+                          ${oweTally.length > 1 ? 'Who you owe' : 'Pay to'}
+                        </div>
+                        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                          ${oweTally.map((o, i) => `
+                          <tr>
+                            <td style="padding:7px 0;${i < oweTally.length - 1 ? 'border-bottom:1px solid #fde4c4;' : ''}vertical-align:middle;">
+                              <span style="display:inline-block;width:24px;height:24px;border-radius:50%;background:#c2410c;text-align:center;line-height:24px;font-size:11px;font-weight:700;color:#fff;vertical-align:middle;">${capitalize(o.name).charAt(0)}</span>
+                              <span style="display:inline-block;vertical-align:middle;margin-left:8px;font-size:13px;font-weight:600;color:#7c2d12;">${capitalize(o.name)}</span>
+                            </td>
+                            <td style="padding:7px 0;${i < oweTally.length - 1 ? 'border-bottom:1px solid #fde4c4;' : ''}text-align:right;vertical-align:middle;white-space:nowrap;font-size:14px;font-weight:800;color:#9a3412;">
+                              ${fmt(o.amount)}
+                            </td>
+                          </tr>`).join('')}
+                        </table>
+                      </td>
+                    </tr>
+                  </table>`
 
   const splitCards = splits.map((sp, idx) => {
     const dateStr = new Date(sp.date + 'T00:00:00').toLocaleDateString('en-IN', {
@@ -204,6 +233,8 @@ export function buildConsolidatedReminderEmail(opts: {
                     </tr>
                   </table>
                   ` : ''}
+
+                  ${oweBlock}
 
                 </td>
               </tr>

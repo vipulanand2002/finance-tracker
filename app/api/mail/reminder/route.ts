@@ -43,8 +43,14 @@ type Split = {
   receipt_url_2: string | null
   receipt_name: string | null
   receipt_name_2: string | null
+  created_by: string | null
+  paid_by?: string | null
   split_participants: Participant[]
 }
+
+// Columns selected for every split lookup. paid_by is appended separately so we
+// can fall back gracefully if that column hasn't been migrated yet.
+const SPLIT_COLS = 'id, title, total_amount, category, date, description, reminder_count, last_reminder_sent_at, receipt_url, receipt_url_2, receipt_name, receipt_name_2, created_by, split_participants(*)'
 
 // Group splits by recipient email, collecting the split details + their share.
 // Returns a Map<email, { name, splits[] }> ready for one consolidated email per person.
@@ -130,22 +136,32 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'no_pending_splits' }, { status: 400 })
     }
 
-    const { data: splitData } = await supabase
+    const q1 = await supabase
       .from('expense_splits')
-      .select('id, title, total_amount, category, date, description, reminder_count, last_reminder_sent_at, receipt_url, receipt_url_2, receipt_name, receipt_name_2, split_participants(*)')
+      .select(`${SPLIT_COLS}, paid_by`)
       .in('id', splitIds)
-      .eq('created_by', user.id)
+      .eq('created_by', user.id) as { data: Split[] | null; error: { message?: string } | null }
+    let splitData = q1.data
+    if (q1.error?.message?.includes('paid_by')) {
+      const q2 = await supabase.from('expense_splits').select(SPLIT_COLS).in('id', splitIds).eq('created_by', user.id) as { data: Split[] | null }
+      splitData = q2.data
+    }
 
     splits = (splitData ?? []) as Split[]
 
   } else if (type === 'trip') {
     if (!trip_id) return NextResponse.json({ error: 'trip_id required' }, { status: 400 })
 
-    const { data: splitData } = await supabase
+    const q1 = await supabase
       .from('expense_splits')
-      .select('id, title, total_amount, category, date, description, reminder_count, last_reminder_sent_at, receipt_url, receipt_url_2, receipt_name, receipt_name_2, split_participants(*)')
+      .select(`${SPLIT_COLS}, paid_by`)
       .eq('trip_id', trip_id)
-      .eq('created_by', user.id)
+      .eq('created_by', user.id) as { data: Split[] | null; error: { message?: string } | null }
+    let splitData = q1.data
+    if (q1.error?.message?.includes('paid_by')) {
+      const q2 = await supabase.from('expense_splits').select(SPLIT_COLS).eq('trip_id', trip_id).eq('created_by', user.id) as { data: Split[] | null }
+      splitData = q2.data
+    }
 
     const all = (splitData ?? []) as Split[]
     splits = all.filter(s => s.split_participants.some(p => !p.is_paid && p.participant_email))
@@ -195,6 +211,23 @@ export async function POST(request: Request) {
   for (const [email, entry] of recipients) {
     const registered = allRegisteredNames.get(email)
     if (registered) entry.name = registered
+  }
+
+  // Resolve the display name of every creditor (the person who actually paid a
+  // split = paid_by ?? created_by). Your own splits are attributed to you; any
+  // on-behalf split is attributed to the friend who fronted the bill. This feeds
+  // the "who you owe" tally at the bottom of each reminder.
+  const creditorNames = new Map<string, string>()
+  creditorNames.set(user.id, creatorName)
+  const creditorIds = Array.from(new Set(
+    splits.map(s => (s.paid_by || s.created_by || user.id)).filter(Boolean) as string[]
+  )).filter(id => id !== user.id)
+  if (creditorIds.length > 0) {
+    const svc = createServiceClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+    const { data: creditorProfiles } = await svc.from('profiles').select('id, full_name, email').in('id', creditorIds)
+    for (const cp of creditorProfiles ?? []) {
+      creditorNames.set(cp.id, cp.full_name || cp.email?.split('@')[0] || 'Someone')
+    }
   }
 
   const transporter = createTransporter()
@@ -250,9 +283,21 @@ export async function POST(request: Request) {
       }
     }
 
+    // Tally this recipient's unpaid shares by whoever they owe (the payer of
+    // each split), so the email can show "pay X to A, Y to B".
+    const byCreditor = new Map<string, number>()
+    for (const { split, amountOwed } of recipientSplits) {
+      const cId = (split.paid_by || split.created_by || user.id) as string
+      byCreditor.set(cId, (byCreditor.get(cId) ?? 0) + amountOwed)
+    }
+    const oweByPerson = Array.from(byCreditor.entries())
+      .map(([id, amount]) => ({ name: creditorNames.get(id) ?? 'Someone', amount }))
+      .sort((a, b) => b.amount - a.amount)
+
     const { subject, html } = buildConsolidatedReminderEmail({
       recipientName: name,
       creatorName,
+      oweByPerson,
       splits: recipientSplits.map(({ split, amountOwed }) => ({
         title: split.title,
         total_amount: split.total_amount,
