@@ -150,6 +150,14 @@ async function backfillAllReferences(
   if (oldAccountId && idChanged) {
     await run('expense_splits.paid_by', svc.from('expense_splits').update({ paid_by: newAccountId }).eq('created_by', userId).eq('paid_by', oldAccountId))
   }
+  // ── expense_splits.paid_by_email/name — the UNREGISTERED email-keyed payer, so
+  // on-behalf splits where this contact is the payer follow their new email/name
+  // (otherwise the old email lingers and the person shows up twice in reminders).
+  if (oldEmail) {
+    const pePatch: Record<string, unknown> = { paid_by_email: newEmail }
+    if (nameChanged) pePatch.paid_by_name = newName
+    await run('expense_splits.paid_by_email', svc.from('expense_splits').update(pePatch).eq('created_by', userId).eq('paid_by_email', oldEmail))
+  }
 
   // ── tagged_payments — to_email is NOT NULL (only moves to a real new email);
   //    from_email is nullable.

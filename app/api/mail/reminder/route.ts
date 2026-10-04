@@ -249,6 +249,14 @@ export async function POST(request: Request) {
       if (!nameByEmail.has(em)) nameByEmail.set(em, s.paid_by_name)
     }
   }
+  // Last-resort: an unregistered participant with no resolved name shows their
+  // participant_name instead of the raw email prefix (e.g. "Simran" not "Mustafa...").
+  for (const s of splits) {
+    for (const p of s.split_participants) {
+      const em = p.participant_email?.toLowerCase()
+      if (em && p.participant_name && !nameByEmail.has(em)) nameByEmail.set(em, p.participant_name)
+    }
+  }
   const nameOfToken = (token: string) =>
     token.startsWith('id:')
       ? creditorNames.get(token.slice(3)) ?? 'Someone'

@@ -125,11 +125,19 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
     const unregPayer = !s.paid_by && !!s.paid_by_email
     const creditorId = s.paid_by || (unregPayer ? null : s.created_by)
     if (!unregPayer && creditorId === myId) {
+      // I paid → the counterparty's unpaid share is owed to me
       for (const p of s.split_participants) if (!p.is_paid && matchesCp(p)) splitTheyOwe += p.amount_owed
     } else {
-      const mine = s.split_participants.find(p =>
-        (p.participant_user_id && p.participant_user_id === myId) || (myEmail && p.participant_email?.toLowerCase() === myEmail))
-      if (mine && !mine.is_paid) splitYouOwe += mine.amount_owed
+      // Someone else paid → I owe them. Only count it here when THIS counterparty
+      // is the payer (matches the Balances tab), not just a co-participant.
+      const payerIsCp = unregPayer
+        ? s.paid_by_email?.toLowerCase() === emailLower
+        : (() => { const payer = s.split_participants.find(p => p.participant_user_id === creditorId); return !!payer && matchesCp(payer) })()
+      if (payerIsCp) {
+        const mine = s.split_participants.find(p =>
+          (p.participant_user_id && p.participant_user_id === myId) || (myEmail && p.participant_email?.toLowerCase() === myEmail))
+        if (mine && !mine.is_paid) splitYouOwe += mine.amount_owed
+      }
     }
   }
   const txnOwed = txns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
@@ -186,18 +194,24 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
                 {splits.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No splits with {counterparty?.name}.</p>
                 ) : splits.map(s => {
-                  const iAmPayer = s.paid_by ? s.paid_by === myId : (s.paid_by_email ? false : s.created_by === myId)
-                  // Show the amount that flows between the two of you for this split:
-                  //  - I paid → what the other person still owes me
-                  //  - they paid → what I (the viewer) still owe them (my contribution)
-                  let amt = 0
+                  // Who paid this bill, and does the amount flow between the two of you?
+                  const unregP = !s.paid_by && !!s.paid_by_email
+                  const credId = s.paid_by || (unregP ? null : s.created_by)
+                  const iAmPayer = !unregP && credId === myId
+                  const payerIsCp = unregP
+                    ? s.paid_by_email?.toLowerCase() === emailLower
+                    : (() => { const payer = s.split_participants.find(p => p.participant_user_id === credId); return !!payer && matchesCp(payer) })()
+                  // I paid → what they still owe me · they paid → what I still owe them ·
+                  // a third party paid → nothing flows between us on this split.
+                  let amt = 0, label = ''
                   if (iAmPayer) {
                     amt = s.split_participants.filter(matchesCp).reduce((a, p) => a + (p.is_paid ? 0 : p.amount_owed), 0)
-                  } else {
+                    label = 'they owe'
+                  } else if (payerIsCp) {
                     const mine = s.split_participants.find(isSelf)
                     amt = mine && !mine.is_paid ? mine.amount_owed : 0
+                    label = 'your share'
                   }
-                  const label = iAmPayer ? 'they owe' : 'your share'
                   return (
                     <div key={s.id} onClick={() => setViewSplit(s)}
                       className="rounded-lg border p-3 cursor-pointer hover:bg-muted/40 transition-colors">

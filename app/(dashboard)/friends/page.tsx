@@ -123,6 +123,8 @@ export default function FriendsPage() {
 
   // Tagged transactions (expenses tagged to this friend, no split linked)
   const [taggedTxns, setTaggedTxns] = useState<TaggedTxn[]>([])
+  // Cross-user tagged payments involving this friend (same source the Balances tab uses)
+  const [taggedPayments, setTaggedPayments] = useState<{ from_email: string | null; amount: number; kind?: string }[]>([])
 
   // Split modal
   const [splitOpen, setSplitOpen] = useState(false)
@@ -190,10 +192,11 @@ export default function FriendsPage() {
   // ── Load detail when friend selected ──────────────────────────────────────
 
   useEffect(() => {
-    if (!selected) { setMessages([]); setSplits([]); setTaggedTxns([]); return }
+    if (!selected) { setMessages([]); setSplits([]); setTaggedTxns([]); setTaggedPayments([]); return }
     if (selected.connected && selected.friend_user_id) loadMessages(selected.friend_user_id)
     loadSplits(selected)
     loadTaggedTxns(selected)
+    loadTaggedPayments(selected)
   }, [selected?.id])
 
   function loadMessages(friendUserId: string) {
@@ -229,6 +232,16 @@ export default function FriendsPage() {
         // Show all tagged transactions; owed calc only uses unsplit expenses
         setTaggedTxns(Array.isArray(d) ? d.filter(t => !t.split_id) : [])
       })
+      .catch(() => {})
+  }
+
+  function loadTaggedPayments(friend: Friend) {
+    const el = friend.email?.toLowerCase() ?? ''
+    if (!el) { setTaggedPayments([]); return }
+    fetch('/api/tagged-payments')
+      .then(r => r.json())
+      .then((d: { from_email: string | null; amount: number; kind?: string }[]) =>
+        setTaggedPayments(Array.isArray(d) ? d.filter(p => p.from_email?.toLowerCase() === el) : []))
       .catch(() => {})
   }
 
@@ -407,7 +420,7 @@ export default function FriendsPage() {
       // so a bill a third party paid doesn't get charged to this friend.
       const payerIsFriend = unregPayer
         ? s.paid_by_email?.toLowerCase() === selectedEmailLower
-        : (!!selected?.friend_user_id && s.paid_by === selected.friend_user_id)
+        : (!!selected?.friend_user_id && creditorId === selected.friend_user_id)
       if (payerIsFriend) {
         const mine = (s.split_participants ?? []).find(isSelf)
         if (mine && !mine.is_paid) splitYouOwe += mine.amount_owed
@@ -416,8 +429,12 @@ export default function FriendsPage() {
   }
   const txnOwed = taggedTxns.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
   const txnReceived = taggedTxns.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
+  // Cross-user tagged payments (same as the Balances tab):
+  //   'charge' → they paid for you (you owe them more) · else → you paid them (reduces it)
+  const paidToThem = taggedPayments.filter(p => p.kind !== 'charge').reduce((sum, p) => sum + p.amount, 0)
+  const chargedToThem = taggedPayments.filter(p => p.kind === 'charge').reduce((sum, p) => sum + p.amount, 0)
   // positive = friend owes you; negative = you owe friend
-  const netBalance = splitTheyOwe - splitYouOwe + txnOwed - txnReceived
+  const netBalance = splitTheyOwe - splitYouOwe + txnOwed - txnReceived + paidToThem - chargedToThem
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -694,12 +711,14 @@ export default function FriendsPage() {
                               {formatCurrency(Math.abs(netBalance))}
                             </p>
                           )}
-                          {(splitTheyOwe > 0 || splitYouOwe > 0 || txnOwed > 0 || txnReceived > 0) && (
+                          {(splitTheyOwe > 0 || splitYouOwe > 0 || txnOwed > 0 || txnReceived > 0 || paidToThem > 0 || chargedToThem > 0) && (
                             <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                               {splitTheyOwe > 0 && <span>They owe (splits): <span className="font-medium text-foreground">{formatCurrency(splitTheyOwe)}</span></span>}
                               {splitYouOwe > 0 && <span>You owe (splits): <span className="font-medium text-foreground">{formatCurrency(splitYouOwe)}</span></span>}
                               {txnOwed > 0 && <span>Expenses: <span className="font-medium text-foreground">{formatCurrency(txnOwed)}</span></span>}
                               {txnReceived > 0 && <span>Received: <span className="font-medium text-foreground">{formatCurrency(txnReceived)}</span></span>}
+                              {paidToThem > 0 && <span>You paid: <span className="font-medium text-foreground">{formatCurrency(paidToThem)}</span></span>}
+                              {chargedToThem > 0 && <span>They paid for you: <span className="font-medium text-foreground">{formatCurrency(chargedToThem)}</span></span>}
                             </div>
                           )}
                           <p className="text-[11px] text-muted-foreground mt-1.5">Tap to view &amp; edit splits and transactions</p>
