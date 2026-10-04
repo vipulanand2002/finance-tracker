@@ -16,7 +16,7 @@ import { formatCurrency } from '@/lib/utils'
 import { FriendPicker } from '@/components/friends/FriendPicker'
 import type { Friend, Trip } from '@/types'
 
-interface Participant { name: string; email: string; amount: string; isPaid?: boolean }
+interface Participant { name: string; email: string; amount: string; isPaid?: boolean; manual?: boolean }
 interface CardInfo { id: string; card_name: string }
 
 export interface EditingSplit {
@@ -111,6 +111,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
           email: p.participant_email ?? '',
           amount: String(p.amount_owed),
           isPaid: p.is_paid,
+          manual: true, // existing amounts are explicit — don't auto-overwrite
         }))
         setTitle(editingSplit.title)
         setTotalAmount(String(editingSplit.total_amount))
@@ -200,15 +201,60 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
     setReceiptUrl2(''); setReceiptName2(''); setReceiptCustomName2('')
   }
 
+  // Distribute the unallocated remainder equally across the participants whose
+  // amount hasn't been manually set. Only named rows take a share; rows the user
+  // already typed an amount into (manual) keep it and are subtracted first.
+  function autoBalance(list: Participant[], totalStr: string): Participant[] {
+    const total = parseFloat(totalStr)
+    if (!total || total <= 0) return list
+    const named = list.map((p, i) => ({ p, i })).filter(x => x.p.name.trim())
+    const autoIdx = named.filter(x => !x.p.manual).map(x => x.i)
+    if (autoIdx.length === 0) return list
+    const manualSum = named
+      .filter(x => x.p.manual)
+      .reduce((s, x) => s + (parseFloat(x.p.amount) || 0), 0)
+    const remaining = Math.max(0, total - manualSum)
+    const base = Math.floor((remaining / autoIdx.length) * 100) / 100
+    const lastAuto = autoIdx[autoIdx.length - 1]
+    const autoSet = new Set(autoIdx)
+    let assigned = 0
+    return list.map((p, i) => {
+      if (!autoSet.has(i)) return p
+      // Last auto row absorbs the rounding remainder so the shares sum exactly.
+      const val = i === lastAuto ? Math.round((remaining - assigned) * 100) / 100 : base
+      assigned += base
+      return { ...p, amount: val.toFixed(2) }
+    })
+  }
+
   function splitEqually() {
     const total = parseFloat(totalAmount)
     if (!total || participants.length === 0) return
-    const each = (total / participants.length).toFixed(2)
-    setParticipants(p => p.map(pt => ({ ...pt, amount: each })))
+    // Clear every manual flag so the whole amount splits evenly across named rows.
+    setParticipants(prev => autoBalance(prev.map(p => ({ ...p, manual: false })), totalAmount))
+  }
+
+  // Changing the total re-splits the remainder across the untouched rows.
+  function handleTotalChange(val: string) {
+    setTotalAmount(val)
+    setParticipants(prev => autoBalance(prev, val))
+  }
+
+  // Typing an amount pins that row (manual) and re-splits the rest; clearing it
+  // returns the row to the auto pool.
+  function updateAmount(i: number, val: string) {
+    setParticipants(prev => autoBalance(
+      prev.map((p, idx) => idx === i ? { ...p, amount: val, manual: val.trim() !== '' } : p),
+      totalAmount,
+    ))
   }
 
   function updateParticipant(i: number, key: keyof Participant, val: string) {
-    setParticipants(prev => prev.map((p, idx) => idx === i ? { ...p, [key]: val } : p))
+    setParticipants(prev => {
+      const next = prev.map((p, idx) => idx === i ? { ...p, [key]: val } : p)
+      // Naming a new row makes it eligible for an auto share; re-split for it.
+      return key === 'name' ? autoBalance(next, totalAmount) : next
+    })
   }
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -286,7 +332,10 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
   }
 
   function addParticipant() { setParticipants(p => [...p, emptyParticipant()]) }
-  function removeParticipant(i: number) { setParticipants(p => p.filter((_, idx) => idx !== i)) }
+  function removeParticipant(i: number) {
+    // Removing a row frees its share back to the auto pool.
+    setParticipants(p => autoBalance(p.filter((_, idx) => idx !== i), totalAmount))
+  }
 
   function handleTripChange(newTripId: string | null) {
     setSelectedTripId(newTripId)
@@ -318,7 +367,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
     }
 
     if (rows.length === 0) return
-    setParticipants(rows.length >= 2 ? rows : [...rows, emptyParticipant()])
+    setParticipants(autoBalance(rows.length >= 2 ? rows : [...rows, emptyParticipant()], totalAmount))
   }
 
   function addFriendAsParticipant(friend: Friend) {
@@ -330,9 +379,9 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
     if (alreadyAdded) { toast.error(`${friend.name} is already added`); return }
     const newRow: Participant = { name: friend.name, email: friend.email ?? '', amount: '' }
     if (emptyIdx !== -1) {
-      setParticipants(prev => prev.map((p, i) => i === emptyIdx ? newRow : p))
+      setParticipants(prev => autoBalance(prev.map((p, i) => i === emptyIdx ? newRow : p), totalAmount))
     } else {
-      setParticipants(prev => [...prev, newRow])
+      setParticipants(prev => autoBalance([...prev, newRow], totalAmount))
     }
   }
 
@@ -441,7 +490,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
 
             <div className="space-y-1">
               <Label>Total Amount (₹) *</Label>
-              <Input type="number" min="0.01" step="0.01" placeholder="0.00" value={totalAmount} onChange={e => setTotalAmount(e.target.value)} required />
+              <Input type="number" min="0.01" step="0.01" placeholder="0.00" value={totalAmount} onChange={e => handleTotalChange(e.target.value)} required />
             </div>
 
             <div className="space-y-1">
@@ -641,7 +690,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
                         step="0.01"
                         placeholder="0"
                         value={p.amount}
-                        onChange={e => updateParticipant(i, 'amount', e.target.value)}
+                        onChange={e => updateAmount(i, e.target.value)}
                       />
                     </div>
                   </div>
@@ -671,7 +720,7 @@ export default function SplitModal({ open, onClose, onSaved, defaultTitle, defau
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => setParticipants(prev => [{ name: myName, email: myEmail, amount: '' }, ...prev])}
+                  onClick={() => setParticipants(prev => autoBalance([{ name: myName, email: myEmail, amount: '' }, ...prev], totalAmount))}
                 >
                   <UserPlus className="w-3.5 h-3.5 mr-1" /> Add me
                 </Button>
