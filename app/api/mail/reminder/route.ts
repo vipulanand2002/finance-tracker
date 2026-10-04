@@ -257,16 +257,36 @@ export async function POST(request: Request) {
       if (em && p.participant_name && !nameByEmail.has(em)) nameByEmail.set(em, p.participant_name)
     }
   }
+  // Canonicalise people through the SENDER's contacts: a name-only row, an email
+  // row, or even a stale email for the same person all collapse to one identity,
+  // so nobody can show up twice in the summary (the "Simran twice" class of bug).
+  const { data: myContacts } = await supabase.from('contacts').select('name, email').eq('user_id', user.id)
+  const contactEmailByName = new Map<string, string>()
+  for (const c of (myContacts ?? []) as { name: string | null; email: string | null }[]) {
+    if (c.email && c.name) {
+      const em = c.email.toLowerCase()
+      contactEmailByName.set(c.name.trim().toLowerCase(), em)
+      if (!nameByEmail.has(em)) nameByEmail.set(em, c.name.trim())
+    }
+  }
+  // Map a (name, email) to the contact's current email when the name matches a
+  // saved contact; otherwise fall back to the email as-is.
+  const canonEmail = (name: string | null | undefined, email: string | null | undefined): string | null => {
+    const n = name?.trim().toLowerCase()
+    if (n && contactEmailByName.has(n)) return contactEmailByName.get(n)!
+    return email?.toLowerCase() ?? null
+  }
+
   const nameOfToken = (token: string) =>
     token.startsWith('id:')
       ? creditorNames.get(token.slice(3)) ?? 'Someone'
       : nameByEmail.get(token) ?? token.split('@')[0]
 
-  // The creditor's token: registered → their email/id; unregistered → paid_by_email;
-  // else the author (normal split).
+  // The creditor's token: registered → their email/id; unregistered → the contact's
+  // current email (canonicalised by payer name) or paid_by_email; else the author.
   const creditorTokenOf = (s: Split) =>
     s.paid_by ? tokenOf(s.paid_by)
-      : (s.paid_by_email ? s.paid_by_email.toLowerCase() : tokenOf((s.created_by ?? user.id) as string))
+      : (s.paid_by_email ? (canonEmail(s.paid_by_name, s.paid_by_email) ?? s.paid_by_email.toLowerCase()) : tokenOf((s.created_by ?? user.id) as string))
 
   const transporter = createTransporter()
   let sent = 0
@@ -339,9 +359,9 @@ export async function POST(request: Request) {
           if (p.is_paid) continue
           const pe = p.participant_email?.toLowerCase()
           if (pe === email) continue
-          const tk = pe || (p.participant_name?.trim() ? `name:${p.participant_name.trim().toLowerCase()}` : '')
-          if (!tk) continue
-          if (!pe && p.participant_name) tokenName.set(tk, p.participant_name.trim())
+          const tk = canonEmail(p.participant_name, pe) || (p.participant_name?.trim() ? `name:${p.participant_name.trim().toLowerCase()}` : '')
+          if (!tk || tk === email) continue
+          if (tk.startsWith('name:') && p.participant_name) tokenName.set(tk, p.participant_name.trim())
           oweFrom.set(tk, (oweFrom.get(tk) ?? 0) + p.amount_owed)
         }
       } else {
