@@ -48,8 +48,9 @@ export function buildConsolidatedReminderEmail(opts: {
   appUrl: string
   oweByPerson?: { name: string; youOwe: number; owedBack: number; net: number }[]
   amountDue?: number
+  owedToYouSplits?: ConsolidatedSplitItem[]
 }): { subject: string; html: string } {
-  const { recipientName, creatorName, splits, appUrl, oweByPerson = [], amountDue } = opts
+  const { recipientName, creatorName, splits, appUrl, oweByPerson = [], amountDue, owedToYouSplits = [] } = opts
 
   const displayCreator = capitalize(creatorName)
   const displayRecipient = capitalize(recipientName.split(' ')[0])
@@ -108,7 +109,10 @@ export function buildConsolidatedReminderEmail(opts: {
                     </tr>
                   </table>`
 
-  const splitCards = splits.map((sp, idx) => {
+  // One expense card. `shareLabel` names the highlighted figure ("Your Share" in
+  // the you-owe section, "Owed to You" in the others-owe-you section). Reminder
+  // meta (1st/2nd reminder) only shows in the you-owe section.
+  const renderCard = (sp: ConsolidatedSplitItem, idx: number, count: number, shareLabel: string, showMeta: boolean) => {
     const dateStr = new Date(sp.date + 'T00:00:00').toLocaleDateString('en-IN', {
       day: 'numeric', month: 'long', year: 'numeric',
     })
@@ -130,7 +134,6 @@ export function buildConsolidatedReminderEmail(opts: {
     const spLastSentStr = sp.lastSentAt ? `· last sent ${daysAgoStr(sp.lastSentAt)}` : ''
 
     return `
-      <!-- Expense ${idx + 1} -->
       <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f8fafc;border:1px solid #e9edf2;border-radius:6px;margin-bottom:12px;">
         <tr>
           <td style="padding:16px 18px;">
@@ -139,11 +142,11 @@ export function buildConsolidatedReminderEmail(opts: {
             <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:10px;">
               <tr>
                 <td style="vertical-align:top;">
-                  <div style="margin-bottom:6px;">
+                  ${showMeta ? `<div style="margin-bottom:6px;">
                     <span style="display:inline-block;font-size:10px;font-weight:600;color:#1a2744;background:#e8ecf5;border-radius:20px;padding:2px 10px;">${spReminderLabel}</span>
                     ${spLastSentStr ? `<span style="font-size:10px;color:#94a3b8;margin-left:6px;">${spLastSentStr}</span>` : ''}
-                  </div>
-                  <div style="font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">${idx + 1} of ${splitCount}</div>
+                  </div>` : ''}
+                  <div style="font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">${idx + 1} of ${count}</div>
                   <div style="font-size:14px;font-weight:700;color:#1e293b;margin-bottom:3px;">${sp.title}</div>
                   <div style="font-size:11px;color:#64748b;">${sp.category}&nbsp;·&nbsp;${dateStr}</div>
                   ${sp.description ? `<div style="font-size:11px;color:#94a3b8;margin-top:2px;">${mdToHtml(sp.description)}</div>` : ''}
@@ -155,11 +158,11 @@ export function buildConsolidatedReminderEmail(opts: {
               </tr>
             </table>
 
-            <!-- Your share -->
+            <!-- Highlighted figure -->
             <div style="padding-top:10px;border-top:1px solid #e9edf2;margin-bottom:10px;">
               <table width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
-                  <td style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.06em;vertical-align:middle;">Your Share</td>
+                  <td style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.06em;vertical-align:middle;">${shareLabel}</td>
                   <td style="text-align:right;vertical-align:middle;white-space:nowrap;">
                     <span style="font-size:17px;font-weight:800;color:#1a2744;">${fmt(sp.amountOwed)}</span>
                   </td>
@@ -179,7 +182,20 @@ export function buildConsolidatedReminderEmail(opts: {
         </tr>
       </table>
     `
-  }).join('')
+  }
+
+  const sectionHeading = (text: string) =>
+    `<div style="font-size:12px;font-weight:700;color:#1e293b;letter-spacing:0.02em;margin:0 0 12px;">${text}</div>`
+
+  const hasOwed = owedToYouSplits.length > 0
+  const splitCards =
+    (hasOwed ? sectionHeading('Splits you owe') : '') +
+    splits.map((sp, idx) => renderCard(sp, idx, splitCount, 'Your Share', true)).join('')
+
+  const owedCards = !hasOwed ? '' : `
+                  <div style="height:1px;background:#f1f5f9;margin:4px 0 20px;"></div>
+                  ${sectionHeading('Splits where others owe you')}
+                  ${owedToYouSplits.map((sp, idx) => renderCard(sp, idx, owedToYouSplits.length, 'Owed to You', false)).join('')}`
 
   const html = `
 <!DOCTYPE html>
@@ -252,6 +268,8 @@ export function buildConsolidatedReminderEmail(opts: {
                     </tr>
                   </table>
                   ` : ''}
+
+                  ${owedCards}
 
                 </td>
               </tr>

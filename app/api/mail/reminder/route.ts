@@ -345,6 +345,31 @@ export async function POST(request: Request) {
     const sortedRecipientSplits = [...recipientSplits]
       .sort((a, b) => (b.split.date ?? '').localeCompare(a.split.date ?? ''))
 
+    const mapParticipants = (s: Split) => s.split_participants.map(p => ({
+      name: (p.participant_email && allRegisteredNames.get(p.participant_email.toLowerCase())) || p.participant_name,
+      email: p.participant_email ?? '',
+      amount_owed: p.amount_owed,
+      is_paid: p.is_paid,
+    }))
+
+    // "Owed to you" section — splits this recipient PAID where others still owe.
+    // (e.g. Kailash paid a ₹3,000 bill; Simran & Isha owe their shares.)
+    const owedToYouSplits = splits
+      .filter(s => tokenOf((s.paid_by || s.created_by || user.id) as string) === email
+        && s.split_participants.some(p => !p.is_paid && p.participant_email && p.participant_email.toLowerCase() !== email))
+      .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''))
+      .map(s => ({
+        title: s.title,
+        total_amount: s.total_amount,
+        category: s.category,
+        date: s.date,
+        description: s.description,
+        amountOwed: round2(s.split_participants
+          .filter(p => !p.is_paid && p.participant_email && p.participant_email.toLowerCase() !== email)
+          .reduce((sum, p) => sum + p.amount_owed, 0)),
+        allParticipants: mapParticipants(s),
+      }))
+
     const { subject, html } = buildConsolidatedReminderEmail({
       recipientName: name,
       creatorName,
@@ -357,15 +382,11 @@ export async function POST(request: Request) {
         date: split.date,
         description: split.description,
         amountOwed,
-        allParticipants: split.split_participants.map(p => ({
-          name: (p.participant_email && allRegisteredNames.get(p.participant_email.toLowerCase())) || p.participant_name,
-          email: p.participant_email ?? '',
-          amount_owed: p.amount_owed,
-          is_paid: p.is_paid,
-        })),
+        allParticipants: mapParticipants(split),
         reminderCount: (split.reminder_count ?? 0) + 1,
         lastSentAt: split.last_reminder_sent_at ?? null,
       })),
+      owedToYouSplits,
       appUrl: APP_URL,
     })
 
