@@ -52,7 +52,7 @@ interface Props {
 const DATE_KEY = 'lastTransactionDate'
 
 type SplitMode = 'equal' | 'percent' | 'shares' | 'exact'
-interface Participant { name: string; email: string; amount: string; percent: string; shares: string }
+interface Participant { name: string; email: string; amount: string; percent: string; shares: string; manual?: boolean }
 const mkParticipant = (name = '', email = ''): Participant => ({ name, email, amount: '', percent: '', shares: '' })
 
 const round2 = (n: number) => Math.round(n * 100) / 100
@@ -78,6 +78,24 @@ function amountsFor(mode: SplitMode, ps: Participant[], total: number): number[]
   if (mode === 'shares') return distributeAmounts(total, ps.map(p => parseFloat(p.shares) || 0))
   if (mode === 'percent') return ps.map(p => round2(total * (parseFloat(p.percent) || 0) / 100))
   return ps.map(p => parseFloat(p.amount) || 0)
+}
+
+// Exact mode only: keep rows the user typed into (manual) fixed and split the
+// leftover equally across the still-untouched named rows. Editing one person
+// therefore re-flows the rest; editing a second leaves the first alone.
+function autoBalanceExact(list: Participant[], total: number): Participant[] {
+  if (!(total > 0)) return list
+  const named = list.map((p, idx) => ({ p, idx })).filter(x => x.p.name.trim())
+  const autoIdx = named.filter(x => !x.p.manual).map(x => x.idx)
+  if (autoIdx.length === 0) return list
+  const manualSum = named
+    .filter(x => x.p.manual)
+    .reduce((s, x) => s + (parseFloat(x.p.amount) || 0), 0)
+  const remaining = Math.max(0, round2(total - manualSum))
+  const shares = distributeAmounts(remaining, autoIdx.map(() => 1))
+  const shareFor = new Map<number, number>()
+  autoIdx.forEach((idx, k) => shareFor.set(idx, shares[k]))
+  return list.map((p, idx) => shareFor.has(idx) ? { ...p, amount: String(shareFor.get(idx)) } : p)
 }
 
 function getDefaultDate() {
@@ -342,23 +360,47 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         return prev.map(p => ({ ...p, shares: p.shares && parseFloat(p.shares) > 0 ? p.shares : '1' }))
       }
       if (mode === 'exact') {
-        // Carry the currently displayed amounts into editable fields
-        return prev.map((p, i) => ({ ...p, amount: prevAmounts[i] ? String(prevAmounts[i]) : p.amount }))
+        // Carry the currently displayed amounts in as a fresh equal split —
+        // nothing is pinned yet, so the first edit re-flows the rest.
+        return prev.map((p, i) => ({ ...p, manual: false, amount: prevAmounts[i] ? String(prevAmounts[i]) : p.amount }))
       }
       return prev // equal — computed automatically
     })
   }
 
   function updateParticipant(i: number, key: keyof Participant, val: string) {
-    setParticipants(prev => prev.map((p, idx) => idx === i ? { ...p, [key]: val } : p))
+    setParticipants(prev => {
+      const next = prev.map((p, idx) => idx === i ? { ...p, [key]: val } : p)
+      // Naming a new row in Exact mode makes it eligible for an auto share.
+      return key === 'name' && splitMode === 'exact'
+        ? autoBalanceExact(next, parseFloat(form.amount) || 0)
+        : next
+    })
   }
+
+  // Exact mode: typing an amount pins that row and re-splits the leftover across
+  // the untouched rows; clearing it returns the row to the auto pool.
+  function updateExactAmount(i: number, val: string) {
+    setParticipants(prev => autoBalanceExact(
+      prev.map((p, idx) => idx === i ? { ...p, amount: val, manual: val.trim() !== '' } : p),
+      parseFloat(form.amount) || 0,
+    ))
+  }
+
+  const exactTotal = () => parseFloat(form.amount) || 0
 
   function addParticipant() {
     const row = mkParticipant()
     if (splitMode === 'shares') row.shares = '1'
-    setParticipants(p => [...p, row])
+    setParticipants(p => splitMode === 'exact' ? autoBalanceExact([...p, row], exactTotal()) : [...p, row])
   }
-  function removeParticipant(i: number) { setParticipants(p => p.filter((_, idx) => idx !== i)) }
+  function removeParticipant(i: number) {
+    setParticipants(p => {
+      const next = p.filter((_, idx) => idx !== i)
+      // Removing a row frees its share back to the untouched rows.
+      return splitMode === 'exact' ? autoBalanceExact(next, exactTotal()) : next
+    })
+  }
 
   function addMe() {
     if (!currentUser?.email) return
@@ -366,7 +408,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
     if (participants.some(p => p.email.toLowerCase() === meLower)) return
     const me = mkParticipant(currentUser.name, currentUser.email)
     if (splitMode === 'shares') me.shares = '1'
-    setParticipants(prev => [me, ...prev])
+    setParticipants(prev => splitMode === 'exact' ? autoBalanceExact([me, ...prev], exactTotal()) : [me, ...prev])
   }
 
   function addFriendAsParticipant(friend: Friend) {
@@ -377,11 +419,9 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
     const newRow = mkParticipant(friend.name, friend.email ?? '')
     if (splitMode === 'shares') newRow.shares = '1'
     const emptyIdx = participants.findIndex(p => !p.name && !p.email)
-    if (emptyIdx !== -1) {
-      setParticipants(prev => prev.map((p, i) => i === emptyIdx ? newRow : p))
-    } else {
-      setParticipants(prev => [...prev, newRow])
-    }
+    const place = (prev: Participant[]) =>
+      emptyIdx !== -1 ? prev.map((p, i) => i === emptyIdx ? newRow : p) : [...prev, newRow]
+    setParticipants(prev => splitMode === 'exact' ? autoBalanceExact(place(prev), exactTotal()) : place(prev))
   }
 
   async function handleReceiptUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -634,7 +674,14 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                 step="0.01"
                 placeholder="0.00"
                 value={form.amount}
-                onChange={e => set('amount', e.target.value)}
+                onChange={e => {
+                  set('amount', e.target.value)
+                  // Exact mode stores per-row amounts, so re-split the leftover
+                  // across untouched rows when the total changes.
+                  if (splitMode === 'exact') {
+                    setParticipants(prev => autoBalanceExact(prev, parseFloat(e.target.value) || 0))
+                  }
+                }}
                 required
               />
             </div>
@@ -783,7 +830,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                                 {splitMode === 'exact' ? (
                                   <div className="w-24 space-y-1 shrink-0">
                                     <Label className="text-xs text-muted-foreground">Amount</Label>
-                                    <Input type="number" min="0" step="0.01" placeholder="0" value={p.amount} onChange={e => updateParticipant(i, 'amount', e.target.value)} />
+                                    <Input type="number" min="0" step="0.01" placeholder="0" value={p.amount} onChange={e => updateExactAmount(i, e.target.value)} />
                                   </div>
                                 ) : (
                                   <div className="w-20 space-y-1 shrink-0">
