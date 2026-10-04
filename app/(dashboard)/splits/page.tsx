@@ -426,21 +426,17 @@ export default function SplitsPage() {
       </div>
 
       {active.length > 0 && (
-        <div className="grid grid-cols-2 gap-4">
-          <Card>
-            <CardContent className="pt-4">
-              <p className="text-xs text-muted-foreground">Others owe you</p>
-              <p className="text-xl font-bold text-emerald-600">{formatCurrency(owedToYou)}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">from splits you created</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4">
-              <p className="text-xs text-muted-foreground">You owe</p>
-              <p className="text-xl font-bold text-blue-600">{formatCurrency(youOwe)}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">across {active.length} active split{active.length !== 1 ? 's' : ''}</p>
-            </CardContent>
-          </Card>
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 sm:max-w-xl">
+          <div className="rounded-xl border bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 px-4 py-3">
+            <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">Others owe you</p>
+            <p className="text-xl font-bold text-emerald-700 dark:text-emerald-300 mt-0.5">{formatCurrency(owedToYou)}</p>
+            <p className="text-[11px] text-emerald-700/70 dark:text-emerald-300/70 mt-0.5">from splits you created</p>
+          </div>
+          <div className="rounded-xl border bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800 px-4 py-3">
+            <p className="text-xs text-blue-700 dark:text-blue-300 font-medium">You owe</p>
+            <p className="text-xl font-bold text-blue-700 dark:text-blue-300 mt-0.5">{formatCurrency(youOwe)}</p>
+            <p className="text-[11px] text-blue-700/70 dark:text-blue-300/70 mt-0.5">across {active.length} active split{active.length !== 1 ? 's' : ''}</p>
+          </div>
         </div>
       )}
 
