@@ -312,14 +312,20 @@ export async function POST(request: Request) {
     const round2 = (n: number) => Math.round(n * 100) / 100
     const oweTo = new Map<string, number>()   // recipient owes token
     const oweFrom = new Map<string, number>() // token owes recipient
+    const tokenName = new Map<string, string>() // display name for no-email (name:) tokens
     for (const s of splits) {
       const cToken = tokenOf((s.paid_by || s.created_by || user.id) as string)
       if (cToken === email) {
-        // Recipient paid this bill — everyone else's unpaid share is owed to them.
+        // Recipient paid this bill — everyone else's unpaid share is owed to them,
+        // INCLUDING participants with no email (keyed by name, e.g. Simran).
         for (const p of s.split_participants) {
+          if (p.is_paid) continue
           const pe = p.participant_email?.toLowerCase()
-          if (p.is_paid || !pe || pe === email) continue
-          oweFrom.set(pe, (oweFrom.get(pe) ?? 0) + p.amount_owed)
+          if (pe === email) continue
+          const tk = pe || (p.participant_name?.trim() ? `name:${p.participant_name.trim().toLowerCase()}` : '')
+          if (!tk) continue
+          if (!pe && p.participant_name) tokenName.set(tk, p.participant_name.trim())
+          oweFrom.set(tk, (oweFrom.get(tk) ?? 0) + p.amount_owed)
         }
       } else {
         // Someone else paid — if the recipient has an unpaid share, they owe them.
@@ -331,7 +337,7 @@ export async function POST(request: Request) {
       .map(token => {
         const youOwe = round2(oweTo.get(token) ?? 0)
         const owedBack = round2(oweFrom.get(token) ?? 0)
-        return { name: nameOfToken(token), youOwe, owedBack, net: round2(youOwe - owedBack) }
+        return { name: tokenName.get(token) ?? nameOfToken(token), youOwe, owedBack, net: round2(youOwe - owedBack) }
       })
       .filter(o => o.youOwe > 0.009 || o.owedBack > 0.009)
       .sort((a, b) => b.net - a.net)
@@ -354,9 +360,12 @@ export async function POST(request: Request) {
 
     // "Owed to you" section — splits this recipient PAID where others still owe.
     // (e.g. Kailash paid a ₹3,000 bill; Simran & Isha owe their shares.)
+    // Others' unpaid share on a bill the recipient paid — any participant who
+    // isn't the recipient and hasn't paid, including no-email ones (e.g. Simran).
+    const owesRecipient = (p: Participant) => !p.is_paid && p.participant_email?.toLowerCase() !== email
     const owedToYouSplits = splits
       .filter(s => tokenOf((s.paid_by || s.created_by || user.id) as string) === email
-        && s.split_participants.some(p => !p.is_paid && p.participant_email && p.participant_email.toLowerCase() !== email))
+        && s.split_participants.some(owesRecipient))
       .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''))
       .map(s => ({
         title: s.title,
@@ -364,9 +373,7 @@ export async function POST(request: Request) {
         category: s.category,
         date: s.date,
         description: s.description,
-        amountOwed: round2(s.split_participants
-          .filter(p => !p.is_paid && p.participant_email && p.participant_email.toLowerCase() !== email)
-          .reduce((sum, p) => sum + p.amount_owed, 0)),
+        amountOwed: round2(s.split_participants.filter(owesRecipient).reduce((sum, p) => sum + p.amount_owed, 0)),
         allParticipants: mapParticipants(s),
       }))
 
