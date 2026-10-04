@@ -46,10 +46,9 @@ export function buildConsolidatedReminderEmail(opts: {
   creatorName: string
   splits: ConsolidatedSplitItem[]
   appUrl: string
-  oweByPerson?: { name: string; amount: number }[]
-  oweNetted?: boolean
+  oweByPerson?: { name: string; youOwe: number; owedBack: number; net: number }[]
 }): { subject: string; html: string } {
-  const { recipientName, creatorName, splits, appUrl, oweByPerson = [], oweNetted = false } = opts
+  const { recipientName, creatorName, splits, appUrl, oweByPerson = [] } = opts
 
   const displayCreator = capitalize(creatorName)
   const displayRecipient = capitalize(recipientName.split(' ')[0])
@@ -64,31 +63,45 @@ export function buildConsolidatedReminderEmail(opts: {
     ? `${reminderLabel}Payment Reminder: ${splits[0].title} — ${fmt(splits[0].amountOwed)} due`
     : `${reminderLabel}Payment Reminder: ${fmt(totalOwed)} due across ${splitCount} expenses`
 
-  // "Who you owe" tally — the recipient's outstanding shares grouped by the
-  // person who paid each bill. Shown below the expenses so they know exactly
-  // how much to send to each member.
-  const oweTally = oweByPerson.filter(o => o.amount > 0.009)
+  // Balance summary — per counterparty, the two directions (what you owe them +,
+  // what they owe you back −) and the resulting net. Mirrors the app's Balances.
+  const oweTally = oweByPerson.filter(o => o.youOwe > 0.009 || o.owedBack > 0.009)
   const oweBlock = oweTally.length === 0 ? '' : `
-                  <!-- Who you owe -->
-                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:8px;">
+                  <!-- Balance summary -->
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:22px;">
                     <tr>
-                      <td style="padding:16px 18px;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;">
-                        <div style="font-size:10px;font-weight:700;color:#9a3412;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">
-                          ${oweTally.length > 1 ? 'Who you owe' : 'Pay to'}
+                      <td style="padding:16px 18px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;">
+                        <div style="font-size:10px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">
+                          ${oweTally.length > 1 ? 'Balance summary' : 'Your balance'}
                         </div>
                         <table width="100%" cellpadding="0" cellspacing="0" border="0">
-                          ${oweTally.map((o, i) => `
+                          ${oweTally.map((o, i) => {
+                            const owes = o.net >= 0 // recipient still owes this person
+                            const netColor = owes ? '#9a3412' : '#15803d'
+                            const nm = capitalize(o.name)
+                            const parts: string[] = []
+                            if (o.youOwe > 0.009) parts.push(`<span style="color:#9a3412;">You owe <strong>+${fmt(o.youOwe)}</strong></span>`)
+                            if (o.owedBack > 0.009) parts.push(`<span style="color:#15803d;">${nm} owes you <strong>&minus;${fmt(o.owedBack)}</strong></span>`)
+                            return `
                           <tr>
-                            <td style="padding:7px 0;${i < oweTally.length - 1 ? 'border-bottom:1px solid #fde4c4;' : ''}vertical-align:middle;">
-                              <span style="display:inline-block;width:24px;height:24px;border-radius:50%;background:#c2410c;text-align:center;line-height:24px;font-size:11px;font-weight:700;color:#fff;vertical-align:middle;">${capitalize(o.name).charAt(0)}</span>
-                              <span style="display:inline-block;vertical-align:middle;margin-left:8px;font-size:13px;font-weight:600;color:#7c2d12;">${capitalize(o.name)}</span>
+                            <td style="padding:12px 0;${i < oweTally.length - 1 ? 'border-bottom:1px solid #e9edf2;' : ''}">
+                              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                                <tr>
+                                  <td style="vertical-align:middle;">
+                                    <span style="display:inline-block;width:24px;height:24px;border-radius:50%;background:#334155;text-align:center;line-height:24px;font-size:11px;font-weight:700;color:#fff;vertical-align:middle;">${nm.charAt(0)}</span>
+                                    <span style="display:inline-block;vertical-align:middle;margin-left:8px;font-size:13px;font-weight:600;color:#1e293b;">${nm}</span>
+                                  </td>
+                                  <td style="text-align:right;vertical-align:middle;white-space:nowrap;">
+                                    <div style="font-size:16px;font-weight:800;color:${netColor};">${fmt(Math.abs(o.net))}</div>
+                                    <div style="font-size:10px;font-weight:600;color:${netColor};text-transform:uppercase;letter-spacing:0.05em;margin-top:1px;">${owes ? 'net you owe' : 'net owed to you'}</div>
+                                  </td>
+                                </tr>
+                              </table>
+                              ${parts.length > 1 ? `<div style="margin-top:6px;font-size:11px;color:#64748b;">${parts.join('&nbsp;&nbsp;·&nbsp;&nbsp;')}</div>` : ''}
                             </td>
-                            <td style="padding:7px 0;${i < oweTally.length - 1 ? 'border-bottom:1px solid #fde4c4;' : ''}text-align:right;vertical-align:middle;white-space:nowrap;font-size:14px;font-weight:800;color:#9a3412;">
-                              ${fmt(o.amount)}
-                            </td>
-                          </tr>`).join('')}
+                          </tr>`
+                          }).join('')}
                         </table>
-                        ${oweNetted ? `<div style="font-size:10px;color:#9a3412;opacity:0.8;margin-top:10px;line-height:1.5;">Net amount — already adjusts for what each person owes you back.</div>` : ''}
                       </td>
                     </tr>
                   </table>`
