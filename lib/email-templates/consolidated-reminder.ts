@@ -49,8 +49,10 @@ export function buildConsolidatedReminderEmail(opts: {
   oweByPerson?: { name: string; youOwe: number; owedBack: number; net: number }[]
   amountDue?: number
   owedToYouSplits?: ConsolidatedSplitItem[]
+  pendingReceive?: number
+  pendingPeople?: { name: string; amount: number }[]
 }): { subject: string; html: string } {
-  const { recipientName, creatorName, splits, appUrl, oweByPerson = [], amountDue, owedToYouSplits = [] } = opts
+  const { recipientName, creatorName, splits, appUrl, oweByPerson = [], amountDue, owedToYouSplits = [], pendingReceive = 0, pendingPeople = [] } = opts
 
   const displayCreator = capitalize(creatorName)
   const displayRecipient = capitalize(recipientName.split(' ')[0])
@@ -59,12 +61,17 @@ export function buildConsolidatedReminderEmail(opts: {
   // provided; the split cards still itemise the gross shares.
   const totalOwed = amountDue != null ? amountDue : grossOwed
   const splitCount = splits.length
+  // Does this recipient owe anything, or are they purely collecting?
+  const owesSomething = totalOwed > 0.009
+  const collectsSomething = pendingReceive > 0.009
 
   // Determine highest reminder count across all splits to label the email
   const maxReminder = splits.reduce((m, sp) => Math.max(m, sp.reminderCount ?? 1), 1)
   const reminderLabel = maxReminder > 1 ? `[${ordinal(maxReminder)} Reminder] ` : ''
 
-  const subject = `${reminderLabel}Payment Reminder: ${fmt(totalOwed)} due${splitCount > 1 ? ` across ${splitCount} expenses` : ''}`
+  const subject = owesSomething
+    ? `${reminderLabel}Payment Reminder: ${fmt(totalOwed)} due${splitCount > 1 ? ` across ${splitCount} expenses` : ''}`
+    : `Balance Summary: ${fmt(pendingReceive)} pending to collect`
 
   // Balance summary — per counterparty, the two directions (what you owe them +,
   // what they owe you back −) and the resulting net. Mirrors the app's Balances.
@@ -105,6 +112,42 @@ export function buildConsolidatedReminderEmail(opts: {
                           </tr>`
                           }).join('')}
                         </table>
+                      </td>
+                    </tr>
+                  </table>`
+
+  // "Pending to receive" box — who still owes this recipient and the total they'll
+  // collect. Shown to anyone who is owed money (e.g. Kailash collecting from others).
+  const pendingTally = pendingPeople.filter(p => p.amount > 0.009)
+  const pendingBlock = pendingTally.length === 0 ? '' : `
+                  <!-- Pending to receive -->
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:22px;">
+                    <tr>
+                      <td style="padding:16px 18px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:6px;">
+                        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:10px;">
+                          <tr>
+                            <td style="font-size:10px;font-weight:700;color:#047857;text-transform:uppercase;letter-spacing:0.08em;vertical-align:middle;">Pending to receive</td>
+                            <td style="text-align:right;vertical-align:middle;white-space:nowrap;">
+                              <span style="font-size:15px;font-weight:800;color:#047857;">${fmt(pendingReceive)}</span>
+                            </td>
+                          </tr>
+                        </table>
+                        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                          ${pendingTally.map((p, i) => {
+                            const nm = capitalize(p.name)
+                            return `
+                          <tr>
+                            <td style="padding:7px 0;${i < pendingTally.length - 1 ? 'border-bottom:1px solid #c7f0db;' : ''}vertical-align:middle;">
+                              <span style="display:inline-block;width:24px;height:24px;border-radius:50%;background:#059669;text-align:center;line-height:24px;font-size:11px;font-weight:700;color:#fff;vertical-align:middle;">${nm.charAt(0)}</span>
+                              <span style="display:inline-block;vertical-align:middle;margin-left:8px;font-size:13px;font-weight:600;color:#065f46;">${nm}</span>
+                            </td>
+                            <td style="padding:7px 0;${i < pendingTally.length - 1 ? 'border-bottom:1px solid #c7f0db;' : ''}text-align:right;vertical-align:middle;white-space:nowrap;font-size:14px;font-weight:700;color:#047857;">
+                              ${fmt(p.amount)}
+                            </td>
+                          </tr>`
+                          }).join('')}
+                        </table>
+                        <div style="font-size:10px;color:#047857;opacity:0.85;margin-top:10px;line-height:1.5;">What these people still owe you — you'll collect this once they settle.</div>
                       </td>
                     </tr>
                   </table>`
@@ -230,12 +273,12 @@ export function buildConsolidatedReminderEmail(opts: {
               <tr>
                 <td style="padding:36px 36px 0;">
 
-                  <!-- Total amount due -->
+                  <!-- Headline: amount due if they owe, else amount to collect -->
                   <p style="margin:0 0 4px;font-size:12px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;">
-                    ${splitCount > 1 ? `Total Due — ${splitCount} Expenses` : 'Amount Due'}
+                    ${owesSomething ? (splitCount > 1 ? `Total Due — ${splitCount} Expenses` : 'Amount Due') : 'Pending to Receive'}
                   </p>
-                  <p style="margin:0 0 6px;font-size:42px;font-weight:800;color:#1a2744;letter-spacing:-1px;line-height:1;">${fmt(totalOwed)}</p>
-                  <p style="margin:0 0 28px;font-size:12px;color:#94a3b8;">Requested by <strong style="color:#475569;font-weight:600;">${displayCreator}</strong></p>
+                  <p style="margin:0 0 6px;font-size:42px;font-weight:800;color:${owesSomething ? '#1a2744' : '#047857'};letter-spacing:-1px;line-height:1;">${fmt(owesSomething ? totalOwed : pendingReceive)}</p>
+                  <p style="margin:0 0 28px;font-size:12px;color:#94a3b8;">${owesSomething ? 'Requested by' : 'Shared by'} <strong style="color:#475569;font-weight:600;">${displayCreator}</strong></p>
 
                   <!-- Divider -->
                   <div style="height:1px;background:#f1f5f9;margin-bottom:28px;"></div>
@@ -243,10 +286,14 @@ export function buildConsolidatedReminderEmail(opts: {
                   <!-- Greeting -->
                   <p style="margin:0 0 6px;font-size:14px;font-weight:600;color:#1e293b;">Dear ${displayRecipient},</p>
                   <p style="margin:0 0 24px;font-size:13px;color:#64748b;line-height:1.7;">
-                    You have ${splitCount === 1 ? 'a pending payment' : `<strong style="color:#1e293b;">${splitCount} pending payments</strong>`} for shared expenses. Your net balance is summarised below, with each expense itemised after.
+                    ${owesSomething
+                      ? `You have ${splitCount === 1 ? 'a pending payment' : `<strong style="color:#1e293b;">${splitCount} pending payments</strong>`} for shared expenses. Your net balance is summarised below, with each expense itemised after.`
+                      : `Here's your balance summary for shared expenses — <strong style="color:#1e293b;">${fmt(pendingReceive)}</strong> is pending to be collected from others. The details are below.`}
                   </p>
 
                   ${oweBlock}
+
+                  ${pendingBlock}
 
                   <!-- Split cards -->
                   ${splitCards}

@@ -70,29 +70,6 @@ async function fetchSplitsWithPayer(
   return []
 }
 
-// Group splits by recipient email, collecting the split details + their share.
-// Returns a Map<email, { name, splits[] }> ready for one consolidated email per person.
-function groupByRecipient(
-  splits: Split[],
-  filterEmail: string | null
-): Map<string, { name: string; splits: { split: Split; amountOwed: number }[] }> {
-  const map = new Map<string, { name: string; splits: { split: Split; amountOwed: number }[] }>()
-
-  for (const split of splits) {
-    const unpaid = filterEmail
-      ? split.split_participants.filter(p => !p.is_paid && p.participant_email?.toLowerCase() === filterEmail)
-      : split.split_participants.filter(p => !p.is_paid && p.participant_email)
-
-    for (const p of unpaid) {
-      const email = p.participant_email!.toLowerCase()
-      if (!map.has(email)) map.set(email, { name: p.participant_name, splits: [] })
-      map.get(email)!.splits.push({ split, amountOwed: p.amount_owed })
-    }
-  }
-
-  return map
-}
-
 // POST /api/mail/reminder
 // Body: { type: 'contact', contact_id: string }
 //     | { type: 'trip', trip_id: string }
@@ -170,27 +147,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid type' }, { status: 400 })
   }
 
-  // Group splits by recipient so each person gets exactly one consolidated email
-  const recipients = groupByRecipient(splits, targetEmail)
-
-  // Never send a reminder to yourself — the sender can appear as an unpaid
-  // participant on splits a friend paid (on-behalf), but you don't owe yourself.
-  if (user.email) recipients.delete(user.email.toLowerCase())
-
-  if (recipients.size === 0) {
-    return NextResponse.json({ error: 'no_pending_splits' }, { status: 400 })
-  }
-
-  // Look up registered names for ALL participants across all splits
-  // (recipients + everyone else in the participant list shown in the mail)
-  const allParticipantEmails = Array.from(new Set([
-    ...Array.from(recipients.keys()),
-    ...splits.flatMap(s =>
+  // Look up registered names for every participant across the splits.
+  const allParticipantEmails = Array.from(new Set(
+    splits.flatMap(s =>
       s.split_participants
         .map(p => p.participant_email?.toLowerCase())
         .filter(Boolean) as string[]
     ),
-  ]))
+  ))
 
   const allRegisteredNames = new Map<string, string>()
   if (allParticipantEmails.length > 0) {
@@ -205,12 +169,6 @@ export async function POST(request: Request) {
     for (const rp of regProfiles ?? []) {
       if (rp.full_name) allRegisteredNames.set(rp.email.toLowerCase(), rp.full_name)
     }
-  }
-
-  // Override each recipient's display name with their own registered name
-  for (const [email, entry] of recipients) {
-    const registered = allRegisteredNames.get(email)
-    if (registered) entry.name = registered
   }
 
   // Resolve the display name of every creditor (the person who actually paid a
@@ -288,6 +246,27 @@ export async function POST(request: Request) {
     s.paid_by ? tokenOf(s.paid_by)
       : (s.paid_by_email ? (canonEmail(s.paid_by_name, s.paid_by_email) ?? s.paid_by_email.toLowerCase()) : tokenOf((s.created_by ?? user.id) as string))
 
+  // Build the recipient set. Contact reminder → just that contact. Trip reminder →
+  // EVERYONE with an email who has a balance here (participants, payers, and you),
+  // so people who are owed money also get their collection summary.
+  const recipientEmails = new Set<string>()
+  if (targetEmail) {
+    recipientEmails.add(targetEmail)
+  } else {
+    if (user.email) recipientEmails.add(user.email.toLowerCase())
+    for (const s of splits) {
+      for (const p of s.split_participants) {
+        const e = p.participant_email ? canonEmail(p.participant_name, p.participant_email) : null
+        if (e) recipientEmails.add(e)
+      }
+      const ct = creditorTokenOf(s)
+      if (ct && !ct.startsWith('id:')) recipientEmails.add(ct)
+    }
+  }
+  if (recipientEmails.size === 0) {
+    return NextResponse.json({ error: 'no_pending_splits' }, { status: 400 })
+  }
+
   const transporter = createTransporter()
   let sent = 0
   const errors: string[] = []
@@ -326,7 +305,18 @@ export async function POST(request: Request) {
     }
   }
 
-  for (const [email, { name, splits: recipientSplits }] of recipients) {
+  for (const email of recipientEmails) {
+    const name = nameByEmail.get(email) ?? email.split('@')[0]
+
+    // Splits THIS recipient owes on: they're an unpaid participant and not the payer.
+    const recipientSplits = splits
+      .filter(s => creditorTokenOf(s) !== email)
+      .map(s => {
+        const mine = s.split_participants.find(p => !p.is_paid && canonEmail(p.participant_name, p.participant_email) === email)
+        return mine ? { split: s, amountOwed: mine.amount_owed } : null
+      })
+      .filter((x): x is { split: Split; amountOwed: number } => x !== null)
+
     // Collect attachments for this recipient's splits (deduplicated by URL)
     const attachments: Attachment[] = []
     const seenUrls = new Set<string>()
@@ -379,10 +369,16 @@ export async function POST(request: Request) {
       .filter(o => o.youOwe > 0.009 || o.owedBack > 0.009)
       .sort((a, b) => b.net - a.net)
 
-    // Net amount this recipient actually has to pay out (sum of positive nets).
-    // If they owe nothing net (they're square or owed money), skip the reminder.
+    // What this recipient must pay out (sum of positive nets = people they owe)
+    // and what they'll collect (sum of negative nets = people who owe them).
     const netTotalDue = round2(oweByPerson.filter(o => o.net > 0).reduce((s, o) => s + o.net, 0))
-    if (netTotalDue <= 0.009) continue
+    const pendingPeople = oweByPerson
+      .filter(o => o.net < -0.009)
+      .map(o => ({ name: o.name, amount: round2(-o.net) }))
+      .sort((a, b) => b.amount - a.amount)
+    const pendingReceive = round2(pendingPeople.reduce((s, o) => s + o.amount, 0))
+    // Nothing owed and nothing to collect → they're square; skip.
+    if (netTotalDue <= 0.009 && pendingReceive <= 0.009) continue
 
     // Transactions arranged by date (most recent first)
     const sortedRecipientSplits = [...recipientSplits]
@@ -419,6 +415,8 @@ export async function POST(request: Request) {
       creatorName,
       oweByPerson,
       amountDue: netTotalDue,
+      pendingReceive,
+      pendingPeople,
       splits: sortedRecipientSplits.map(({ split, amountOwed }) => ({
         title: split.title,
         total_amount: split.total_amount,
