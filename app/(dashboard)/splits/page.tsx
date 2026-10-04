@@ -34,6 +34,8 @@ interface Split {
   id: string
   created_by: string
   paid_by?: string | null
+  paid_by_email?: string | null
+  paid_by_name?: string | null
   title: string
   total_amount: number
   category: string
@@ -386,8 +388,10 @@ export default function SplitsPage() {
   // Perspective matters:
   //  - Splits I created → others' unpaid shares are owed TO me.
   //  - Splits I only participate in → only MY unpaid share is what I owe.
-  // The payer (paid_by) is the creditor; falls back to the author for normal splits
-  const iAmPayer = (s: Split) => !!myId && (s.paid_by || s.created_by) === myId
+  // The payer (paid_by) is the creditor; falls back to the author for normal
+  // splits. An unregistered email-only payer is never me, so those are "you owe".
+  const iAmPayer = (s: Split) =>
+    s.paid_by ? s.paid_by === myId : (s.paid_by_email ? false : (!!myId && s.created_by === myId))
 
   const owedToYou = active
     .filter(iAmPayer)

@@ -23,6 +23,8 @@ interface Participant {
 interface SplitRow {
   created_by: string
   paid_by?: string | null
+  paid_by_email?: string | null
+  paid_by_name?: string | null
   is_settled: boolean
   split_participants: Participant[]
 }
@@ -110,9 +112,12 @@ export default function BalancesPage() {
 
         for (const sp of splitList) {
           if (sp.is_settled) continue
-          // The person who PAID the bill is the creditor (may differ from author)
-          const creditorId = sp.paid_by || sp.created_by
-          const iAmCreditor = !!myId && creditorId === myId
+          // The person who PAID the bill is the creditor. Registered → paid_by
+          // (user id). Unregistered (email-only payer) → paid_by_email/name, in
+          // which case the author (created_by) is NOT the creditor.
+          const unregPayerEmail = !sp.paid_by && sp.paid_by_email ? sp.paid_by_email.toLowerCase() : null
+          const creditorId = sp.paid_by || (unregPayerEmail ? null : sp.created_by)
+          const iAmCreditor = !!myId && creditorId === myId && !unregPayerEmail
           if (iAmCreditor) {
             // Everyone else's unpaid share is owed TO me
             for (const p of sp.split_participants ?? []) {
@@ -123,9 +128,14 @@ export default function BalancesPage() {
             // I only participate → my unpaid share is what I owe the payer
             const myRow = (sp.split_participants ?? []).find(isSelf)
             if (myRow && !myRow.is_paid) {
-              const payer = (sp.split_participants ?? []).find(p => p.participant_user_id === creditorId)
-              ensure(payer?.participant_name ?? 'Split payer', payer?.participant_email ?? null)
-                .splitYouOwe += myRow.amount_owed
+              if (unregPayerEmail) {
+                // Unregistered payer — attribute by their email/name
+                ensure(sp.paid_by_name ?? 'Split payer', sp.paid_by_email ?? null).splitYouOwe += myRow.amount_owed
+              } else {
+                const payer = (sp.split_participants ?? []).find(p => p.participant_user_id === creditorId)
+                ensure(payer?.participant_name ?? 'Split payer', payer?.participant_email ?? null)
+                  .splitYouOwe += myRow.amount_owed
+              }
             }
           }
         }

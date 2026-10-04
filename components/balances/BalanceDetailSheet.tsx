@@ -37,6 +37,8 @@ interface SplitRow {
   is_settled: boolean
   created_by: string
   paid_by?: string | null
+  paid_by_email?: string | null
+  paid_by_name?: string | null
   trip_id?: string | null
   contact_id?: string | null
   receipt_url?: string | null
@@ -119,8 +121,10 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
   let splitTheyOwe = 0, splitYouOwe = 0
   for (const s of splits) {
     if (s.is_settled) continue
-    const creditorId = s.paid_by || s.created_by
-    if (creditorId === myId) {
+    // Unregistered (email-only) payer → the author is not the creditor.
+    const unregPayer = !s.paid_by && !!s.paid_by_email
+    const creditorId = s.paid_by || (unregPayer ? null : s.created_by)
+    if (!unregPayer && creditorId === myId) {
       for (const p of s.split_participants) if (!p.is_paid && matchesCp(p)) splitTheyOwe += p.amount_owed
     } else {
       const mine = s.split_participants.find(p =>
@@ -182,7 +186,7 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
                 {splits.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No splits with {counterparty?.name}.</p>
                 ) : splits.map(s => {
-                  const iAmPayer = (s.paid_by || s.created_by) === myId
+                  const iAmPayer = s.paid_by ? s.paid_by === myId : (s.paid_by_email ? false : s.created_by === myId)
                   // Show the amount that flows between the two of you for this split:
                   //  - I paid → what the other person still owes me
                   //  - they paid → what I (the viewer) still owe them (my contribution)

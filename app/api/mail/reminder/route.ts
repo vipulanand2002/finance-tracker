@@ -45,12 +45,30 @@ type Split = {
   receipt_name_2: string | null
   created_by: string | null
   paid_by?: string | null
+  paid_by_email?: string | null
+  paid_by_name?: string | null
   split_participants: Participant[]
 }
 
-// Columns selected for every split lookup. paid_by is appended separately so we
-// can fall back gracefully if that column hasn't been migrated yet.
+// Columns selected for every split lookup. The payer columns are appended with a
+// graceful fallback so we still work if 043/044 haven't been migrated yet.
 const SPLIT_COLS = 'id, title, total_amount, category, date, description, reminder_count, last_reminder_sent_at, receipt_url, receipt_url_2, receipt_name, receipt_name_2, created_by, split_participants(*)'
+
+// Select splits with the payer columns, degrading gracefully: full payer set →
+// paid_by only → none, depending on which migrations (043/044) have been applied.
+type SplitQuery = ReturnType<ReturnType<Awaited<ReturnType<typeof createClient>>['from']>['select']>
+async function fetchSplitsWithPayer(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  filter: (q: SplitQuery) => SplitQuery,
+): Promise<Split[]> {
+  const colSets = [`${SPLIT_COLS}, paid_by, paid_by_email, paid_by_name`, `${SPLIT_COLS}, paid_by`, SPLIT_COLS]
+  for (const cols of colSets) {
+    const res = await filter(supabase.from('expense_splits').select(cols)) as unknown as { data: Split[] | null; error: { message?: string } | null }
+    if (!res.error) return (res.data ?? []) as Split[]
+    if (!res.error.message?.includes('paid_by')) return (res.data ?? []) as Split[]
+  }
+  return []
+}
 
 // Group splits by recipient email, collecting the split details + their share.
 // Returns a Map<email, { name, splits[] }> ready for one consolidated email per person.
@@ -136,34 +154,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'no_pending_splits' }, { status: 400 })
     }
 
-    const q1 = await supabase
-      .from('expense_splits')
-      .select(`${SPLIT_COLS}, paid_by`)
-      .in('id', splitIds)
-      .eq('created_by', user.id) as { data: Split[] | null; error: { message?: string } | null }
-    let splitData = q1.data
-    if (q1.error?.message?.includes('paid_by')) {
-      const q2 = await supabase.from('expense_splits').select(SPLIT_COLS).in('id', splitIds).eq('created_by', user.id) as { data: Split[] | null }
-      splitData = q2.data
-    }
-
-    splits = (splitData ?? []) as Split[]
+    splits = await fetchSplitsWithPayer(supabase, q => q.in('id', splitIds).eq('created_by', user.id))
 
   } else if (type === 'trip') {
     if (!trip_id) return NextResponse.json({ error: 'trip_id required' }, { status: 400 })
 
-    const q1 = await supabase
-      .from('expense_splits')
-      .select(`${SPLIT_COLS}, paid_by`)
-      .eq('trip_id', trip_id)
-      .eq('created_by', user.id) as { data: Split[] | null; error: { message?: string } | null }
-    let splitData = q1.data
-    if (q1.error?.message?.includes('paid_by')) {
-      const q2 = await supabase.from('expense_splits').select(SPLIT_COLS).eq('trip_id', trip_id).eq('created_by', user.id) as { data: Split[] | null }
-      splitData = q2.data
-    }
-
-    const all = (splitData ?? []) as Split[]
+    const all = await fetchSplitsWithPayer(supabase, q => q.eq('trip_id', trip_id).eq('created_by', user.id))
     splits = all.filter(s => s.split_participants.some(p => !p.is_paid && p.participant_email))
 
     if (splits.length === 0) {
@@ -246,10 +242,23 @@ export async function POST(request: Request) {
     const em = creditorEmailById.get(id)
     if (em) nameByEmail.set(em, nm)
   }
+  // Unregistered (email-only) payers carry their display name on the split itself.
+  for (const s of splits) {
+    if (!s.paid_by && s.paid_by_email && s.paid_by_name) {
+      const em = s.paid_by_email.toLowerCase()
+      if (!nameByEmail.has(em)) nameByEmail.set(em, s.paid_by_name)
+    }
+  }
   const nameOfToken = (token: string) =>
     token.startsWith('id:')
       ? creditorNames.get(token.slice(3)) ?? 'Someone'
       : nameByEmail.get(token) ?? token.split('@')[0]
+
+  // The creditor's token: registered → their email/id; unregistered → paid_by_email;
+  // else the author (normal split).
+  const creditorTokenOf = (s: Split) =>
+    s.paid_by ? tokenOf(s.paid_by)
+      : (s.paid_by_email ? s.paid_by_email.toLowerCase() : tokenOf((s.created_by ?? user.id) as string))
 
   const transporter = createTransporter()
   let sent = 0
@@ -314,7 +323,7 @@ export async function POST(request: Request) {
     const oweFrom = new Map<string, number>() // token owes recipient
     const tokenName = new Map<string, string>() // display name for no-email (name:) tokens
     for (const s of splits) {
-      const cToken = tokenOf((s.paid_by || s.created_by || user.id) as string)
+      const cToken = creditorTokenOf(s)
       if (cToken === email) {
         // Recipient paid this bill — everyone else's unpaid share is owed to them,
         // INCLUDING participants with no email (keyed by name, e.g. Simran).
@@ -364,7 +373,7 @@ export async function POST(request: Request) {
     // isn't the recipient and hasn't paid, including no-email ones (e.g. Simran).
     const owesRecipient = (p: Participant) => !p.is_paid && p.participant_email?.toLowerCase() !== email
     const owedToYouSplits = splits
-      .filter(s => tokenOf((s.paid_by || s.created_by || user.id) as string) === email
+      .filter(s => creditorTokenOf(s) === email
         && s.split_participants.some(owesRecipient))
       .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''))
       .map(s => ({

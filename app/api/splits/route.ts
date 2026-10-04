@@ -344,18 +344,22 @@ export async function PATCH(request: Request) {
     if (participants?.length) {
       const creatorEmail = (user.email ?? '').toLowerCase()
 
-      // Who actually paid this bill (the creditor)? For a normal split that's
-      // the creator; for an on-behalf split it's paid_by (the friend). Only the
-      // payer's share is auto-marked paid — otherwise editing an on-behalf split
-      // would keep re-marking the creator's own (unpaid) share as paid.
-      // paid_by may not exist on un-migrated DBs → fall back to created_by.
-      const { data: splitRow } = await supabase
-        .from('expense_splits')
-        .select('paid_by, created_by')
-        .eq('id', id!)
-        .single()
-      const payerId = (splitRow?.paid_by as string | null) || (splitRow?.created_by as string | null) || user.id
-      const payerIsCreator = payerId === user.id
+      // Who actually paid this bill (the creditor)? For a normal split that's the
+      // creator; for an on-behalf split it's paid_by (a registered friend) or
+      // paid_by_email (an unregistered contact). Only the payer's share is
+      // auto-marked paid — otherwise editing would keep re-marking the creator's
+      // own (unpaid) share as paid. Columns may not exist on un-migrated DBs.
+      type PayerRow = { paid_by?: string | null; paid_by_email?: string | null; created_by?: string | null }
+      let splitRow: PayerRow | null = null
+      const pr = await supabase.from('expense_splits').select('paid_by, paid_by_email, created_by').eq('id', id!).single() as { data: PayerRow | null; error: { message?: string } | null }
+      if (pr.error?.message?.includes('paid_by_email')) {
+        const pr2 = await supabase.from('expense_splits').select('paid_by, created_by').eq('id', id!).single() as { data: PayerRow | null }
+        splitRow = pr2.data
+      } else {
+        splitRow = pr.data
+      }
+      const payerEmail = (splitRow?.paid_by_email ?? '').toLowerCase() || null
+      const payerIsCreator = !payerEmail && (splitRow?.paid_by || splitRow?.created_by || user.id) === user.id
 
       // Delete only unpaid participants — paid ones stay intact
       await supabase
@@ -381,8 +385,9 @@ export async function PATCH(request: Request) {
           const isCreator = !!p.email && p.email.toLowerCase() === creatorEmail
           // Mark paid only if this participant is the payer. The creator counts
           // as payer only on a normal split (payerIsCreator); on an on-behalf
-          // split the creator's share stays unpaid.
-          const isPayer = isCreator && payerIsCreator
+          // split the creator's share stays unpaid. An unregistered payer is
+          // matched by email.
+          const isPayer = (isCreator && payerIsCreator) || (!!payerEmail && !!p.email && p.email.toLowerCase() === payerEmail)
           return {
             split_id: id!,
             participant_name: p.name,
