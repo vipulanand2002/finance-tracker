@@ -344,6 +344,19 @@ export async function PATCH(request: Request) {
     if (participants?.length) {
       const creatorEmail = (user.email ?? '').toLowerCase()
 
+      // Who actually paid this bill (the creditor)? For a normal split that's
+      // the creator; for an on-behalf split it's paid_by (the friend). Only the
+      // payer's share is auto-marked paid — otherwise editing an on-behalf split
+      // would keep re-marking the creator's own (unpaid) share as paid.
+      // paid_by may not exist on un-migrated DBs → fall back to created_by.
+      const { data: splitRow } = await supabase
+        .from('expense_splits')
+        .select('paid_by, created_by')
+        .eq('id', id!)
+        .single()
+      const payerId = (splitRow?.paid_by as string | null) || (splitRow?.created_by as string | null) || user.id
+      const payerIsCreator = payerId === user.id
+
       // Delete only unpaid participants — paid ones stay intact
       await supabase
         .from('split_participants')
@@ -366,14 +379,18 @@ export async function PATCH(request: Request) {
         .filter(p => !p.email || !paidEmails.has(p.email.toLowerCase()))
         .map(p => {
           const isCreator = !!p.email && p.email.toLowerCase() === creatorEmail
+          // Mark paid only if this participant is the payer. The creator counts
+          // as payer only on a normal split (payerIsCreator); on an on-behalf
+          // split the creator's share stays unpaid.
+          const isPayer = isCreator && payerIsCreator
           return {
             split_id: id!,
             participant_name: p.name,
             participant_email: p.email?.toLowerCase() ?? null,
             participant_user_id: isCreator ? user.id : null,
             amount_owed: p.amount,
-            is_paid: isCreator,
-            paid_at: isCreator ? new Date().toISOString() : null,
+            is_paid: isPayer,
+            paid_at: isPayer ? new Date().toISOString() : null,
           }
         })
 
