@@ -47,8 +47,9 @@ export function buildConsolidatedReminderEmail(opts: {
   splits: ConsolidatedSplitItem[]
   appUrl: string
   oweByPerson?: { name: string; amount: number }[]
+  oweNetted?: boolean
 }): { subject: string; html: string } {
-  const { recipientName, creatorName, splits, appUrl, oweByPerson = [] } = opts
+  const { recipientName, creatorName, splits, appUrl, oweByPerson = [], oweNetted = false } = opts
 
   const displayCreator = capitalize(creatorName)
   const displayRecipient = capitalize(recipientName.split(' ')[0])
@@ -87,6 +88,7 @@ export function buildConsolidatedReminderEmail(opts: {
                             </td>
                           </tr>`).join('')}
                         </table>
+                        ${oweNetted ? `<div style="font-size:10px;color:#9a3412;opacity:0.8;margin-top:10px;line-height:1.5;">Net amount — already adjusts for what each person owes you back.</div>` : ''}
                       </td>
                     </tr>
                   </table>`

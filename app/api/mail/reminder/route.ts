@@ -218,7 +218,9 @@ export async function POST(request: Request) {
   // on-behalf split is attributed to the friend who fronted the bill. This feeds
   // the "who you owe" tally at the bottom of each reminder.
   const creditorNames = new Map<string, string>()
+  const creditorEmailById = new Map<string, string>()
   creditorNames.set(user.id, creatorName)
+  if (user.email) creditorEmailById.set(user.id, user.email.toLowerCase())
   const creditorIds = Array.from(new Set(
     splits.map(s => (s.paid_by || s.created_by || user.id)).filter(Boolean) as string[]
   )).filter(id => id !== user.id)
@@ -227,8 +229,23 @@ export async function POST(request: Request) {
     const { data: creditorProfiles } = await svc.from('profiles').select('id, full_name, email').in('id', creditorIds)
     for (const cp of creditorProfiles ?? []) {
       creditorNames.set(cp.id, cp.full_name || cp.email?.split('@')[0] || 'Someone')
+      if (cp.email) creditorEmailById.set(cp.id, cp.email.toLowerCase())
     }
   }
+
+  // Person token = email when known, else an id-based key. Netting keys both
+  // directions (what R owes X, what X owes R) on the same token so they cancel.
+  const tokenOf = (creditorId: string) => creditorEmailById.get(creditorId) ?? `id:${creditorId}`
+  const nameByEmail = new Map(allRegisteredNames)
+  if (user.email) nameByEmail.set(user.email.toLowerCase(), creatorName)
+  for (const [id, nm] of creditorNames) {
+    const em = creditorEmailById.get(id)
+    if (em) nameByEmail.set(em, nm)
+  }
+  const nameOfToken = (token: string) =>
+    token.startsWith('id:')
+      ? creditorNames.get(token.slice(3)) ?? 'Someone'
+      : nameByEmail.get(token) ?? token.split('@')[0]
 
   const transporter = createTransporter()
   let sent = 0
@@ -283,21 +300,38 @@ export async function POST(request: Request) {
       }
     }
 
-    // Tally this recipient's unpaid shares by whoever they owe (the payer of
-    // each split), so the email can show "pay X to A, Y to B".
-    const byCreditor = new Map<string, number>()
+    // Net tally per person: what this recipient owes each payer, MINUS what that
+    // payer owes the recipient back (for bills the recipient fronted). Example:
+    // you paid ₹1000 for them, they paid ₹300 for you -> they owe you ₹700 net.
+    const net = new Map<string, number>()
+    // Direction 1 — the recipient owes the payer of each split they're in.
     for (const { split, amountOwed } of recipientSplits) {
-      const cId = (split.paid_by || split.created_by || user.id) as string
-      byCreditor.set(cId, (byCreditor.get(cId) ?? 0) + amountOwed)
+      const token = tokenOf((split.paid_by || split.created_by || user.id) as string)
+      net.set(token, (net.get(token) ?? 0) + amountOwed)
     }
-    const oweByPerson = Array.from(byCreditor.entries())
-      .map(([id, amount]) => ({ name: creditorNames.get(id) ?? 'Someone', amount }))
+    // Direction 2 — bills the recipient paid: everyone else's unpaid share there
+    // is owed back to the recipient, so it offsets what the recipient owes them.
+    let hasOffsets = false
+    for (const split of splits) {
+      const payerToken = tokenOf((split.paid_by || split.created_by || user.id) as string)
+      if (payerToken !== email) continue // only splits this recipient paid
+      for (const p of split.split_participants) {
+        const pe = p.participant_email?.toLowerCase()
+        if (p.is_paid || !pe || pe === email) continue
+        net.set(pe, (net.get(pe) ?? 0) - p.amount_owed)
+        hasOffsets = true
+      }
+    }
+    const oweByPerson = Array.from(net.entries())
+      .map(([token, amount]) => ({ name: nameOfToken(token), amount: Math.round(amount * 100) / 100 }))
+      .filter(o => o.amount > 0.009)
       .sort((a, b) => b.amount - a.amount)
 
     const { subject, html } = buildConsolidatedReminderEmail({
       recipientName: name,
       creatorName,
       oweByPerson,
+      oweNetted: hasOffsets,
       splits: recipientSplits.map(({ split, amountOwed }) => ({
         title: split.title,
         total_amount: split.total_amount,
