@@ -92,79 +92,108 @@ export async function GET() {
   )
 }
 
-// ─── helper: back-fill email across splits, trip invitations, and trip members ──
+// ─── helper: cascade a contact's email/name change across EVERY denormalised
+// reference the editing user owns — email columns, the linked account-id columns,
+// and stored names. Runs with the service client but is strictly scoped to rows the
+// user owns (splits/trips they created, tagged_payments they're a party to), so it
+// never touches another user's data. Awaited by callers so it's reliable.
 async function backfillAllReferences(
-  supabase: Awaited<ReturnType<typeof import('@/lib/supabase/server').createClient>>,
   userId: string,
-  name: string,
-  oldEmail: string | null,
-  newEmail: string,
-) {
-  const emailChanged = oldEmail && oldEmail !== newEmail
+  userEmail: string,
+  oldName: string | null,
+  newName: string,
+  oldEmailRaw: string | null,
+  newEmailRaw: string | null,
+): Promise<string[]> {
+  const svc = createServiceClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+  const errors: string[] = []
+  const run = async (label: string, p: PromiseLike<{ error: unknown }>) => {
+    try { const { error } = await p; if (error) errors.push(`${label}: ${(error as { message?: string })?.message ?? error}`) }
+    catch (e) { errors.push(`${label}: ${e instanceof Error ? e.message : String(e)}`) }
+  }
 
-  // 1. split_participants (scoped to splits created by this user)
-  const { data: userSplits } = await supabase
-    .from('expense_splits')
-    .select('id')
-    .eq('created_by', userId)
+  const oldEmail = oldEmailRaw?.trim().toLowerCase() || null
+  const newEmail = newEmailRaw?.trim().toLowerCase() || null
+  const emailChanged = oldEmail !== newEmail
+  const nameChanged = !!newName && oldName?.trim().toLowerCase() !== newName.trim().toLowerCase()
 
+  // Resolve the account ids behind the old / new email (null if unregistered/cleared)
+  const resolveId = async (email: string | null) => {
+    if (!email) return null
+    const { data } = await svc.from('profiles').select('id').eq('email', email).maybeSingle()
+    return ((data as { id?: string } | null)?.id) ?? null
+  }
+  const [oldAccountId, newAccountId] = await Promise.all([resolveId(oldEmail), resolveId(newEmail)])
+  const idChanged = oldAccountId !== newAccountId
+
+  if (!emailChanged && !nameChanged && !idChanged) return errors
+
+  // ── split_participants (splits created by this user) — nullable email, so this
+  //    is also where clearing an email takes effect.
+  const { data: userSplits } = await svc.from('expense_splits').select('id').eq('created_by', userId)
   const splitIds = (userSplits ?? []).map((s: { id: string }) => s.id)
   if (splitIds.length > 0) {
-    if (emailChanged) {
-      await supabase
-        .from('split_participants')
-        .update({ participant_email: newEmail })
-        .in('split_id', splitIds)
-        .eq('participant_email', oldEmail)
+    const spPatch: Record<string, unknown> = { participant_email: newEmail, participant_user_id: newAccountId }
+    if (nameChanged) spPatch.participant_name = newName
+    if (oldEmail) {
+      await run('split_participants(email)', svc.from('split_participants').update(spPatch).in('split_id', splitIds).eq('participant_email', oldEmail))
     }
-    // name-only → email (null email + name match)
-    await supabase
-      .from('split_participants')
-      .update({ participant_email: newEmail })
-      .in('split_id', splitIds)
-      .ilike('participant_name', name)
-      .is('participant_email', null)
-  }
-
-  // 2. trip_invitations sent by this user
-  if (emailChanged) {
-    await supabase
-      .from('trip_invitations')
-      .update({ invitee_email: newEmail })
-      .eq('inviter_id', userId)
-      .eq('invitee_email', oldEmail)
-  }
-  // name-only invitations (no email at time of invite)
-  await supabase
-    .from('trip_invitations')
-    .update({ invitee_email: newEmail })
-    .eq('inviter_id', userId)
-    .ilike('invitee_name', name)
-    .is('invitee_email', null)
-
-  // 3. trip_members in trips owned by this user
-  const { data: userTrips } = await supabase
-    .from('trips')
-    .select('id')
-    .eq('user_id', userId)
-
-  const tripIds = (userTrips ?? []).map((t: { id: string }) => t.id)
-  if (tripIds.length > 0) {
-    if (emailChanged) {
-      await supabase
-        .from('trip_members')
-        .update({ email: newEmail })
-        .in('trip_id', tripIds)
-        .eq('email', oldEmail)
+    if (oldAccountId && idChanged) {
+      await run('split_participants(uid)', svc.from('split_participants').update(spPatch).in('split_id', splitIds).eq('participant_user_id', oldAccountId))
     }
-    // name-only members
-    await supabase
-      .from('trip_members')
-      .update({ email: newEmail })
-      .in('trip_id', tripIds)
-      .ilike('name', name)
-      .is('email', null)
+    if (newEmail && oldName) {
+      await run('split_participants(name)', svc.from('split_participants').update(spPatch).in('split_id', splitIds).is('participant_email', null).ilike('participant_name', oldName))
+    }
   }
+
+  // ── expense_splits.paid_by (the creditor/payer) — fixes the reminder/balance side
+  if (oldAccountId && idChanged) {
+    await run('expense_splits.paid_by', svc.from('expense_splits').update({ paid_by: newAccountId }).eq('created_by', userId).eq('paid_by', oldAccountId))
+  }
+
+  // ── tagged_payments — to_email is NOT NULL (only moves to a real new email);
+  //    from_email is nullable.
+  if (oldEmail) {
+    if (newEmail) {
+      await run('tagged_payments(to)', svc.from('tagged_payments').update({ to_email: newEmail, to_user_id: newAccountId }).eq('from_user_id', userId).eq('to_email', oldEmail))
+    } else if (idChanged) {
+      await run('tagged_payments(to_uid)', svc.from('tagged_payments').update({ to_user_id: newAccountId }).eq('from_user_id', userId).eq('to_email', oldEmail))
+    }
+    const fromPatch: Record<string, unknown> = { from_email: newEmail, from_user_id: newAccountId }
+    if (nameChanged) fromPatch.from_name = newName
+    await run('tagged_payments(from)', svc.from('tagged_payments').update(fromPatch).eq('to_user_id', userId).eq('from_email', oldEmail))
+  }
+
+  // The remaining tables have NOT NULL email columns — only updatable to a real
+  // new email (can't be nulled). When the email is cleared we still propagate a rename.
+  if (oldEmail && (newEmail || nameChanged)) {
+    // ── trip_invitations sent by this user
+    const invPatch: Record<string, unknown> = {}
+    if (newEmail) invPatch.invitee_email = newEmail
+    if (nameChanged) invPatch.invitee_name = newName
+    await run('trip_invitations', svc.from('trip_invitations').update(invPatch).eq('inviter_id', userId).eq('invitee_email', oldEmail))
+
+    // ── trips owned by this user → trip_members (+ trip_personal_budgets)
+    const { data: userTrips } = await svc.from('trips').select('id').eq('user_id', userId)
+    const tripIds = (userTrips ?? []).map((t: { id: string }) => t.id)
+    if (tripIds.length > 0) {
+      // UNIQUE(trip_id,email) / UNIQUE(trip_id,user_id) can collide → tolerate
+      const tmPatch: Record<string, unknown> = {}
+      if (newEmail) tmPatch.email = newEmail
+      if (nameChanged) tmPatch.name = newName
+      await run('trip_members', svc.from('trip_members').update(tmPatch).in('trip_id', tripIds).eq('email', oldEmail))
+      if (newEmail) {
+        await run('trip_personal_budgets', svc.from('trip_personal_budgets').update({ user_email: newEmail, user_id: newAccountId }).in('trip_id', tripIds).eq('user_email', oldEmail))
+      }
+    }
+
+    // ── split_notifications created by this user
+    if (newEmail) {
+      await run('split_notifications', svc.from('split_notifications').update({ invitee_email: newEmail }).eq('creator_email', userEmail).eq('invitee_email', oldEmail))
+    }
+  }
+
+  return errors
 }
 
 // ─── POST /api/friends ────────────────────────────────────────────────────────
@@ -260,9 +289,11 @@ export async function POST(request: Request) {
     }
   }
 
-  // Back-fill email across all tagged records (new contact, no old email)
+  // Back-fill references for a new contact (no old email): link any rows that were
+  // added by this name before the contact existed, and set account ids.
   if (email) {
-    backfillAllReferences(supabase, user.id, name, null, email).catch(() => {})
+    await backfillAllReferences(user.id, user.email?.toLowerCase() ?? '', name, name, null, email)
+      .catch(() => [])
   }
 
   return NextResponse.json({
@@ -290,15 +321,16 @@ export async function PUT(request: Request) {
   const email = body.email?.trim().toLowerCase() || null
   const notes = body.notes?.trim() || null
 
-  // Fetch old email before updating so we can propagate changes
+  // Fetch old name + email before updating so we can propagate changes
   const { data: oldContact } = await supabase
     .from('contacts')
-    .select('email')
+    .select('name, email')
     .eq('id', id)
     .eq('user_id', user.id)
     .single()
 
   const oldEmail = oldContact?.email ?? null
+  const oldName = oldContact?.name ?? null
 
   const { data: contact, error } = await supabase
     .from('contacts')
@@ -348,16 +380,18 @@ export async function PUT(request: Request) {
     }
   }
 
-  // Propagate email change across all tagged records (splits, trip invitations, trip members)
-  if (email) {
-    backfillAllReferences(supabase, user.id, name, oldEmail, email).catch(() => {})
-  }
+  // Propagate the email/name change (including clearing the email) across every
+  // denormalised reference this user owns. Awaited so it completes before we respond.
+  const backfillWarnings = await backfillAllReferences(
+    user.id, user.email?.toLowerCase() ?? '', oldName, name, oldEmail, email,
+  ).catch((e) => [e instanceof Error ? e.message : String(e)])
 
   return NextResponse.json({
     ...contact,
     connected: !!friendUserId,
     friend_user_id: friendUserId,
     friendship_id: friendshipId,
+    ...(backfillWarnings.length > 0 ? { backfill_warnings: backfillWarnings } : {}),
   })
 }
 
