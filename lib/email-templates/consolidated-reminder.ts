@@ -47,21 +47,23 @@ export function buildConsolidatedReminderEmail(opts: {
   splits: ConsolidatedSplitItem[]
   appUrl: string
   oweByPerson?: { name: string; youOwe: number; owedBack: number; net: number }[]
+  amountDue?: number
 }): { subject: string; html: string } {
-  const { recipientName, creatorName, splits, appUrl, oweByPerson = [] } = opts
+  const { recipientName, creatorName, splits, appUrl, oweByPerson = [], amountDue } = opts
 
   const displayCreator = capitalize(creatorName)
   const displayRecipient = capitalize(recipientName.split(' ')[0])
-  const totalOwed = splits.reduce((s, sp) => s + sp.amountOwed, 0)
+  const grossOwed = splits.reduce((s, sp) => s + sp.amountOwed, 0)
+  // The headline is the NET due (after amounts owed back to the recipient) when
+  // provided; the split cards still itemise the gross shares.
+  const totalOwed = amountDue != null ? amountDue : grossOwed
   const splitCount = splits.length
 
   // Determine highest reminder count across all splits to label the email
   const maxReminder = splits.reduce((m, sp) => Math.max(m, sp.reminderCount ?? 1), 1)
   const reminderLabel = maxReminder > 1 ? `[${ordinal(maxReminder)} Reminder] ` : ''
 
-  const subject = splitCount === 1
-    ? `${reminderLabel}Payment Reminder: ${splits[0].title} — ${fmt(splits[0].amountOwed)} due`
-    : `${reminderLabel}Payment Reminder: ${fmt(totalOwed)} due across ${splitCount} expenses`
+  const subject = `${reminderLabel}Payment Reminder: ${fmt(totalOwed)} due${splitCount > 1 ? ` across ${splitCount} expenses` : ''}`
 
   // Balance summary — per counterparty, the two directions (what you owe them +,
   // what they owe you back −) and the resulting net. Mirrors the app's Balances.
@@ -225,7 +227,7 @@ export function buildConsolidatedReminderEmail(opts: {
                   <!-- Greeting -->
                   <p style="margin:0 0 6px;font-size:14px;font-weight:600;color:#1e293b;">Dear ${displayRecipient},</p>
                   <p style="margin:0 0 24px;font-size:13px;color:#64748b;line-height:1.7;">
-                    You have ${splitCount === 1 ? 'a pending payment' : `<strong style="color:#1e293b;">${splitCount} pending payments</strong>`} for shared expenses. Here's what you owe — the itemised breakdown follows below.
+                    You have ${splitCount === 1 ? 'a pending payment' : `<strong style="color:#1e293b;">${splitCount} pending payments</strong>`} for shared expenses. Your net balance is summarised below, with each expense itemised after.
                   </p>
 
                   ${oweBlock}
@@ -240,9 +242,9 @@ export function buildConsolidatedReminderEmail(opts: {
                       <td style="padding:14px 18px;background:#f1f5f9;border-radius:6px;">
                         <table width="100%" cellpadding="0" cellspacing="0" border="0">
                           <tr>
-                            <td style="font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.06em;vertical-align:middle;">Total Outstanding</td>
+                            <td style="font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.06em;vertical-align:middle;">Your share across these expenses</td>
                             <td style="text-align:right;vertical-align:middle;white-space:nowrap;">
-                              <span style="font-size:22px;font-weight:800;color:#1a2744;">${fmt(totalOwed)}</span>
+                              <span style="font-size:22px;font-weight:800;color:#1a2744;">${fmt(grossOwed)}</span>
                             </td>
                           </tr>
                         </table>
