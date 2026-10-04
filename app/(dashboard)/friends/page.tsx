@@ -50,7 +50,11 @@ interface SplitRow {
   total_amount: number
   date: string
   category: string
-  split_participants?: { id: string; participant_name: string; participant_email: string | null; amount_owed: number; is_paid: boolean }[]
+  created_by?: string
+  paid_by?: string | null
+  paid_by_email?: string | null
+  is_settled?: boolean
+  split_participants?: { id: string; participant_name: string; participant_email: string | null; participant_user_id?: string | null; amount_owed: number; is_paid: boolean }[]
 }
 
 interface TaggedTxn {
@@ -89,6 +93,7 @@ function avatarColor(name: string) {
 
 export default function FriendsPage() {
   const [myId, setMyId] = useState('')
+  const [myEmail, setMyEmail] = useState('')
   const [friends, setFriends] = useState<Friend[]>([])
   const [incomingRequests, setIncomingRequests] = useState<IncomingRequest[]>([])
   const [processingReq, setProcessingReq] = useState<string | null>(null)
@@ -132,7 +137,7 @@ export default function FriendsPage() {
   // ── Bootstrap ─────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    createClient().auth.getUser().then(({ data: { user } }) => { if (user) setMyId(user.id) })
+    createClient().auth.getUser().then(({ data: { user } }) => { if (user) { setMyId(user.id); setMyEmail((user.email ?? '').toLowerCase()) } })
     loadFriends()
     loadIncomingRequests()
   }, [])
@@ -202,10 +207,17 @@ export default function FriendsPage() {
 
   function loadSplits(friend: Friend) {
     setLoadingSplits(true)
-    const url = `/api/splits?contact_id=${friend.id}${friend.email ? `&contact_email=${encodeURIComponent(friend.email.toLowerCase())}` : ''}`
-    fetch(url)
+    // Load all splits and keep the ones this friend is in (by email OR, for a
+    // name-only friend, by name) — same matching the balance detail sheet uses,
+    // so multi-participant trip splits (which aren't contact_id-linked) count too.
+    const el = friend.email?.toLowerCase() ?? ''
+    const nl = friend.name.toLowerCase()
+    const isFriend = (p: { participant_email: string | null; participant_name: string }) =>
+      (!!el && p.participant_email?.toLowerCase() === el) ||
+      (!p.participant_email && !!nl && p.participant_name.toLowerCase() === nl)
+    fetch('/api/splits')
       .then(r => r.json())
-      .then(d => setSplits(Array.isArray(d) ? d : []))
+      .then(d => setSplits(Array.isArray(d) ? d.filter((s: SplitRow) => (s.split_participants ?? []).some(isFriend)) : []))
       .catch(() => {})
       .finally(() => setLoadingSplits(false))
   }
@@ -368,17 +380,44 @@ export default function FriendsPage() {
     (f.email ?? '').toLowerCase().includes(search.toLowerCase())
   )
 
-  const selectedEmailLower = selected?.email?.toLowerCase()
-  const splitOwed = splits.reduce((sum, s) => {
-    const relevant = (s.split_participants ?? []).filter(p =>
-      !p.is_paid && (selectedEmailLower ? p.participant_email?.toLowerCase() === selectedEmailLower : false)
-    )
-    return sum + relevant.reduce((a, p) => a + p.amount_owed, 0)
-  }, 0)
+  const selectedEmailLower = selected?.email?.toLowerCase() ?? ''
+  const selectedNameLower = selected?.name?.toLowerCase() ?? ''
+  const matchesFriend = (p: NonNullable<SplitRow['split_participants']>[number]) =>
+    (!!selectedEmailLower && p.participant_email?.toLowerCase() === selectedEmailLower) ||
+    (!p.participant_email && !!selectedNameLower && p.participant_name.toLowerCase() === selectedNameLower)
+  const isSelf = (p: NonNullable<SplitRow['split_participants']>[number]) =>
+    (!!p.participant_user_id && p.participant_user_id === myId) ||
+    (!!myEmail && p.participant_email?.toLowerCase() === myEmail)
+
+  // Creditor-aware split balance (same logic as the Balances tab / detail sheet):
+  //  - I paid the bill  → the friend's unpaid share is owed to me
+  //  - someone else paid → my unpaid share is what I owe them
+  // Registered payer = paid_by; unregistered (email-only) payer = paid_by_email.
+  let splitTheyOwe = 0, splitYouOwe = 0
+  for (const s of splits) {
+    if (s.is_settled) continue
+    const unregPayer = !s.paid_by && !!s.paid_by_email
+    const creditorId = s.paid_by || (unregPayer ? null : s.created_by)
+    if (!unregPayer && !!myId && creditorId === myId) {
+      // I paid → the friend's unpaid share is owed to me
+      for (const p of (s.split_participants ?? [])) if (!p.is_paid && matchesFriend(p)) splitTheyOwe += p.amount_owed
+    } else {
+      // Someone else paid → I owe them. Only count it toward THIS friend when the
+      // friend is the actual payer (matches how the Balances tab attributes it),
+      // so a bill a third party paid doesn't get charged to this friend.
+      const payerIsFriend = unregPayer
+        ? s.paid_by_email?.toLowerCase() === selectedEmailLower
+        : (!!selected?.friend_user_id && s.paid_by === selected.friend_user_id)
+      if (payerIsFriend) {
+        const mine = (s.split_participants ?? []).find(isSelf)
+        if (mine && !mine.is_paid) splitYouOwe += mine.amount_owed
+      }
+    }
+  }
   const txnOwed = taggedTxns.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
   const txnReceived = taggedTxns.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
   // positive = friend owes you; negative = you owe friend
-  const netBalance = splitOwed + txnOwed - txnReceived
+  const netBalance = splitTheyOwe - splitYouOwe + txnOwed - txnReceived
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -655,9 +694,10 @@ export default function FriendsPage() {
                               {formatCurrency(Math.abs(netBalance))}
                             </p>
                           )}
-                          {(splitOwed > 0 || txnOwed > 0 || txnReceived > 0) && (
+                          {(splitTheyOwe > 0 || splitYouOwe > 0 || txnOwed > 0 || txnReceived > 0) && (
                             <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                              {splitOwed > 0 && <span>Splits: <span className="font-medium text-foreground">{formatCurrency(splitOwed)}</span></span>}
+                              {splitTheyOwe > 0 && <span>They owe (splits): <span className="font-medium text-foreground">{formatCurrency(splitTheyOwe)}</span></span>}
+                              {splitYouOwe > 0 && <span>You owe (splits): <span className="font-medium text-foreground">{formatCurrency(splitYouOwe)}</span></span>}
                               {txnOwed > 0 && <span>Expenses: <span className="font-medium text-foreground">{formatCurrency(txnOwed)}</span></span>}
                               {txnReceived > 0 && <span>Received: <span className="font-medium text-foreground">{formatCurrency(txnReceived)}</span></span>}
                             </div>
