@@ -392,6 +392,11 @@ export async function POST(request: Request) {
       .map(o => ({ name: o.name, amount: round2(-o.net) }))
       .sort((a, b) => b.amount - a.amount)
     const pendingReceive = round2(pendingPeople.reduce((s, o) => s + o.amount, 0))
+    // Per-person "pending to pay" — the recipient-owes side, mirrors pendingPeople.
+    const pendingPayPeople = oweByPerson
+      .filter(o => o.net > 0.009)
+      .map(o => ({ name: o.name, amount: round2(o.net) }))
+      .sort((a, b) => b.amount - a.amount)
     // Nothing owed and nothing to collect → they're square; skip.
     if (netTotalDue <= 0.009 && pendingReceive <= 0.009) continue
 
@@ -432,6 +437,7 @@ export async function POST(request: Request) {
       amountDue: netTotalDue,
       pendingReceive,
       pendingPeople,
+      pendingPayPeople,
       splits: sortedRecipientSplits.map(({ split, amountOwed }) => ({
         title: split.title,
         total_amount: split.total_amount,

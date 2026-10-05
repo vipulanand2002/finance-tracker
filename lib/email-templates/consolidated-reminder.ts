@@ -51,8 +51,9 @@ export function buildConsolidatedReminderEmail(opts: {
   owedToYouSplits?: ConsolidatedSplitItem[]
   pendingReceive?: number
   pendingPeople?: { name: string; amount: number }[]
+  pendingPayPeople?: { name: string; amount: number }[]
 }): { subject: string; html: string } {
-  const { recipientName, creatorName, splits, appUrl, oweByPerson = [], amountDue, owedToYouSplits = [], pendingReceive = 0, pendingPeople = [] } = opts
+  const { recipientName, creatorName, splits, appUrl, oweByPerson = [], amountDue, owedToYouSplits = [], pendingReceive = 0, pendingPeople = [], pendingPayPeople = [] } = opts
 
   const displayCreator = capitalize(creatorName)
   const displayRecipient = capitalize(recipientName.split(' ')[0])
@@ -148,6 +149,44 @@ export function buildConsolidatedReminderEmail(opts: {
                           }).join('')}
                         </table>
                         <div style="font-size:10px;color:#047857;opacity:0.85;margin-top:10px;line-height:1.5;">What these people still owe you — you'll collect this once they settle.</div>
+                      </td>
+                    </tr>
+                  </table>`
+
+  // "Pending to pay" box — mirror of pending-receive, in amber, showing who the
+  // recipient still owes net and the total they'll pay out. Order first in the
+  // layout since it's the action list the recipient needs to act on.
+  const payTally = pendingPayPeople.filter(p => p.amount > 0.009)
+  const pendingTotal = payTally.reduce((s, p) => s + p.amount, 0)
+  const pendingPayBlock = payTally.length === 0 ? '' : `
+                  <!-- Pending to pay -->
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:22px;">
+                    <tr>
+                      <td style="padding:16px 18px;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;">
+                        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:10px;">
+                          <tr>
+                            <td style="font-size:10px;font-weight:700;color:#9a3412;text-transform:uppercase;letter-spacing:0.08em;vertical-align:middle;">Pending to pay</td>
+                            <td style="text-align:right;vertical-align:middle;white-space:nowrap;">
+                              <span style="font-size:15px;font-weight:800;color:#9a3412;">${fmt(pendingTotal)}</span>
+                            </td>
+                          </tr>
+                        </table>
+                        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                          ${payTally.map((p, i) => {
+                            const nm = capitalize(p.name)
+                            return `
+                          <tr>
+                            <td style="padding:7px 0;${i < payTally.length - 1 ? 'border-bottom:1px solid #fde4c4;' : ''}vertical-align:middle;">
+                              <span style="display:inline-block;width:24px;height:24px;border-radius:50%;background:#c2410c;text-align:center;line-height:24px;font-size:11px;font-weight:700;color:#fff;vertical-align:middle;">${nm.charAt(0)}</span>
+                              <span style="display:inline-block;vertical-align:middle;margin-left:8px;font-size:13px;font-weight:600;color:#7c2d12;">${nm}</span>
+                            </td>
+                            <td style="padding:7px 0;${i < payTally.length - 1 ? 'border-bottom:1px solid #fde4c4;' : ''}text-align:right;vertical-align:middle;white-space:nowrap;font-size:14px;font-weight:700;color:#9a3412;">
+                              ${fmt(p.amount)}
+                            </td>
+                          </tr>`
+                          }).join('')}
+                        </table>
+                        <div style="font-size:10px;color:#9a3412;opacity:0.85;margin-top:10px;line-height:1.5;">What you owe each person — settle these to clear your balance.</div>
                       </td>
                     </tr>
                   </table>`
@@ -292,6 +331,8 @@ export function buildConsolidatedReminderEmail(opts: {
                   </p>
 
                   ${oweBlock}
+
+                  ${pendingPayBlock}
 
                   ${pendingBlock}
 
