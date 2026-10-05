@@ -69,9 +69,16 @@ export async function POST(request: Request) {
   const authorName = myProfile?.full_name || user.email?.split('@')[0] || 'A friend'
   const svc = service()
 
-  // Only keep the trip if the friend is actually part of it
+  // Only keep the trip if it makes sense. For a registered friend, require that
+  // they're actually a trip member (otherwise an on-behalf transaction would land
+  // in their account for a trip they're not part of). For an unregistered contact
+  // there's no account to protect — trust the user's trip selection.
   let tripId: string | null = null
-  if (body.trip_id && await friendInTrip(body.trip_id, resolved.friendId, resolved.email, resolved.name)) tripId = body.trip_id
+  if (body.trip_id) {
+    tripId = resolved.friendId
+      ? (await friendInTrip(body.trip_id, resolved.friendId, resolved.email, resolved.name) ? body.trip_id : null)
+      : body.trip_id
+  }
 
   const splitParts = body.split?.participants as { name: string; email?: string; amount: number }[] | undefined
 
