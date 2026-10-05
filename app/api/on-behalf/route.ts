@@ -19,28 +19,37 @@ async function resolveFriendUserId(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
   contactId: string,
-): Promise<{ friendId: string | null; email: string; name: string } | null> {
+): Promise<{ friendId: string | null; email: string | null; name: string } | null> {
   const { data: contact } = await supabase
     .from('contacts').select('email, name').eq('id', contactId).eq('user_id', userId).single()
-  const email = contact?.email?.toLowerCase()
-  if (!email) return null
-  const name = contact?.name?.trim() || email.split('@')[0]
+  const name = contact?.name?.trim()
+  if (!name) return null // no such contact / no name
+  const email = contact?.email?.toLowerCase() || null
+  if (!email) return { friendId: null, email: null, name } // name-only contact (no account, no mail)
   const { data: profile } = await service().from('profiles').select('id').eq('email', email).single()
   // profile.id === userId would be yourself; treat as unregistered (friendId null)
   const friendId = profile?.id && profile.id !== userId ? profile.id : null
   return { friendId, email, name }
 }
 
-// Is the friend a member of this trip (owner / invitation / member)?
-async function friendInTrip(tripId: string, friendId: string | null, friendEmail: string): Promise<boolean> {
+// Is the friend a member of this trip (owner / invitation / member)? Matches by
+// email, or — for a name-only contact — by name against the _nomail_ placeholder rows.
+async function friendInTrip(tripId: string, friendId: string | null, friendEmail: string | null, friendName: string): Promise<boolean> {
   const svc = service()
   const { data: trip } = await svc.from('trips').select('user_id').eq('id', tripId).single()
   if (!trip) return false
   if (friendId && trip.user_id === friendId) return true
-  const { data: inv } = await svc.from('trip_invitations').select('id').eq('trip_id', tripId).eq('invitee_email', friendEmail).neq('status', 'declined').limit(1)
-  if (inv?.length) return true
-  const { data: mem } = await svc.from('trip_members').select('id').eq('trip_id', tripId).eq('email', friendEmail).limit(1)
-  return !!mem?.length
+  if (friendEmail) {
+    const { data: inv } = await svc.from('trip_invitations').select('id').eq('trip_id', tripId).eq('invitee_email', friendEmail).neq('status', 'declined').limit(1)
+    if (inv?.length) return true
+    const { data: mem } = await svc.from('trip_members').select('id').eq('trip_id', tripId).eq('email', friendEmail).limit(1)
+    if (mem?.length) return true
+  }
+  // name-only trip members are stored with a _nomail_ placeholder email
+  const { data: invN } = await svc.from('trip_invitations').select('id').eq('trip_id', tripId).ilike('invitee_name', friendName).like('invitee_email', '_nomail_%').neq('status', 'declined').limit(1)
+  if (invN?.length) return true
+  const { data: memN } = await svc.from('trip_members').select('id').eq('trip_id', tripId).ilike('name', friendName).like('email', '_nomail_%').limit(1)
+  return !!memN?.length
 }
 
 // POST /api/on-behalf — create a transaction in a friend's account, authored by me.
@@ -54,7 +63,7 @@ export async function POST(request: Request) {
   if (!body.on_behalf_of) return NextResponse.json({ error: 'Missing friend' }, { status: 400 })
 
   const resolved = await resolveFriendUserId(supabase, user.id, body.on_behalf_of)
-  if (!resolved) return NextResponse.json({ error: 'This contact needs an email to add an expense on their behalf' }, { status: 400 })
+  if (!resolved) return NextResponse.json({ error: 'This contact needs a name to add an expense on their behalf' }, { status: 400 })
 
   const { data: myProfile } = await supabase.from('profiles').select('full_name').eq('id', user.id).single()
   const authorName = myProfile?.full_name || user.email?.split('@')[0] || 'A friend'
@@ -62,13 +71,13 @@ export async function POST(request: Request) {
 
   // Only keep the trip if the friend is actually part of it
   let tripId: string | null = null
-  if (body.trip_id && await friendInTrip(body.trip_id, resolved.friendId, resolved.email)) tripId = body.trip_id
+  if (body.trip_id && await friendInTrip(body.trip_id, resolved.friendId, resolved.email, resolved.name)) tripId = body.trip_id
 
   const splitParts = body.split?.participants as { name: string; email?: string; amount: number }[] | undefined
 
-  // ── Unregistered contact (email but no account): there's no account to hold a
-  //    transaction, so we create a SPLIT ONLY, with the contact as the email-keyed
-  //    payer (their share paid, everyone else owes them).
+  // ── Unregistered contact (no account): there's no account to hold a transaction,
+  //    so we create a SPLIT ONLY with the contact as the payer (their share paid,
+  //    everyone else owes them). Keyed by email when they have one, else by name.
   if (!resolved.friendId) {
     if (!splitParts?.length) {
       return NextResponse.json({ error: 'Add split participants to log an expense for a contact without an account' }, { status: 400 })
@@ -82,7 +91,7 @@ export async function POST(request: Request) {
       trip_id: tripId,
       created_by: user.id,
       paid_by: null,
-      paid_by_email: resolved.email,
+      paid_by_email: resolved.email, // null for a name-only contact
       paid_by_name: resolved.name,
     }
     const { data: split, error: splitErr } = await svc.from('expense_splits').insert(splitBase).select().single()
@@ -92,14 +101,18 @@ export async function POST(request: Request) {
       }
       return NextResponse.json({ error: splitErr.message }, { status: 500 })
     }
-    const payerEmail = resolved.email.toLowerCase()
+    const payerEmail = resolved.email?.toLowerCase() ?? null
+    const payerName = resolved.name.trim().toLowerCase()
     await svc.from('split_participants').insert(
       splitParts.filter(p => p.name?.trim() && p.amount > 0).map(p => {
-        const isPayer = !!p.email && p.email.toLowerCase() === payerEmail
+        // The payer is matched by email when we have one, otherwise by name.
+        const isPayer = payerEmail
+          ? (!!p.email && p.email.toLowerCase() === payerEmail)
+          : (!p.email && p.name.trim().toLowerCase() === payerName)
         return {
           split_id: split.id,
           participant_name: p.name.trim(),
-          participant_email: p.email?.toLowerCase() ?? null,
+          participant_email: p.email?.trim().toLowerCase() || null,
           participant_user_id: null, // unregistered — no account to link
           amount_owed: p.amount,
           is_paid: isPayer,
@@ -112,6 +125,7 @@ export async function POST(request: Request) {
 
   // ── Registered contact: full on-behalf (transaction in their account + split).
   const friendId = resolved.friendId
+  const friendEmail = resolved.email as string // a registered contact always has an email
 
   const payload: Record<string, unknown> = {
     user_id: friendId,
@@ -139,12 +153,12 @@ export async function POST(request: Request) {
     const { data: profs } = await svc.from('profiles').select('id, email, full_name').in('email', tagEmails)
     const profileName = new Map<string, string>((profs ?? []).filter((p: { full_name: string | null }) => !!p.full_name).map((p: { email: string; full_name: string }) => [p.email.toLowerCase(), p.full_name]))
     for (const p of (profs ?? []) as { id: string; email: string }[]) {
-      if (p.email.toLowerCase() !== resolved.email) registeredTags.push({ email: p.email.toLowerCase(), userId: p.id })
+      if (p.email.toLowerCase() !== friendEmail) registeredTags.push({ email: p.email.toLowerCase(), userId: p.id })
     }
 
     const friendContactIds: string[] = []
     for (const email of tagEmails) {
-      if (email === resolved.email) continue // never tag the friend themselves
+      if (email === friendEmail) continue // never tag the friend themselves
       const { data: existing } = await svc.from('contacts').select('id').eq('user_id', friendId).eq('email', email).maybeSingle()
       if (existing?.id) { friendContactIds.push(existing.id); continue }
       let name = profileName.get(email)
@@ -188,7 +202,7 @@ export async function POST(request: Request) {
     if (!splitErr && split) {
       // The friend paid this bill (it's on their behalf), so THEIR share is
       // marked paid; you and everyone else still owe your shares.
-      const payerEmail = resolved.email.toLowerCase()
+      const payerEmail = friendEmail.toLowerCase()
       await svc.from('split_participants').insert(parts.filter(p => p.name?.trim() && p.amount > 0).map(p => {
         const isPayer = !!p.email && p.email.toLowerCase() === payerEmail
         return {
@@ -212,11 +226,11 @@ export async function POST(request: Request) {
       const hasKind = !probe.error
       const kind = body.type === 'income' ? 'payment' : 'charge'
       const { data: aProfile } = await svc.from('profiles').select('full_name').eq('id', friendId).single()
-      const aName = aProfile?.full_name || resolved.email.split('@')[0]
+      const aName = aProfile?.full_name || friendEmail.split('@')[0]
       const rows = registeredTags.map(t => ({
         from_user_id: friendId,
         from_name: aName,
-        from_email: resolved.email,
+        from_email: friendEmail,
         to_email: t.email,
         to_user_id: t.userId,
         amount: body.amount,

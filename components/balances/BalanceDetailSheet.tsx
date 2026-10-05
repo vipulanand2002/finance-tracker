@@ -121,8 +121,10 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
   let splitTheyOwe = 0, splitYouOwe = 0
   for (const s of splits) {
     if (s.is_settled) continue
-    // Unregistered (email-only) payer → the author is not the creditor.
-    const unregPayer = !s.paid_by && !!s.paid_by_email
+    // Unregistered payer (email-only or name-only) → the author is not the creditor.
+    const unregEmailPayer = !s.paid_by && !!s.paid_by_email
+    const unregNamePayer = !s.paid_by && !s.paid_by_email && !!s.paid_by_name
+    const unregPayer = unregEmailPayer || unregNamePayer
     const creditorId = s.paid_by || (unregPayer ? null : s.created_by)
     if (!unregPayer && creditorId === myId) {
       // I paid → the counterparty's unpaid share is owed to me
@@ -130,9 +132,11 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
     } else {
       // Someone else paid → I owe them. Only count it here when THIS counterparty
       // is the payer (matches the Balances tab), not just a co-participant.
-      const payerIsCp = unregPayer
+      const payerIsCp = unregEmailPayer
         ? s.paid_by_email?.toLowerCase() === emailLower
-        : (() => { const payer = s.split_participants.find(p => p.participant_user_id === creditorId); return !!payer && matchesCp(payer) })()
+        : unregNamePayer
+          ? s.paid_by_name?.trim().toLowerCase() === nameLower
+          : (() => { const payer = s.split_participants.find(p => p.participant_user_id === creditorId); return !!payer && matchesCp(payer) })()
       if (payerIsCp) {
         const mine = s.split_participants.find(p =>
           (p.participant_user_id && p.participant_user_id === myId) || (myEmail && p.participant_email?.toLowerCase() === myEmail))
@@ -195,12 +199,16 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
                   <p className="text-sm text-muted-foreground">No splits with {counterparty?.name}.</p>
                 ) : splits.map(s => {
                   // Who paid this bill, and does the amount flow between the two of you?
-                  const unregP = !s.paid_by && !!s.paid_by_email
+                  const unregPE = !s.paid_by && !!s.paid_by_email
+                  const unregPN = !s.paid_by && !s.paid_by_email && !!s.paid_by_name
+                  const unregP = unregPE || unregPN
                   const credId = s.paid_by || (unregP ? null : s.created_by)
                   const iAmPayer = !unregP && credId === myId
-                  const payerIsCp = unregP
+                  const payerIsCp = unregPE
                     ? s.paid_by_email?.toLowerCase() === emailLower
-                    : (() => { const payer = s.split_participants.find(p => p.participant_user_id === credId); return !!payer && matchesCp(payer) })()
+                    : unregPN
+                      ? s.paid_by_name?.trim().toLowerCase() === nameLower
+                      : (() => { const payer = s.split_participants.find(p => p.participant_user_id === credId); return !!payer && matchesCp(payer) })()
                   // I paid → what they still owe me · they paid → what I still owe them ·
                   // a third party paid → nothing flows between us on this split.
                   let amt = 0, label = ''

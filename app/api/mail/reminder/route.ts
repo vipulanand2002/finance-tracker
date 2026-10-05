@@ -235,16 +235,31 @@ export async function POST(request: Request) {
     return email?.toLowerCase() ?? null
   }
 
+  // Display names for name-only (no email) people, keyed by their `name:` token —
+  // both name-only payers (paid_by_name) and name-only participants.
+  const nameTokenName = new Map<string, string>()
+  for (const s of splits) {
+    if (s.paid_by_name) nameTokenName.set(`name:${s.paid_by_name.trim().toLowerCase()}`, s.paid_by_name.trim())
+    for (const p of s.split_participants) {
+      if (!p.participant_email && p.participant_name) nameTokenName.set(`name:${p.participant_name.trim().toLowerCase()}`, p.participant_name.trim())
+    }
+  }
+
   const nameOfToken = (token: string) =>
     token.startsWith('id:')
       ? creditorNames.get(token.slice(3)) ?? 'Someone'
-      : nameByEmail.get(token) ?? token.split('@')[0]
+      : token.startsWith('name:')
+        ? (nameTokenName.get(token) ?? token.slice(5))
+        : nameByEmail.get(token) ?? token.split('@')[0]
 
-  // The creditor's token: registered → their email/id; unregistered → the contact's
-  // current email (canonicalised by payer name) or paid_by_email; else the author.
+  // The creditor's token: registered → their email/id; unregistered with an email →
+  // the contact's current email (canonicalised); unregistered name-only → a name
+  // token; else the author (normal split).
   const creditorTokenOf = (s: Split) =>
     s.paid_by ? tokenOf(s.paid_by)
-      : (s.paid_by_email ? (canonEmail(s.paid_by_name, s.paid_by_email) ?? s.paid_by_email.toLowerCase()) : tokenOf((s.created_by ?? user.id) as string))
+      : s.paid_by_email ? (canonEmail(s.paid_by_name, s.paid_by_email) ?? s.paid_by_email.toLowerCase())
+      : s.paid_by_name ? `name:${s.paid_by_name.trim().toLowerCase()}`
+      : tokenOf((s.created_by ?? user.id) as string)
 
   // Build the recipient set. Contact reminder → just that contact. Trip reminder →
   // EVERYONE with an email who has a balance here (participants, payers, and you),
@@ -260,7 +275,7 @@ export async function POST(request: Request) {
         if (e) recipientEmails.add(e)
       }
       const ct = creditorTokenOf(s)
-      if (ct && !ct.startsWith('id:')) recipientEmails.add(ct)
+      if (ct && !ct.startsWith('id:') && !ct.startsWith('name:')) recipientEmails.add(ct)
     }
   }
   if (recipientEmails.size === 0) {

@@ -349,17 +349,19 @@ export async function PATCH(request: Request) {
       // paid_by_email (an unregistered contact). Only the payer's share is
       // auto-marked paid — otherwise editing would keep re-marking the creator's
       // own (unpaid) share as paid. Columns may not exist on un-migrated DBs.
-      type PayerRow = { paid_by?: string | null; paid_by_email?: string | null; created_by?: string | null }
+      type PayerRow = { paid_by?: string | null; paid_by_email?: string | null; paid_by_name?: string | null; created_by?: string | null }
       let splitRow: PayerRow | null = null
-      const pr = await supabase.from('expense_splits').select('paid_by, paid_by_email, created_by').eq('id', id!).single() as { data: PayerRow | null; error: { message?: string } | null }
-      if (pr.error?.message?.includes('paid_by_email')) {
+      const pr = await supabase.from('expense_splits').select('paid_by, paid_by_email, paid_by_name, created_by').eq('id', id!).single() as { data: PayerRow | null; error: { message?: string } | null }
+      if (pr.error?.message?.includes('paid_by')) {
         const pr2 = await supabase.from('expense_splits').select('paid_by, created_by').eq('id', id!).single() as { data: PayerRow | null }
         splitRow = pr2.data
       } else {
         splitRow = pr.data
       }
       const payerEmail = (splitRow?.paid_by_email ?? '').toLowerCase() || null
-      const payerIsCreator = !payerEmail && (splitRow?.paid_by || splitRow?.created_by || user.id) === user.id
+      // Name-only payer (no email) — matched by participant name instead.
+      const payerName = !payerEmail && splitRow?.paid_by_name ? splitRow.paid_by_name.trim().toLowerCase() : null
+      const payerIsCreator = !payerEmail && !payerName && (splitRow?.paid_by || splitRow?.created_by || user.id) === user.id
 
       // Delete only unpaid participants — paid ones stay intact
       await supabase
@@ -386,8 +388,10 @@ export async function PATCH(request: Request) {
           // Mark paid only if this participant is the payer. The creator counts
           // as payer only on a normal split (payerIsCreator); on an on-behalf
           // split the creator's share stays unpaid. An unregistered payer is
-          // matched by email.
-          const isPayer = (isCreator && payerIsCreator) || (!!payerEmail && !!p.email && p.email.toLowerCase() === payerEmail)
+          // matched by email, or by name when they have no email.
+          const isPayer = (isCreator && payerIsCreator)
+            || (!!payerEmail && !!p.email && p.email.toLowerCase() === payerEmail)
+            || (!!payerName && !p.email && p.name?.trim().toLowerCase() === payerName)
           return {
             split_id: id!,
             participant_name: p.name,

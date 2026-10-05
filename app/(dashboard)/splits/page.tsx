@@ -391,7 +391,9 @@ export default function SplitsPage() {
   // The payer (paid_by) is the creditor; falls back to the author for normal
   // splits. An unregistered email-only payer is never me, so those are "you owe".
   const iAmPayer = (s: Split) =>
-    s.paid_by ? s.paid_by === myId : (s.paid_by_email ? false : (!!myId && s.created_by === myId))
+    s.paid_by ? s.paid_by === myId
+      : (s.paid_by_email || s.paid_by_name) ? false  // unregistered payer (email or name-only) is never me
+      : (!!myId && s.created_by === myId)
 
   const owedToYou = active
     .filter(iAmPayer)
@@ -537,14 +539,14 @@ export default function SplitsPage() {
             Opens the full add popup — you can also make it a trip expense or a split. Saved to their account; only you can edit it.
           </p>
           <div className="space-y-1.5 mt-1">
-            {friends.filter(f => f.email).length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">Add a friend with an email first.</p>
-            ) : friends.filter(f => f.email).map(f => (
+            {friends.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">Add a friend first.</p>
+            ) : friends.map(f => (
               <button key={f.id} onClick={() => { setPickFriend(false); setOnBehalf(f) }}
                 className="w-full flex items-center justify-between gap-2 rounded-lg border p-2 text-left hover:bg-muted transition-colors">
                 <div className="min-w-0">
                   <p className="text-sm truncate">{f.name}</p>
-                  <p className="text-xs text-muted-foreground truncate">{f.email}</p>
+                  <p className="text-xs text-muted-foreground truncate">{f.email || 'No email · won’t receive reminders'}</p>
                 </div>
                 <Plus className="w-4 h-4 text-muted-foreground shrink-0" />
               </button>
