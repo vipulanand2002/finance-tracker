@@ -122,6 +122,7 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
   const [txExpanded, setTxExpanded] = useState(true)
   const [txViewMode, setTxViewMode] = useState<'all' | 'category' | 'member'>('all')
   const [viewTx, setViewTx] = useState<Transaction | null>(null)          // read-only transaction detail
+  const [viewMember, setViewMember] = useState<{ uid: string | null; email: string | null; name: string } | null>(null) // member balance popup
   const [collapsedMembers, setCollapsedMembers] = useState<Set<string>>(new Set())
   const [sendingReminders, setSendingReminders] = useState(false)
 
@@ -276,6 +277,65 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
       )
       .reduce((sum, p) => sum + p.amount_owed, 0)
     return directTx + splitShare
+  }
+
+  // Per-counterparty net balance for a trip member (balances-style). net > 0 means
+  // the member owes that person; net < 0 means that person owes the member.
+  function computeMemberBalance(member: { uid: string | null; email: string | null; name: string }) {
+    // Canonicalise: the same person must map to ONE token whether identified by
+    // account id or email (otherwise they'd show up twice).
+    const emailToUid = new Map<string, string>()
+    if (currentUserId && currentUserEmail) emailToUid.set(currentUserEmail.toLowerCase(), currentUserId)
+    for (const b of personalBudgets) if (b.user_email) emailToUid.set(b.user_email.toLowerCase(), b.user_id)
+    for (const s of tripSplits) for (const p of s.split_participants) {
+      if (p.participant_user_id && p.participant_email) emailToUid.set(p.participant_email.toLowerCase(), p.participant_user_id)
+    }
+    const emailToken = (email: string) => {
+      const u = emailToUid.get(email.toLowerCase())
+      return u ? `u:${u}` : `e:${email.toLowerCase()}`
+    }
+    const personToken = (uid?: string | null, email?: string | null, name?: string | null) =>
+      uid ? `u:${uid}` : email ? emailToken(email) : `n:${(name ?? '').trim().toLowerCase()}`
+    const creditorToken = (s: TripSplit) =>
+      s.paid_by ? `u:${s.paid_by}`
+        : s.paid_by_email ? emailToken(s.paid_by_email)
+        : s.paid_by_name ? `n:${s.paid_by_name.trim().toLowerCase()}`
+        : `u:${s.created_by}`
+    const partToken = (p: TripSplitParticipant) => personToken(p.participant_user_id, p.participant_email, p.participant_name)
+    const rToken = personToken(member.uid, member.email, member.name)
+
+    // Display names per token
+    const nameOf = new Map<string, string>()
+    if (currentUserId) nameOf.set(`u:${currentUserId}`, currentUserName || 'You')
+    if (currentUserEmail) nameOf.set(`e:${currentUserEmail.toLowerCase()}`, currentUserName || 'You')
+    for (const s of tripSplits) {
+      for (const p of s.split_participants) nameOf.set(partToken(p), p.participant_name)
+      if (s.paid_by_name) nameOf.set(`n:${s.paid_by_name.trim().toLowerCase()}`, s.paid_by_name.trim())
+      if (s.paid_by_email && s.paid_by_name) nameOf.set(`e:${s.paid_by_email.toLowerCase()}`, s.paid_by_name.trim())
+    }
+
+    const oweTo = new Map<string, number>()   // member owes token
+    const oweFrom = new Map<string, number>() // token owes member
+    for (const s of tripSplits) {
+      const cTok = creditorToken(s)
+      if (cTok === rToken) {
+        for (const p of s.split_participants) {
+          if (p.is_paid) continue
+          const pt = partToken(p)
+          if (pt === rToken) continue
+          oweFrom.set(pt, (oweFrom.get(pt) ?? 0) + p.amount_owed)
+        }
+      } else {
+        const mine = s.split_participants.find(p => !p.is_paid && partToken(p) === rToken)
+        if (mine) oweTo.set(cTok, (oweTo.get(cTok) ?? 0) + mine.amount_owed)
+      }
+    }
+    const resolveName = (tok: string) =>
+      nameOf.get(tok) ?? (tok.startsWith('u:') ? 'Member' : tok.startsWith('e:') ? tok.slice(2).split('@')[0] : tok.slice(2))
+    return [...new Set([...oweTo.keys(), ...oweFrom.keys()])]
+      .map(tok => ({ name: resolveName(tok), net: Math.round(((oweTo.get(tok) ?? 0) - (oweFrom.get(tok) ?? 0)) * 100) / 100 }))
+      .filter(o => Math.abs(o.net) > 0.009)
+      .sort((a, b) => b.net - a.net)
   }
 
   async function saveMyBudget(privateOverride?: boolean) {
@@ -542,22 +602,9 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                     ))
                     .reduce((sum, s) => sum + s.total_amount, 0)
                 }
-                // Unpaid split shares a person still owes.
-                const owesFor = (uid: string | null | undefined, email: string, name: string): number => {
-                  const el = email.toLowerCase(), nl = name.trim().toLowerCase()
-                  return tripSplits
-                    .flatMap(s => s.split_participants)
-                    .filter(p => !p.is_paid && (
-                      (uid && p.participant_user_id === uid) ||
-                      (!!el && p.participant_email?.toLowerCase() === el) ||
-                      (!el && !p.participant_email && p.participant_name.trim().toLowerCase() === nl)
-                    ))
-                    .reduce((sum, p) => sum + p.amount_owed, 0)
-                }
-
                 const resolved = memberList.map(m => {
                   const uid = m.userId ?? (m.email ? emailToUserId.get(m.email.toLowerCase()) ?? null : null)
-                  return { ...m, uid, spent: spentFor(uid, m.email, m.name), owes: owesFor(uid, m.email, m.name) }
+                  return { ...m, uid, spent: spentFor(uid, m.email, m.name) }
                 })
 
                 // Temporary members: name-only people in the splits (participants or
@@ -575,16 +622,21 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                   }
                 }
                 const temporary = [...tempNames.values()]
-                  .map(name => ({ name, spent: spentFor(null, '', name), owes: owesFor(null, '', name) }))
+                  .map(name => ({ name, spent: spentFor(null, '', name) }))
                   .sort((a, b) => b.spent - a.spent)
 
                 // Total spent across everyone (members + temporary) for the % share.
                 const totalTrip = resolved.reduce((s, m) => s + m.spent, 0) + temporary.reduce((s, t) => s + t.spent, 0)
 
-                const memberCard = (name: string, email: string | null, spent: number, owes: number, isMe: boolean, temp: boolean) => {
+                const memberCard = (m: { uid: string | null; email: string | null; name: string }, spent: number, isMe: boolean, temp: boolean) => {
+                  const { name, email } = m
                   const pct = totalTrip > 0 ? (spent / totalTrip) * 100 : 0
                   return (
-                    <div key={(email || name) + (temp ? '_t' : '')} className="rounded-lg border p-3 space-y-2">
+                    <button
+                      key={(email || name) + (temp ? '_t' : '')}
+                      onClick={() => setViewMember({ uid: m.uid, email: m.email, name: m.name })}
+                      className="w-full text-left rounded-lg border p-3 space-y-2 hover:bg-muted/40 transition-colors"
+                    >
                       <div className="flex items-center justify-between gap-3">
                         <div className="flex items-center gap-2.5 min-w-0">
                           <span className="w-8 h-8 rounded-full bg-primary/15 text-primary flex items-center justify-center font-semibold text-sm shrink-0">
@@ -603,9 +655,7 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                           <p className={`text-sm font-bold ${spent > 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
                             {spent > 0 ? formatCurrency(spent) : '—'}
                           </p>
-                          {totalTrip > 0 && spent > 0 && (
-                            <p className="text-[10px] text-muted-foreground">{Math.round(pct)}% of trip</p>
-                          )}
+                          <p className="text-[10px] text-muted-foreground">{totalTrip > 0 && spent > 0 ? `${Math.round(pct)}% · ` : ''}tap for balances</p>
                         </div>
                       </div>
                       {spent > 0 && (
@@ -613,18 +663,13 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                           <div className={`h-full rounded-full ${temp ? 'bg-amber-400/70' : 'bg-primary/70'}`} style={{ width: `${pct}%` }} />
                         </div>
                       )}
-                      {owes > 0 && (
-                        <p className="text-xs text-amber-600 dark:text-amber-400">
-                          Owes: <span className="font-medium">{formatCurrency(owes)}</span>
-                        </p>
-                      )}
-                    </div>
+                    </button>
                   )
                 }
 
                 return (
                   <div className="space-y-2">
-                    {resolved.map(m => memberCard(m.name, m.email || null, m.spent, m.owes, m.uid === currentUserId, false))}
+                    {resolved.map(m => memberCard({ uid: m.uid, email: m.email || null, name: m.name }, m.spent, m.uid === currentUserId, false))}
 
                     {temporary.length > 0 && (
                       <div className="pt-3 space-y-2">
@@ -632,7 +677,7 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                           <p className="text-xs font-medium text-muted-foreground">Temporary members</p>
                           <span className="text-[10px] text-muted-foreground">· no account · no chat</span>
                         </div>
-                        {temporary.map(t => memberCard(t.name, null, t.spent, t.owes, false, true))}
+                        {temporary.map(t => memberCard({ uid: null, email: null, name: t.name }, t.spent, false, true))}
                       </div>
                     )}
                   </div>
@@ -1530,6 +1575,50 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
   const _modals = (
     <>
       {/* Read-only transaction detail (any trip member can view) */}
+      {/* Member balance popup — who they owe / who owes them (this trip) */}
+      <Dialog open={!!viewMember} onOpenChange={v => { if (!v) setViewMember(null) }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{viewMember?.name}{viewMember?.uid === currentUserId ? ' (you)' : ''} · balances</DialogTitle>
+          </DialogHeader>
+          {viewMember && (() => {
+            const rows = computeMemberBalance(viewMember)
+            if (rows.length === 0) {
+              return <p className="text-sm text-muted-foreground py-2">All settled — no pending balances in this trip.</p>
+            }
+            const first = viewMember.name.split(' ')[0]
+            const owes = rows.filter(r => r.net > 0)
+            const owed = rows.filter(r => r.net < 0)
+            return (
+              <div className="space-y-4 text-sm">
+                {owes.length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-medium text-muted-foreground">{first} owes</p>
+                    {owes.map(r => (
+                      <div key={`o${r.name}`} className="flex items-center justify-between rounded-md border px-3 py-2">
+                        <span className="truncate">{r.name}</span>
+                        <span className="font-semibold text-amber-600 dark:text-amber-400 tabular-nums">{formatCurrency(r.net)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {owed.length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-medium text-muted-foreground">Owes {first}</p>
+                    {owed.map(r => (
+                      <div key={`d${r.name}`} className="flex items-center justify-between rounded-md border px-3 py-2">
+                        <span className="truncate">{r.name}</span>
+                        <span className="font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">{formatCurrency(Math.abs(r.net))}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={!!viewTx} onOpenChange={v => { if (!v) setViewTx(null) }}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader><DialogTitle>{viewTx?.description ?? viewTx?.category}</DialogTitle></DialogHeader>
