@@ -150,6 +150,12 @@ async function backfillAllReferences(
   if (oldAccountId && idChanged) {
     await run('expense_splits.paid_by', svc.from('expense_splits').update({ paid_by: newAccountId }).eq('created_by', userId).eq('paid_by', oldAccountId))
   }
+  // ── on-behalf transactions (created by me in the contact's account) — move them
+  // to the contact's new account so they don't strand under an old identity (which
+  // shows as "Member" in the trip view). Only when the new email maps to an account.
+  if (oldAccountId && newAccountId && idChanged) {
+    await run('transactions.user_id', svc.from('transactions').update({ user_id: newAccountId }).eq('created_by', userId).eq('user_id', oldAccountId))
+  }
   // ── expense_splits.paid_by_email/name — the UNREGISTERED email-keyed payer, so
   // on-behalf splits where this contact is the payer follow their new email/name
   // (otherwise the old email lingers and the person shows up twice in reminders).
