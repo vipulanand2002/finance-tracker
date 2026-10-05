@@ -1249,24 +1249,30 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                   }
                 }
 
-                // Compute "spent" per person (what they paid out for the group): for
-                // registered → their expense transactions; unregistered → sum of
-                // splits they fronted as paid_by_email / paid_by_name payer.
-                const spentOf = (r: Row): number => {
-                  if (r.uid) return transactions.filter(t => t.user_id === r.uid && t.type === 'expense').reduce((s, t) => s + t.amount, 0)
+                // Each person's CONSUMPTION on this trip — direct non-split txns
+                // (registered only) + their share across every split they're a
+                // participant in, whoever paid. This is the right lens for a
+                // personal budget, which caps consumption, not out-of-pocket.
+                const consumedOf = (r: Row): number => {
                   const el = r.email?.toLowerCase() ?? ''
                   const nl = r.name.trim().toLowerCase()
-                  return tripSplits
-                    .filter(s => !s.paid_by && (
-                      (!!el && s.paid_by_email?.toLowerCase() === el) ||
-                      (!el && !s.paid_by_email && s.paid_by_name?.trim().toLowerCase() === nl)
-                    ))
-                    .reduce((sum, s) => sum + s.total_amount, 0)
+                  const direct = r.uid
+                    ? transactions.filter(t => t.user_id === r.uid && !t.split_id && t.type === 'expense').reduce((s, t) => s + t.amount, 0)
+                    : 0
+                  const shares = tripSplits
+                    .flatMap(s => s.split_participants)
+                    .filter(p =>
+                      (!!r.uid && p.participant_user_id === r.uid) ||
+                      (!!el && p.participant_email?.toLowerCase() === el) ||
+                      (!el && !p.participant_email && p.participant_name.trim().toLowerCase() === nl)
+                    )
+                    .reduce((s, p) => s + p.amount_owed, 0)
+                  return direct + shares
                 }
 
                 const others = [...seen.values()]
                   .filter(r => r.uid !== currentUserId)
-                  .map(r => ({ ...r, spent: spentOf(r), budget: personalBudgets.find(b => b.user_id === r.uid) ?? null }))
+                  .map(r => ({ ...r, spent: consumedOf(r), budget: personalBudgets.find(b => b.user_id === r.uid) ?? null }))
                   .sort((a, b) => b.spent - a.spent)
 
                 if (others.length === 0) return null
