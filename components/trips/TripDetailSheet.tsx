@@ -80,6 +80,9 @@ interface TripSplitParticipant {
 interface TripSplit {
   id: string
   created_by: string
+  paid_by?: string | null
+  paid_by_email?: string | null
+  paid_by_name?: string | null
   title: string
   total_amount: number
   category: string
@@ -517,72 +520,121 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                   )
                 }
 
-                // Total = only direct expenses paid (who actually spent money)
-                const totalTrip = memberList.reduce((sum, m) => {
-                  const spent = m.userId
-                    ? transactions.filter(t => t.user_id === m.userId && t.type === 'expense').reduce((s, t) => s + t.amount, 0)
-                    : 0
-                  return sum + spent
-                }, 0)
+                // Resolve each member's account id from the data we already have, so a
+                // member's own expenses (incl. on-behalf ones logged for them) are counted.
+                const emailToUserId = new Map<string, string>()
+                if (currentUserId && currentUserEmail) emailToUserId.set(currentUserEmail.toLowerCase(), currentUserId)
+                for (const b of personalBudgets) if (b.user_email) emailToUserId.set(b.user_email.toLowerCase(), b.user_id)
+                for (const s of tripSplits) for (const p of s.split_participants) {
+                  if (p.participant_user_id && p.participant_email) emailToUserId.set(p.participant_email.toLowerCase(), p.participant_user_id)
+                }
+
+                // What a person PAID for the group: registered → their expense
+                // transactions; unregistered (no account) → the total of splits they
+                // paid (as email or name payer, which carry no transaction).
+                const spentFor = (uid: string | null | undefined, email: string, name: string): number => {
+                  if (uid) return transactions.filter(t => t.user_id === uid && t.type === 'expense').reduce((s, t) => s + t.amount, 0)
+                  const el = email.toLowerCase(), nl = name.trim().toLowerCase()
+                  return tripSplits
+                    .filter(s => !s.paid_by && (
+                      (!!el && s.paid_by_email?.toLowerCase() === el) ||
+                      (!el && !s.paid_by_email && s.paid_by_name?.trim().toLowerCase() === nl)
+                    ))
+                    .reduce((sum, s) => sum + s.total_amount, 0)
+                }
+                // Unpaid split shares a person still owes.
+                const owesFor = (uid: string | null | undefined, email: string, name: string): number => {
+                  const el = email.toLowerCase(), nl = name.trim().toLowerCase()
+                  return tripSplits
+                    .flatMap(s => s.split_participants)
+                    .filter(p => !p.is_paid && (
+                      (uid && p.participant_user_id === uid) ||
+                      (!!el && p.participant_email?.toLowerCase() === el) ||
+                      (!el && !p.participant_email && p.participant_name.trim().toLowerCase() === nl)
+                    ))
+                    .reduce((sum, p) => sum + p.amount_owed, 0)
+                }
+
+                const resolved = memberList.map(m => {
+                  const uid = m.userId ?? (m.email ? emailToUserId.get(m.email.toLowerCase()) ?? null : null)
+                  return { ...m, uid, spent: spentFor(uid, m.email, m.name), owes: owesFor(uid, m.email, m.name) }
+                })
+
+                // Temporary members: name-only people in the splits (participants or
+                // payers) who aren't real trip members — shown but with no chat access.
+                const memberNames = new Set(memberList.map(m => m.name.trim().toLowerCase()))
+                const tempNames = new Map<string, string>()
+                for (const s of tripSplits) {
+                  for (const p of s.split_participants) {
+                    if (!p.participant_email && p.participant_name && !memberNames.has(p.participant_name.trim().toLowerCase())) {
+                      tempNames.set(p.participant_name.trim().toLowerCase(), p.participant_name.trim())
+                    }
+                  }
+                  if (!s.paid_by && !s.paid_by_email && s.paid_by_name && !memberNames.has(s.paid_by_name.trim().toLowerCase())) {
+                    tempNames.set(s.paid_by_name.trim().toLowerCase(), s.paid_by_name.trim())
+                  }
+                }
+                const temporary = [...tempNames.values()]
+                  .map(name => ({ name, spent: spentFor(null, '', name), owes: owesFor(null, '', name) }))
+                  .sort((a, b) => b.spent - a.spent)
+
+                // Total spent across everyone (members + temporary) for the % share.
+                const totalTrip = resolved.reduce((s, m) => s + m.spent, 0) + temporary.reduce((s, t) => s + t.spent, 0)
+
+                const memberCard = (name: string, email: string | null, spent: number, owes: number, isMe: boolean, temp: boolean) => {
+                  const pct = totalTrip > 0 ? (spent / totalTrip) * 100 : 0
+                  return (
+                    <div key={(email || name) + (temp ? '_t' : '')} className="rounded-lg border p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="w-8 h-8 rounded-full bg-primary/15 text-primary flex items-center justify-center font-semibold text-sm shrink-0">
+                            {(name || email || '?').charAt(0).toUpperCase()}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">
+                              {name}
+                              {isMe && <span className="text-muted-foreground font-normal ml-1 text-xs">(you)</span>}
+                              {temp && <span className="ml-1.5 text-[10px] rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 align-middle">no account</span>}
+                            </p>
+                            <p className="text-xs text-muted-foreground truncate">{email || 'No email · won’t receive reminders'}</p>
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className={`text-sm font-bold ${spent > 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
+                            {spent > 0 ? formatCurrency(spent) : '—'}
+                          </p>
+                          {totalTrip > 0 && spent > 0 && (
+                            <p className="text-[10px] text-muted-foreground">{Math.round(pct)}% of trip</p>
+                          )}
+                        </div>
+                      </div>
+                      {spent > 0 && (
+                        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${temp ? 'bg-amber-400/70' : 'bg-primary/70'}`} style={{ width: `${pct}%` }} />
+                        </div>
+                      )}
+                      {owes > 0 && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400">
+                          Owes: <span className="font-medium">{formatCurrency(owes)}</span>
+                        </p>
+                      )}
+                    </div>
+                  )
+                }
 
                 return (
                   <div className="space-y-2">
-                    {memberList.map(m => {
-                      const emailLower = m.email.toLowerCase()
-                      // What they actually paid out of pocket
-                      const directSpent = m.userId
-                        ? transactions.filter(t => t.user_id === m.userId && t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
-                        : 0
-                      // What they still owe from unpaid splits (informational)
-                      const splitOwed = tripSplits
-                        .flatMap(s => s.split_participants)
-                        .filter(p =>
-                          !p.is_paid && (
-                            (m.userId && p.participant_user_id === m.userId) ||
-                            (m.email && p.participant_email?.toLowerCase() === emailLower) ||
-                            (!m.email && !p.participant_email && p.participant_name.toLowerCase() === m.name.toLowerCase())
-                          )
-                        )
-                        .reduce((sum, p) => sum + p.amount_owed, 0)
-                      const pct = totalTrip > 0 ? (directSpent / totalTrip) * 100 : 0
-                      const isMe = m.userId === currentUserId
+                    {resolved.map(m => memberCard(m.name, m.email || null, m.spent, m.owes, m.uid === currentUserId, false))}
 
-                      return (
-                        <div key={m.email || m.name} className="rounded-lg border p-3 space-y-2">
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <span className="w-8 h-8 rounded-full bg-primary/15 text-primary flex items-center justify-center font-semibold text-sm shrink-0">
-                                {(m.name || m.email).charAt(0).toUpperCase()}
-                              </span>
-                              <div className="min-w-0">
-                                <p className="text-sm font-medium truncate">
-                                  {m.name}{isMe && <span className="text-muted-foreground font-normal ml-1 text-xs">(you)</span>}
-                                </p>
-                                {m.email && <p className="text-xs text-muted-foreground truncate">{m.email}</p>}
-                              </div>
-                            </div>
-                            <div className="text-right shrink-0">
-                              <p className={`text-sm font-bold ${directSpent > 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
-                                {directSpent > 0 ? formatCurrency(directSpent) : '—'}
-                              </p>
-                              {totalTrip > 0 && directSpent > 0 && (
-                                <p className="text-[10px] text-muted-foreground">{Math.round(pct)}% of trip</p>
-                              )}
-                            </div>
-                          </div>
-                          {directSpent > 0 && (
-                            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                              <div className="h-full bg-primary/70 rounded-full" style={{ width: `${pct}%` }} />
-                            </div>
-                          )}
-                          {splitOwed > 0 && (
-                            <p className="text-xs text-amber-600 dark:text-amber-400">
-                              Owes: <span className="font-medium">{formatCurrency(splitOwed)}</span>
-                            </p>
-                          )}
+                    {temporary.length > 0 && (
+                      <div className="pt-3 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs font-medium text-muted-foreground">Temporary members</p>
+                          <span className="text-[10px] text-muted-foreground">· no account · no chat</span>
                         </div>
-                      )
-                    })}
+                        {temporary.map(t => memberCard(t.name, null, t.spent, t.owes, false, true))}
+                      </div>
+                    )}
                   </div>
                 )
               })()}
