@@ -1204,35 +1204,101 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                 })()}
               </div>
 
-              {/* Other members' budgets with their spending */}
-              {personalBudgets.filter(b => b.user_id !== currentUserId).length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">Team Members</p>
-                  {personalBudgets
-                    .filter(b => b.user_id !== currentUserId)
-                    .map(b => {
-                      const spent = computePersonalSpending(b.user_id, b.user_email)
-                      const pct = Math.min((spent / b.amount) * 100, 100)
-                      const over = spent > b.amount
+              {/* Every other trip member/contributor — with their spent and, if they
+                  set one, budget progress. Temporary (name-only) payers are included. */}
+              {(() => {
+                // Resolve emails to account ids so one person isn't counted twice.
+                const emailToUid = new Map<string, string>()
+                if (currentUserId && currentUserEmail) emailToUid.set(currentUserEmail.toLowerCase(), currentUserId)
+                for (const b of personalBudgets) if (b.user_email) emailToUid.set(b.user_email.toLowerCase(), b.user_id)
+                for (const s of tripSplits) for (const p of s.split_participants) {
+                  if (p.participant_user_id && p.participant_email) emailToUid.set(p.participant_email.toLowerCase(), p.participant_user_id)
+                }
+                const keyOf = (uid: string | null, email: string | null, name: string) =>
+                  uid ? `u:${uid}` : email ? `e:${email.toLowerCase()}` : `n:${name.trim().toLowerCase()}`
+
+                type Row = { uid: string | null; email: string | null; name: string; temp: boolean }
+                const seen = new Map<string, Row>()
+                const add = (uidIn: string | null | undefined, emailIn: string | null, nameIn: string, temp = false) => {
+                  const uid = uidIn ?? (emailIn ? emailToUid.get(emailIn.toLowerCase()) ?? null : null)
+                  const email = emailIn && !emailIn.startsWith('_nomail_') ? emailIn : null
+                  const name = nameIn.trim()
+                  if (!name) return
+                  const k = keyOf(uid, email, name)
+                  if (!seen.has(k)) seen.set(k, { uid, email, name, temp })
+                }
+                // Real members: trip owner (you), invitations, legacy members, budget holders
+                for (const inv of (trip.trip_invitations ?? [])) {
+                  if (inv.status === 'declined') continue
+                  add(null, inv.invitee_email || null, inv.invitee_name || inv.invitee_email?.split('@')[0] || '')
+                }
+                for (const m of (trip.trip_members ?? [])) {
+                  add(null, m.email || null, m.name || m.email?.split('@')[0] || '')
+                }
+                for (const b of personalBudgets) add(b.user_id, b.user_email, b.user_email.split('@')[0])
+                // Temporary — name-only people in splits (participants or payers)
+                const realNames = new Set([...seen.values()].map(r => r.name.toLowerCase()))
+                for (const s of tripSplits) {
+                  for (const p of s.split_participants) {
+                    if (!p.participant_email && p.participant_name && !realNames.has(p.participant_name.trim().toLowerCase())) {
+                      add(null, null, p.participant_name, true)
+                    }
+                  }
+                  if (!s.paid_by && !s.paid_by_email && s.paid_by_name && !realNames.has(s.paid_by_name.trim().toLowerCase())) {
+                    add(null, null, s.paid_by_name, true)
+                  }
+                }
+
+                // Compute "spent" per person (what they paid out for the group): for
+                // registered → their expense transactions; unregistered → sum of
+                // splits they fronted as paid_by_email / paid_by_name payer.
+                const spentOf = (r: Row): number => {
+                  if (r.uid) return transactions.filter(t => t.user_id === r.uid && t.type === 'expense').reduce((s, t) => s + t.amount, 0)
+                  const el = r.email?.toLowerCase() ?? ''
+                  const nl = r.name.trim().toLowerCase()
+                  return tripSplits
+                    .filter(s => !s.paid_by && (
+                      (!!el && s.paid_by_email?.toLowerCase() === el) ||
+                      (!el && !s.paid_by_email && s.paid_by_name?.trim().toLowerCase() === nl)
+                    ))
+                    .reduce((sum, s) => sum + s.total_amount, 0)
+                }
+
+                const others = [...seen.values()]
+                  .filter(r => r.uid !== currentUserId)
+                  .map(r => ({ ...r, spent: spentOf(r), budget: personalBudgets.find(b => b.user_id === r.uid) ?? null }))
+                  .sort((a, b) => b.spent - a.spent)
+
+                if (others.length === 0) return null
+
+                return (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">Trip Members</p>
+                    {others.map(r => {
+                      const over = r.budget ? r.spent > r.budget.amount : false
+                      const pct = r.budget ? Math.min((r.spent / r.budget.amount) * 100, 100) : 0
                       return (
-                        <div key={b.id} className="space-y-1">
-                          <div className="flex items-center justify-between text-xs">
+                        <div key={keyOf(r.uid, r.email, r.name)} className="space-y-1">
+                          <div className="flex items-center justify-between gap-2 text-xs">
                             <div className="flex items-center gap-1.5 min-w-0">
                               <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] font-semibold shrink-0">
-                                {b.user_email.charAt(0).toUpperCase()}
+                                {r.name.charAt(0).toUpperCase()}
                               </span>
-                              <span className="truncate">{b.user_email.split('@')[0]}</span>
+                              <span className="truncate">{r.name}</span>
+                              {r.temp && <span className="text-[10px] rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 shrink-0">no account</span>}
                             </div>
                             <span className={`shrink-0 ${over ? 'text-red-600' : 'text-muted-foreground'}`}>
-                              {formatCurrency(spent)} / {formatCurrency(b.amount)}
+                              {r.spent > 0 ? formatCurrency(r.spent) : '—'}
+                              {r.budget ? ` / ${formatCurrency(r.budget.amount)}` : ''}
                             </span>
                           </div>
-                          <Progress value={pct} className={`h-1 ${over ? '[&>div]:bg-red-500' : ''}`} />
+                          {r.budget && <Progress value={pct} className={`h-1 ${over ? '[&>div]:bg-red-500' : ''}`} />}
                         </div>
                       )
                     })}
-                </div>
-              )}
+                  </div>
+                )
+              })()}
             </div>
 
             {/* Category breakdown */}
@@ -1489,28 +1555,59 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                       }
                     }
 
-                    const groups = new Map<string, Transaction[]>()
-                    for (const t of expenses) {
-                      const list = groups.get(t.user_id) ?? []
-                      list.push(t)
-                      groups.set(t.user_id, list)
+                    // Groups keyed by a "person token" so registered users and
+                    // unregistered split-payers coexist. Each item is either a
+                    // real transaction or a synthetic split-paid-by entry.
+                    type Item =
+                      | { kind: 'txn'; id: string; date: string; title: string; category: string; amount: number; txn: Transaction }
+                      | { kind: 'split'; id: string; date: string; title: string; category: string; amount: number; split: TripSplit }
+                    type Group = { key: string; label: string; isMe: boolean; items: Item[] }
+                    const groups = new Map<string, Group>()
+                    const ensure = (key: string, label: string, isMe: boolean) => {
+                      let g = groups.get(key)
+                      if (!g) { g = { key, label, isMe, items: [] }; groups.set(key, g) }
+                      return g
                     }
-                    return [...groups.entries()]
-                      .sort(([, a], [, b]) =>
-                        b.reduce((s, t) => s + t.amount, 0) - a.reduce((s, t) => s + t.amount, 0)
+
+                    // Real transactions grouped by their user_id (owner's account).
+                    for (const t of expenses) {
+                      const key = `u:${t.user_id}`
+                      const isMe = t.user_id === currentUserId
+                      const email = userEmailMap.get(t.user_id)
+                      const label = isMe ? 'Me' : (email?.split('@')[0] ?? 'Member')
+                      ensure(key, label, isMe).items.push({ kind: 'txn', id: t.id, date: t.date, title: t.description ?? t.category, category: t.category, amount: t.amount, txn: t })
+                    }
+
+                    // Unregistered payers (no account) — their contributions live on
+                    // the split itself (paid_by_email or paid_by_name), not as txns.
+                    for (const s of tripSplits) {
+                      if (s.paid_by) continue
+                      let key: string, label: string
+                      if (s.paid_by_email) {
+                        key = `e:${s.paid_by_email.toLowerCase()}`
+                        label = s.paid_by_name || s.paid_by_email.split('@')[0]
+                      } else if (s.paid_by_name) {
+                        key = `n:${s.paid_by_name.trim().toLowerCase()}`
+                        label = s.paid_by_name
+                      } else continue
+                      ensure(key, label, false).items.push({ kind: 'split', id: s.id, date: s.date, title: s.title, category: s.category, amount: s.total_amount, split: s })
+                    }
+
+                    return [...groups.values()]
+                      .sort((a, b) =>
+                        b.items.reduce((s, i) => s + i.amount, 0) - a.items.reduce((s, i) => s + i.amount, 0)
                       )
-                      .map(([userId, txs]) => {
-                        const memberTotal = txs.reduce((s, t) => s + t.amount, 0)
-                        const isMe = userId === currentUserId
-                        const email = userEmailMap.get(userId)
-                        const label = isMe ? 'Me' : (email?.split('@')[0] ?? 'Member')
-                        const collapsed = collapsedMembers.has(userId)
+                      .map(g => {
+                        const memberTotal = g.items.reduce((s, i) => s + i.amount, 0)
+                        const collapsed = collapsedMembers.has(g.key)
+                        // Sort items by date, newest first
+                        const sortedItems = [...g.items].sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''))
                         return (
-                          <div key={userId} className="rounded-lg border overflow-hidden">
+                          <div key={g.key} className="rounded-lg border overflow-hidden">
                             <button
                               onClick={() => setCollapsedMembers(prev => {
                                 const next = new Set(prev)
-                                if (next.has(userId)) next.delete(userId); else next.add(userId)
+                                if (next.has(g.key)) next.delete(g.key); else next.add(g.key)
                                 return next
                               })}
                               className="w-full flex items-center justify-between px-3 py-2 bg-muted/50 hover:bg-muted transition-colors"
@@ -1518,44 +1615,78 @@ export default function TripDetailSheet({ trip, open, onClose, onUpdated, inline
                               <div className="flex items-center gap-2 min-w-0">
                                 <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground shrink-0 transition-transform duration-200 ${collapsed ? '-rotate-90' : ''}`} />
                                 <span className="w-5 h-5 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[10px] font-bold shrink-0">
-                                  {label.charAt(0).toUpperCase()}
+                                  {g.label.charAt(0).toUpperCase()}
                                 </span>
-                                <span className="text-sm font-medium truncate">{label}</span>
-                                <span className="text-xs text-muted-foreground shrink-0">· {txs.length}</span>
+                                <span className="text-sm font-medium truncate">{g.label}</span>
+                                {!g.isMe && !g.key.startsWith('u:') && (
+                                  <span className="text-[10px] rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 shrink-0">no account</span>
+                                )}
+                                <span className="text-xs text-muted-foreground shrink-0">· {g.items.length}</span>
                               </div>
                               <span className="text-sm font-semibold text-red-600 shrink-0 tabular-nums">-{formatCurrency(memberTotal)}</span>
                             </button>
                             {!collapsed && (
                             <div className="divide-y">
-                              {txs.map(t => (
-                                <div key={t.id} onClick={() => setViewTx(t)}
-                                  className={`flex items-center gap-2 py-2 px-3 group cursor-pointer hover:bg-muted/40 transition-colors ${t.is_discrete ? 'opacity-75' : ''}`}>
-                                  <span className="text-xs text-muted-foreground w-12 shrink-0">{format(parseISO(t.date), 'd MMM')}</span>
+                              {sortedItems.map(item => item.kind === 'txn' ? (
+                                <div key={`t_${item.id}`} onClick={() => setViewTx(item.txn)}
+                                  className={`flex items-center gap-2 py-2 px-3 group cursor-pointer hover:bg-muted/40 transition-colors ${item.txn.is_discrete ? 'opacity-75' : ''}`}>
+                                  <span className="text-xs text-muted-foreground w-12 shrink-0">{format(parseISO(item.date), 'd MMM')}</span>
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-1.5">
-                                      <p className="text-sm truncate">{t.description ?? t.category}</p>
-                                      {t.is_discrete && (
+                                      <p className="text-sm truncate">{item.title}</p>
+                                      {item.txn.is_discrete && (
                                         <span className="flex items-center gap-0.5 text-[10px] text-amber-600 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-700 rounded px-1 py-0.5 shrink-0">
                                           <EyeOff className="w-2.5 h-2.5" /> Private
                                         </span>
                                       )}
-                                      {t.receipt_url && <Paperclip className="w-3 h-3 text-muted-foreground shrink-0" />}
+                                      {item.txn.receipt_url && <Paperclip className="w-3 h-3 text-muted-foreground shrink-0" />}
                                     </div>
-                                    <p className="text-xs text-muted-foreground">{t.category}</p>
+                                    <p className="text-xs text-muted-foreground">{item.category}</p>
                                   </div>
-                                  <span className="text-sm font-semibold shrink-0 text-red-600 tabular-nums">-{formatCurrency(t.amount)}</span>
-                                  {t.user_id === currentUserId && (
-                                    <button onClick={e => { e.stopPropagation(); setEditingTx(t) }} title="Edit transaction"
+                                  <span className="text-sm font-semibold shrink-0 text-red-600 tabular-nums">-{formatCurrency(item.amount)}</span>
+                                  {item.txn.user_id === currentUserId && (
+                                    <button onClick={e => { e.stopPropagation(); setEditingTx(item.txn) }} title="Edit transaction"
                                       className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity shrink-0">
                                       <Pencil className="w-3.5 h-3.5" />
                                     </button>
                                   )}
                                   {!trip.is_closed && (
-                                    <button onClick={e => { e.stopPropagation(); unlinkTransaction(t.id) }} title="Unlink from trip"
+                                    <button onClick={e => { e.stopPropagation(); unlinkTransaction(item.id) }} title="Unlink from trip"
                                       className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity shrink-0">
                                       <Link2 className="w-3.5 h-3.5" />
                                     </button>
                                   )}
+                                </div>
+                              ) : (
+                                // Synthetic contribution row for an unregistered payer. Clicking opens the split for editing (if I created it).
+                                <div
+                                  key={`s_${item.id}`}
+                                  onClick={() => {
+                                    if (item.split.created_by === currentUserId && !trip.is_closed) setEditingTripSplit({
+                                      id: item.split.id,
+                                      title: item.split.title,
+                                      total_amount: item.split.total_amount,
+                                      category: item.split.category,
+                                      description: item.split.description,
+                                      date: item.split.date,
+                                      trip_id: trip.id,
+                                      contact_id: null,
+                                      receipt_url: item.split.receipt_url ?? null,
+                                      receipt_url_2: item.split.receipt_url_2 ?? null,
+                                      split_participants: item.split.split_participants,
+                                    })
+                                  }}
+                                  className={`flex items-center gap-2 py-2 px-3 ${item.split.created_by === currentUserId && !trip.is_closed ? 'cursor-pointer hover:bg-muted/40 transition-colors' : ''}`}
+                                >
+                                  <span className="text-xs text-muted-foreground w-12 shrink-0">{format(parseISO(item.date), 'd MMM')}</span>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-1.5">
+                                      <p className="text-sm truncate">{item.title}</p>
+                                      <span className="text-[10px] rounded border border-muted-foreground/20 px-1 py-0.5 text-muted-foreground shrink-0">split paid</span>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">{item.category}</p>
+                                  </div>
+                                  <span className="text-sm font-semibold shrink-0 text-red-600 tabular-nums">-{formatCurrency(item.amount)}</span>
                                 </div>
                               ))}
                             </div>
