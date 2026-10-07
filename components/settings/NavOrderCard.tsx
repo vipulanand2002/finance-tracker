@@ -204,7 +204,7 @@ export default function NavOrderCard() {
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div className="min-w-0">
             <CardTitle className="flex items-center gap-2 text-base">
-              <ListOrdered className="w-4 h-4" />Navigation
+              <ListOrdered className="w-4 h-4" />Menu order
               {!isDefault && (
                 <span className="text-[10px] font-medium rounded-full bg-primary/10 text-primary px-2 py-0.5">Custom order</span>
               )}
@@ -235,8 +235,8 @@ export default function NavOrderCard() {
       </CardHeader>
 
       <CardContent>
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
-          <div className="lg:col-span-3">
+        <div className="grid grid-cols-1 xl:grid-cols-5 gap-6 items-start">
+          <div className="xl:col-span-3">
             <DndContext
               sensors={sensors}
               collisionDetection={closestCenter}
@@ -258,7 +258,7 @@ export default function NavOrderCard() {
             </DndContext>
           </div>
 
-          <div className="lg:col-span-2 lg:sticky lg:top-2">
+          <div className="xl:col-span-2 xl:sticky xl:top-2">
             <SidebarPreview items={items} />
           </div>
         </div>
