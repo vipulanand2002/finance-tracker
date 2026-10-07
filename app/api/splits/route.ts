@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { sendPushToUser } from '@/lib/push'
+import { selectPairShares, type CloseSplit } from '@/lib/close-balance'
 
 async function getUser() {
   const supabase = await createClient()
@@ -240,41 +241,42 @@ export async function PATCH(request: Request) {
 
   // PATCH /api/splits?type=close_balance
   // Body: { contact_email: string | null, contact_name: string }
-  // Marks all unpaid split shares for this person as paid;
-  // auto-settles any split where all participants are now paid.
+  // Settles the splits between YOU and this person, in both directions:
+  //   • bills you paid       → their unpaid share is marked paid (they paid you)
+  //   • bills they paid      → your unpaid share is marked paid (you paid them)
+  // Shares on bills a THIRD party paid are left untouched — that debt isn't
+  // between the two of you. Auto-settles splits where everyone is now paid.
   if (type === 'close_balance') {
     const { contact_email, contact_name } = body as { contact_email: string | null; contact_name: string }
+    const email = contact_email?.trim().toLowerCase() || null
 
-    // Get all unsettled splits created by this user
-    const { data: userSplits } = await supabase
-      .from('expense_splits')
-      .select('id')
-      .eq('created_by', user.id)
-      .eq('is_settled', false)
-
-    const splitIds = (userSplits ?? []).map((s: { id: string }) => s.id)
-    if (splitIds.length === 0) return NextResponse.json({ markedPaid: 0 })
-
-    // Find matching unpaid participants
-    let participantQuery = supabase
-      .from('split_participants')
-      .select('id, split_id')
-      .in('split_id', splitIds)
-      .eq('is_paid', false)
-
-    if (contact_email) {
-      participantQuery = participantQuery.eq('participant_email', contact_email.toLowerCase())
-    } else {
-      participantQuery = participantQuery
-        .ilike('participant_name', contact_name)
-        .is('participant_email', null)
+    // Their account id, if they have one (payers are stored by account id)
+    let theirId: string | null = null
+    if (email) {
+      const { data: pr } = await supabase.from('profiles').select('id').eq('email', email).maybeSingle()
+      theirId = (pr as { id?: string } | null)?.id ?? null
     }
 
-    const { data: matched } = await participantQuery
-    if (!matched?.length) return NextResponse.json({ markedPaid: 0 })
+    const cols = 'id, created_by, split_participants(id, participant_name, participant_email, participant_user_id, is_paid)'
+    // Payer columns need migrations 043/044 — fall back gracefully without them
+    type Res = { data: CloseSplit[] | null; error: { message?: string } | null }
+    let res = await supabase.from('expense_splits').select(`${cols}, paid_by, paid_by_email, paid_by_name`)
+      .eq('created_by', user.id).eq('is_settled', false) as unknown as Res
+    if (res.error) {
+      res = await supabase.from('expense_splits').select(cols)
+        .eq('created_by', user.id).eq('is_settled', false) as unknown as Res
+    }
+    const userSplits = res.data ?? []
+    if (userSplits.length === 0) return NextResponse.json({ markedPaid: 0 })
 
-    const participantIds = matched.map((p: { id: string }) => p.id)
-    const affectedSplitIds = [...new Set(matched.map((p: { split_id: string }) => p.split_id))]
+    // Only the shares between YOU and this person (never a third party's bill)
+    const matched = selectPairShares(userSplits, {
+      userId: user.id, userEmail: user.email ?? '', email, name: contact_name ?? '', theirId,
+    })
+    if (matched.length === 0) return NextResponse.json({ markedPaid: 0 })
+
+    const participantIds = matched.map(p => p.id)
+    const affectedSplitIds = [...new Set(matched.map(p => p.split_id))]
 
     // Mark them all paid
     await supabase

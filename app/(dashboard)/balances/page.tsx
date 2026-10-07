@@ -200,12 +200,45 @@ export default function BalancesPage() {
 
   useEffect(() => { load() }, [load])
 
+  // Payments you already logged for this person (income tagged to them) were
+  // counted against the balance. When closing, the splits they covered are marked
+  // paid, so those records are un-tagged — otherwise they'd be counted twice and
+  // flip the balance the other way. (The income itself stays in your transactions.)
+  async function untagPayments(friend: FriendBalance) {
+    interface TaggedTx {
+      id: string; amount: number; type: string; category: string; description: string | null; date: string
+      is_recurring: boolean; is_discrete: boolean; receipt_url: string | null; trip_id: string | null
+      card_id: string | null; split_id: string | null; contact_id: string | null; contact_ids: string[] | null
+    }
+    const r = await fetch(`/api/transactions?contact_id=${friend.id}`)
+    const body = r.ok ? await r.json() : []
+    const list: TaggedTx[] = Array.isArray(body) ? body : body.transactions ?? []
+    for (const t of list.filter(t => t.type === 'income' && !t.split_id)) {
+      const rest = (t.contact_ids ?? []).filter(c => c !== friend.id)
+      const res = await fetch(`/api/transactions?id=${t.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: t.amount, type: t.type, category: t.category, description: t.description, date: t.date,
+          is_recurring: t.is_recurring, is_discrete: t.is_discrete, receipt_url: t.receipt_url,
+          trip_id: t.trip_id, card_id: t.card_id, split_id: t.split_id,
+          contact_id: t.contact_id === friend.id ? (rest[0] ?? null) : t.contact_id,
+          contact_ids: rest,
+        }),
+      })
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error ?? 'Failed to clear payment') }
+    }
+  }
+
   async function closeBalance(friend: FriendBalance) {
     setClosing(friend.key)
     setConfirmClose(null)
+    const round2 = (n: number) => Math.round(n * 100) / 100
     try {
-      // 1. Mark this person's outstanding split shares as paid (if any)
-      if (friend.splitOwed > 0) {
+      // 1. Settle the splits between the two of you — both ways: their shares on
+      //    bills you paid AND your shares on bills they paid. (Bills a third
+      //    person paid are not between you two and are left alone.)
+      if (friend.splitOwed > 0 || friend.splitYouOwe > 0) {
         const res = await fetch('/api/splits?type=close_balance', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -215,24 +248,34 @@ export default function BalancesPage() {
         if (!res.ok) throw new Error(data.error)
       }
 
-      // 2. Settle the remaining (non-split) amount they owe — e.g. tagged expenses —
-      //    by recording a settlement income tagged to them.
-      const remaining = Math.round((friend.net - friend.splitOwed) * 100) / 100
-      if (remaining > 0.009 && friend.id) {
-        const res = await fetch('/api/transactions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            amount: remaining,
-            type: 'income',
-            category: 'Other',
-            description: `Settled balance with ${friend.name}`,
-            date: new Date().toISOString().split('T')[0],
-            contact_id: friend.id,
-            contact_ids: [friend.id],
-          }),
-        })
-        if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error ?? 'Failed to settle') }
+      // 2. Whatever is left outside the splits (tagged expenses, recorded payments,
+      //    charges) is settled with one entry so the balance lands on exactly zero.
+      if (friend.id) {
+        let remaining = round2(friend.txnOwed - friend.txnReceived + friend.paidToThem - friend.chargedToThem)
+        if (remaining < -0.009 && friend.txnReceived > 0) {
+          // They'd already paid you (logged as income) — that payment has now been
+          // applied to the splits above, so stop counting it a second time.
+          await untagPayments(friend)
+          remaining = round2(friend.txnOwed + friend.paidToThem - friend.chargedToThem)
+        }
+        if (Math.abs(remaining) > 0.009) {
+          // remaining > 0: they owe you → they pay you (income)
+          // remaining < 0: you owe them  → you pay them (expense)
+          const res = await fetch('/api/transactions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              amount: Math.abs(remaining),
+              type: remaining > 0 ? 'income' : 'expense',
+              category: 'Other',
+              description: `Settled balance with ${friend.name}`,
+              date: new Date().toISOString().split('T')[0],
+              contact_id: friend.id,
+              contact_ids: [friend.id],
+            }),
+          })
+          if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error ?? 'Failed to settle') }
+        }
       }
 
       toast.success(`Settled up with ${friend.name}`)
@@ -377,7 +420,7 @@ export default function BalancesPage() {
               {confirmClose === b.key && (
                 <div className="flex items-center justify-between gap-2 flex-wrap pt-1 border-t">
                   <p className="text-xs text-muted-foreground">
-                    Settle your balance with <span className="font-medium text-foreground">{b.name}</span>? Marks their splits paid and records the rest as settled.
+                    Settle your balance with <span className="font-medium text-foreground">{b.name}</span>? Marks the splits between you two as paid (both ways) and settles anything else, so the balance lands on zero.
                   </p>
                   <div className="flex gap-2">
                     <Button size="sm" variant="ghost" className="h-8 px-3 text-xs gap-1" onClick={() => setConfirmClose(null)}>
