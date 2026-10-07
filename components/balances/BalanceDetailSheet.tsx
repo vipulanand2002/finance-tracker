@@ -198,7 +198,7 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
                 {splits.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No splits with {counterparty?.name}.</p>
                 ) : splits.map(s => {
-                  // Who paid this bill, and does the amount flow between the two of you?
+                  // Who paid this bill?
                   const unregPE = !s.paid_by && !!s.paid_by_email
                   const unregPN = !s.paid_by && !s.paid_by_email && !!s.paid_by_name
                   const unregP = unregPE || unregPN
@@ -209,16 +209,34 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
                     : unregPN
                       ? s.paid_by_name?.trim().toLowerCase() === nameLower
                       : (() => { const payer = s.split_participants.find(p => p.participant_user_id === credId); return !!payer && matchesCp(payer) })()
-                  // I paid → what they still owe me · they paid → what I still owe them ·
-                  // a third party paid → nothing flows between us on this split.
+                  // Resolve the payer's display name for third-party cases.
+                  const thirdPartyPayerName = (!iAmPayer && !payerIsCp)
+                    ? (unregPE ? (s.paid_by_name ?? s.paid_by_email ?? 'someone')
+                      : unregPN ? s.paid_by_name!
+                      : (profileNames.get(s.split_participants.find(p => p.participant_user_id === credId)?.participant_email?.toLowerCase() ?? '')
+                         ?? s.split_participants.find(p => p.participant_user_id === credId)?.participant_name
+                         ?? 'someone'))
+                    : null
+                  // Figure for this row — in all cases show the COUNTERPARTY's own
+                  // unpaid share on this split (what Kailash still owes on this bill),
+                  // except when I paid, where we show what they still owe ME.
+                  const cpUnpaid = s.split_participants
+                    .filter(matchesCp)
+                    .reduce((a, p) => a + (p.is_paid ? 0 : p.amount_owed), 0)
+                  const cpAllPaid = s.split_participants.filter(matchesCp).every(p => p.is_paid)
                   let amt = 0, label = ''
                   if (iAmPayer) {
-                    amt = s.split_participants.filter(matchesCp).reduce((a, p) => a + (p.is_paid ? 0 : p.amount_owed), 0)
-                    label = 'they owe'
+                    amt = cpUnpaid
+                    label = 'they owe you'
                   } else if (payerIsCp) {
                     const mine = s.split_participants.find(isSelf)
                     amt = mine && !mine.is_paid ? mine.amount_owed : 0
                     label = 'your share'
+                  } else {
+                    // Third party paid: show the counterparty's unpaid share, labelled
+                    // with who it's owed to (not between you and them).
+                    amt = cpUnpaid
+                    label = cpAllPaid ? 'paid' : `owes ${thirdPartyPayerName}`
                   }
                   return (
                     <div key={s.id} onClick={() => setViewSplit(s)}
@@ -231,9 +249,9 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
                         <div className="flex items-center gap-1.5 shrink-0">
                           <div className="text-right">
                             <span className={`text-sm font-semibold ${s.is_settled || amt === 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                              {s.is_settled ? 'Settled' : formatCurrency(amt)}
+                              {s.is_settled ? 'Settled' : amt > 0 ? formatCurrency(amt) : '—'}
                             </span>
-                            {!s.is_settled && amt > 0 && <p className="text-[10px] text-muted-foreground leading-tight">{label}</p>}
+                            {!s.is_settled && label && <p className="text-[10px] text-muted-foreground leading-tight">{label}</p>}
                           </div>
                           {s.created_by === myId && !s.is_settled && (
                             <button onClick={e => { e.stopPropagation(); editSplit(s) }} title="Edit" className="text-muted-foreground hover:text-foreground"><Pencil className="w-3.5 h-3.5" /></button>
