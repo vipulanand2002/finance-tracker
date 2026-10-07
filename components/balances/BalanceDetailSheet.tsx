@@ -221,8 +221,8 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
                 {/* Once nothing is outstanding, show what was paid between you (past tense) */}
                 {net === 0 && (histThey > 0 || histYou > 0) && (
                   <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                    {histThey > 0 && <span>They paid (splits): <span className="text-foreground font-medium">{formatCurrency(histThey)}</span></span>}
-                    {histYou  > 0 && <span>You paid (splits): <span className="text-foreground font-medium">{formatCurrency(histYou)}</span></span>}
+                    {histThey > 0 && <span>They owed (splits): <span className="text-foreground font-medium">{formatCurrency(histThey)}</span></span>}
+                    {histYou  > 0 && <span>You owed (splits): <span className="text-foreground font-medium">{formatCurrency(histYou)}</span></span>}
                   </div>
                 )}
                 <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
@@ -275,17 +275,18 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
                   if (iAmPayer) {
                     amt = cpUnpaid
                     label = 'they owe you'
-                    if (amt === 0) { paidRow = latestPaid(s.split_participants.filter(matchesCp)); if (paidRow) label = 'they paid you' }
+                    // Settled ≠ paid: it may have been paid or just agreed closed
+                    if (amt === 0) { paidRow = latestPaid(s.split_participants.filter(matchesCp)); if (paidRow) label = 'their share · settled' }
                   } else if (payerIsCp) {
                     const mine = s.split_participants.find(isSelf)
                     amt = mine && !mine.is_paid ? mine.amount_owed : 0
                     label = 'your share'
-                    if (mine?.is_paid) { paidRow = mine; label = 'you paid them' }
+                    if (mine?.is_paid) { paidRow = mine; label = 'your share · settled' }
                   } else {
                     // Third party paid: show the counterparty's unpaid share, labelled
                     // with who it's owed to (not between you and them).
                     amt = cpUnpaid
-                    label = cpAllPaid ? 'paid' : `owes ${thirdPartyPayerName}`
+                    label = cpAllPaid ? 'settled' : `owes ${thirdPartyPayerName}`
                     if (cpAllPaid) paidRow = latestPaid(s.split_participants.filter(matchesCp))
                   }
                   const paidOn = paidRow?.paid_at ? new Date(paidRow.paid_at) : null
@@ -300,7 +301,7 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
                         <div className="flex items-center gap-1.5 shrink-0">
                           <div className="text-right">
                             <span className={`text-sm font-semibold ${s.is_settled || amt === 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                              {s.is_settled ? 'Settled' : amt > 0 ? formatCurrency(amt) : paidRow ? 'Paid' : '—'}
+                              {s.is_settled ? 'Settled' : amt > 0 ? formatCurrency(amt) : paidRow ? 'Settled' : '—'}
                             </span>
                             {label && (
                               <p className="text-[10px] text-muted-foreground leading-tight">

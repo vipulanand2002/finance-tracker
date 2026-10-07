@@ -269,15 +269,28 @@ export async function PATCH(request: Request) {
   }
 
   // PATCH /api/splits?type=close_balance
-  // Body: { contact_email: string | null, contact_name: string }
-  // Settles the splits between YOU and this person, in both directions:
-  //   • bills you paid       → their unpaid share is marked paid (they paid you)
-  //   • bills they paid      → your unpaid share is marked paid (you paid them)
+  // Body: { contact_email, contact_name, person_key?, contact_id?, net_before?, started_at?,
+  //         tagged?: { expenses, received, paid_to_them, charged_to_them } }
+  // Closes the balance with one person — an agreement that you're settled, NOT a
+  // payment: no income or expense is ever created here. It settles the splits
+  // between YOU and this person, in both directions:
+  //   • bills you paid       → their unpaid share is marked as settled
+  //   • bills they paid      → your unpaid share is marked as settled
   // Shares on bills a THIRD party paid are left untouched — that debt isn't
-  // between the two of you. Auto-settles splits where everyone is now paid.
+  // between the two of you. Splits that end up fully paid are marked settled, and
+  // the settlement itself is recorded (settlements table) so it shows in history.
   if (type === 'close_balance') {
-    const { contact_email, contact_name } = body as { contact_email: string | null; contact_name: string }
+    const { contact_email, contact_name, person_key, contact_id, net_before, started_at, tagged } = body as {
+      contact_email: string | null
+      contact_name: string
+      person_key?: string
+      contact_id?: string | null
+      net_before?: number
+      started_at?: string | null
+      tagged?: { expenses?: number; received?: number; paid_to_them?: number; charged_to_them?: number }
+    }
     const email = contact_email?.trim().toLowerCase() || null
+    const now = new Date().toISOString()
 
     // Their account id, if they have one (payers are stored by account id)
     let theirId: string | null = null
@@ -286,7 +299,7 @@ export async function PATCH(request: Request) {
       theirId = (pr as { id?: string } | null)?.id ?? null
     }
 
-    const cols = 'id, created_by, split_participants(id, participant_name, participant_email, participant_user_id, is_paid)'
+    const cols = 'id, created_by, split_participants(id, participant_name, participant_email, participant_user_id, amount_owed, is_paid)'
     // Payer columns need migrations 043/044 — fall back gracefully without them
     type Res = { data: CloseSplit[] | null; error: { message?: string } | null }
     let res = await supabase.from('expense_splits').select(`${cols}, paid_by, paid_by_email, paid_by_name`)
@@ -296,17 +309,16 @@ export async function PATCH(request: Request) {
         .eq('created_by', user.id).eq('is_settled', false) as unknown as Res
     }
     const userSplits = res.data ?? []
-    if (userSplits.length === 0) return NextResponse.json({ markedPaid: 0 })
 
     // Only the shares between YOU and this person (never a third party's bill)
     const pair = { userId: user.id, userEmail: user.email ?? '', email, name: contact_name ?? '', theirId }
     const matched = selectPairShares(userSplits, pair)
 
-    // Mark them all paid
+    // Mark them all as settled (paid) — same timestamp as the settlement record
     if (matched.length > 0) {
       await supabase
         .from('split_participants')
-        .update({ is_paid: true, paid_at: new Date().toISOString() })
+        .update({ is_paid: true, paid_at: now })
         .in('id', matched.map(p => p.id))
     }
 
@@ -329,7 +341,37 @@ export async function PATCH(request: Request) {
       }
     }
 
-    return NextResponse.json({ markedPaid: matched.length, settledSplits })
+    // Record the settlement itself. Amounts recorded before this moment belong to the
+    // closed round, so the balance with this person starts fresh from here.
+    let settlementSaved = false
+    let settlementsMissing = false
+    if (person_key) {
+      const r2 = (n: number) => Math.round(n * 100) / 100
+      const num = (v: unknown) => (typeof v === 'number' && isFinite(v) ? r2(v) : 0)
+      const owed = (who: 'them' | 'you') => r2(matched.filter(m => m.owedBy === who).reduce((a, m) => a + m.amount, 0))
+      const { error: insErr } = await supabase.from('settlements').insert({
+        user_id: user.id,
+        person_key,
+        person_name: contact_name ?? '',
+        person_email: email,
+        contact_id: contact_id ?? null,
+        settled_at: now,
+        started_at: started_at ?? null,
+        net_before: num(net_before),
+        they_owed: owed('them'),
+        you_owed: owed('you'),
+        expenses: num(tagged?.expenses),
+        received: num(tagged?.received),
+        paid_to_them: num(tagged?.paid_to_them),
+        charged_to_them: num(tagged?.charged_to_them),
+        share_count: matched.length,
+        split_ids: [...new Set(matched.map(m => m.split_id))],
+      })
+      if (insErr) settlementsMissing = true   // table not created yet (migration 045)
+      else settlementSaved = true
+    }
+
+    return NextResponse.json({ markedPaid: matched.length, settledSplits, settlementSaved, settlementsMissing })
   }
 
   if (type === 'update') {

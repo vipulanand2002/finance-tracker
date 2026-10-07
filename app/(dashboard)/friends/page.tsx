@@ -65,6 +65,7 @@ interface TaggedTxn {
   type: 'income' | 'expense'
   category: string
   date: string
+  created_at?: string
   split_id: string | null
 }
 
@@ -125,7 +126,10 @@ export default function FriendsPage() {
   // Tagged transactions (expenses tagged to this friend, no split linked)
   const [taggedTxns, setTaggedTxns] = useState<TaggedTxn[]>([])
   // Cross-user tagged payments involving this friend (same source the Balances tab uses)
-  const [taggedPayments, setTaggedPayments] = useState<{ from_email: string | null; amount: number; kind?: string }[]>([])
+  const [taggedPayments, setTaggedPayments] = useState<{ from_email: string | null; amount: number; kind?: string; created_at?: string; date?: string }[]>([])
+  // When the balance with this friend was last settled (ms). Amounts recorded before
+  // it belong to the closed round and are not counted again.
+  const [settledSince, setSettledSince] = useState(-Infinity)
 
   // Split modal
   const [splitOpen, setSplitOpen] = useState(false)
@@ -193,12 +197,24 @@ export default function FriendsPage() {
   // ── Load detail when friend selected ──────────────────────────────────────
 
   useEffect(() => {
-    if (!selected) { setMessages([]); setSplits([]); setTaggedTxns([]); setTaggedPayments([]); return }
+    if (!selected) { setMessages([]); setSplits([]); setTaggedTxns([]); setTaggedPayments([]); setSettledSince(-Infinity); return }
     if (selected.connected && selected.friend_user_id) loadMessages(selected.friend_user_id)
     loadSplits(selected)
     loadTaggedTxns(selected)
     loadTaggedPayments(selected)
+    loadSettlement(selected)
   }, [selected?.id])
+
+  function loadSettlement(friend: Friend) {
+    const key = friend.email ? `e:${friend.email.toLowerCase()}` : `n:${friend.name.toLowerCase()}`
+    fetch('/api/settlements')
+      .then(r => r.json())
+      .then((d: { rows?: { person_key: string; settled_at: string }[] }) => {
+        const times = (d.rows ?? []).filter(r => r.person_key === key).map(r => Date.parse(r.settled_at)).filter(t => !isNaN(t))
+        setSettledSince(times.length ? Math.max(...times) : -Infinity)
+      })
+      .catch(() => {})
+  }
 
   function loadMessages(friendUserId: string) {
     setLoadingMsgs(true)
@@ -433,12 +449,15 @@ export default function FriendsPage() {
       }
     }
   }
-  const txnOwed = taggedTxns.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
-  const txnReceived = taggedTxns.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
+  // Only amounts recorded since the last settlement count (earlier ones are closed)
+  const freshTxns = taggedTxns.filter(t => Date.parse(t.created_at ?? `${t.date}T00:00:00Z`) > settledSince)
+  const freshPayments = taggedPayments.filter(p => Date.parse(p.created_at ?? `${p.date ?? ''}T00:00:00Z`) > settledSince)
+  const txnOwed = freshTxns.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
+  const txnReceived = freshTxns.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
   // Cross-user tagged payments (same as the Balances tab):
   //   'charge' → they paid for you (you owe them more) · else → you paid them (reduces it)
-  const paidToThem = taggedPayments.filter(p => p.kind !== 'charge').reduce((sum, p) => sum + p.amount, 0)
-  const chargedToThem = taggedPayments.filter(p => p.kind === 'charge').reduce((sum, p) => sum + p.amount, 0)
+  const paidToThem = freshPayments.filter(p => p.kind !== 'charge').reduce((sum, p) => sum + p.amount, 0)
+  const chargedToThem = freshPayments.filter(p => p.kind === 'charge').reduce((sum, p) => sum + p.amount, 0)
   // positive = friend owes you; negative = you owe friend
   const netBalance = splitTheyOwe - splitYouOwe + txnOwed - txnReceived + paidToThem - chargedToThem
 
@@ -790,7 +809,10 @@ export default function FriendsPage() {
       {selected && (
         <BalanceDetailSheet
           open={balanceOpen}
-          counterparty={{ name: selected.name, email: selected.email, contactId: selected.id }}
+          counterparty={{
+            name: selected.name, email: selected.email, contactId: selected.id,
+            since: Number.isFinite(settledSince) ? new Date(settledSince).toISOString() : null,
+          }}
           onClose={() => setBalanceOpen(false)}
           onChanged={() => { loadSplits(selected); loadTaggedTxns(selected) }}
         />

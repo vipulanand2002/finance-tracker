@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import { formatCurrency } from '@/lib/utils'
 import { fetchProfileNames } from '@/lib/profile-names'
-import { pairShares, buildSettlementRounds, type PairShare, type TaggedItem, type SettlementRound } from '@/lib/settlement-history'
+import { pairShares, buildPersonHistory, type PairShare, type TaggedItem, type SettlementRound, type SettlementRecord } from '@/lib/settlement-history'
 import { format, formatDistanceToNow } from 'date-fns'
 import { ArrowUpRight, ArrowDownLeft, CheckCircle2, Loader2, Send, X, Plus, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -63,6 +63,8 @@ interface FriendBalance {
   /** When the balance with this person was last fully settled. Tagged amounts recorded
    *  before this belong to earlier, closed rounds — so they're not counted again. */
   since: string | null
+  /** When the current (open) round began — earliest unsettled bill or entry. */
+  roundStart: string | null
 }
 
 // One settlement with one person. The same person can have several (one per round).
@@ -78,6 +80,8 @@ interface SettledEntry {
 export default function BalancesPage() {
   const [balances, setBalances] = useState<FriendBalance[]>([])
   const [settled, setSettled] = useState<SettledEntry[]>([])   // every past settlement, newest first
+  // false until migration 045 (settlements table) has been applied
+  const [settlementsAvailable, setSettlementsAvailable] = useState(true)
   const [loading, setLoading] = useState(true)
   const [reminding, setReminding] = useState<string | null>(null)
   const [confirmClose, setConfirmClose] = useState<string | null>(null)  // contact id pending confirmation
@@ -94,13 +98,17 @@ export default function BalancesPage() {
         const myId = user?.id ?? ''
         const myEmail = (user?.email ?? '').toLowerCase()
 
-        const [friendsRes, splitsRes, payRes] = await Promise.all([
+        const [friendsRes, splitsRes, payRes, settleRes] = await Promise.all([
           fetch('/api/friends'),
           fetch('/api/splits'),
           fetch('/api/tagged-payments'),
+          fetch('/api/settlements'),
         ])
         const friends = await friendsRes.json()
         const splits = await splitsRes.json()
+        const settleData = settleRes.ok ? await settleRes.json() : { available: false, rows: [] }
+        setSettlementsAvailable(!!settleData.available)
+        const settleRecords: SettlementRecord[] = Array.isArray(settleData.rows) ? settleData.rows : []
         const paymentsData = payRes.ok ? await payRes.json() : []
         const friendList: { id: string; name: string; email: string | null }[] = Array.isArray(friends) ? friends : []
         const splitList: SplitRow[] = Array.isArray(splits) ? splits : []
@@ -115,7 +123,7 @@ export default function BalancesPage() {
           const key = keyOf(email, name)
           let cp = map.get(key)
           if (!cp) {
-            cp = { key, id: id ?? null, name, email: email ?? null, splitOwed: 0, splitYouOwe: 0, txnOwed: 0, txnReceived: 0, paidToThem: 0, chargedToThem: 0, net: 0, since: null }
+            cp = { key, id: id ?? null, name, email: email ?? null, splitOwed: 0, splitYouOwe: 0, txnOwed: 0, txnReceived: 0, paidToThem: 0, chargedToThem: 0, net: 0, since: null, roundStart: null }
             map.set(key, cp)
           } else {
             if (!cp.id && id) cp.id = id
@@ -198,10 +206,14 @@ export default function BalancesPage() {
           })
         )
 
-        // Work out each person's settlement rounds. A round closes when every share
-        // is paid AND the recorded amounts net to zero; anything after that is a fresh
-        // round (back in Active) that becomes its own entry the next time it clears.
+        // Each person's settlements: the ones you recorded by closing a balance, plus
+        // (for older history) rounds worked out from timestamps — a round closes when
+        // every share is paid AND the recorded amounts net to zero. Anything after the
+        // latest settlement is a fresh round (back in Active) that becomes its own entry
+        // the next time it's settled.
         const atOf = (x: { created_at?: string; date: string }) => x.created_at ?? `${x.date}T00:00:00Z`
+        const recordsByKey = new Map<string, SettlementRecord[]>()
+        for (const r of settleRecords) recordsByKey.set(r.person_key, [...(recordsByKey.get(r.person_key) ?? []), r])
         const entries: SettledEntry[] = []
         for (const cp of map.values()) {
           const items: TaggedItem[] = [
@@ -211,12 +223,18 @@ export default function BalancesPage() {
             ...(rawPays.get(cp.key) ?? [])
               .map(p => ({ kind: (p.kind === 'charge' ? 'charge' : 'payment') as 'charge' | 'payment', amount: p.amount, at: atOf(p) })),
           ]
-          const { rounds, boundary } = buildSettlementRounds(sharesByKey.get(cp.key) ?? [], items)
+          const { rounds, boundary } = buildPersonHistory(sharesByKey.get(cp.key) ?? [], items, recordsByKey.get(cp.key) ?? [])
           cp.since = boundary
           // Active numbers only count what was recorded after the last settlement
-          // (earlier amounts net to zero and belong to the closed rounds).
+          // (earlier amounts belong to the closed rounds, even if a settlement left
+          // something over — settling is an agreement, not necessarily a payment).
           const after = boundary ? Date.parse(boundary) : -Infinity
           const fresh = items.filter(i => Date.parse(i.at) > after)
+          const openStarts = [
+            ...(sharesByKey.get(cp.key) ?? []).filter(s => !(s.isPaid && s.paidAt && Date.parse(s.paidAt) <= after)).map(s => s.createdAt),
+            ...fresh.map(i => i.at),
+          ].filter((x): x is string => !!x).sort((a, b) => Date.parse(a) - Date.parse(b))
+          cp.roundStart = openStarts[0] ?? null
           const total = (kind: TaggedItem['kind']) => fresh.filter(i => i.kind === kind).reduce((s, i) => s + i.amount, 0)
           cp.txnOwed = total('expense')
           cp.txnReceived = total('income')
@@ -267,93 +285,49 @@ export default function BalancesPage() {
 
   useEffect(() => { load() }, [load])
 
-  // Payments you already logged for this person (income tagged to them) were
-  // counted against the balance. When closing, the splits they covered are marked
-  // paid, so those records are un-tagged — otherwise they'd be counted twice and
-  // flip the balance the other way. (The income itself stays in your transactions.)
-  async function untagPayments(friend: FriendBalance) {
-    interface TaggedTx {
-      id: string; amount: number; type: string; category: string; description: string | null; date: string
-      is_recurring: boolean; is_discrete: boolean; receipt_url: string | null; trip_id: string | null
-      card_id: string | null; split_id: string | null; contact_id: string | null; contact_ids: string[] | null
-    }
-    const r = await fetch(`/api/transactions?contact_id=${friend.id}`)
-    const body = r.ok ? await r.json() : []
-    const list: (TaggedTx & { created_at?: string })[] = Array.isArray(body) ? body : body.transactions ?? []
-    // Only this round's payments — never ones that belong to an earlier settlement
-    const since = friend.since ? Date.parse(friend.since) : -Infinity
-    for (const t of list.filter(t => t.type === 'income' && !t.split_id && Date.parse(t.created_at ?? `${t.date}T00:00:00Z`) > since)) {
-      const rest = (t.contact_ids ?? []).filter(c => c !== friend.id)
-      const res = await fetch(`/api/transactions?id=${t.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amount: t.amount, type: t.type, category: t.category, description: t.description, date: t.date,
-          is_recurring: t.is_recurring, is_discrete: t.is_discrete, receipt_url: t.receipt_url,
-          trip_id: t.trip_id, card_id: t.card_id, split_id: t.split_id,
-          contact_id: t.contact_id === friend.id ? (rest[0] ?? null) : t.contact_id,
-          contact_ids: rest,
-        }),
-      })
-      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error ?? 'Failed to clear payment') }
-    }
-  }
-
+  // Closing a balance is an AGREEMENT that you're settled — not a payment. It never
+  // creates income or expense: it settles the splits between you two and records the
+  // settlement, so everything recorded up to now belongs to the closed round.
   async function closeBalance(friend: FriendBalance) {
-    setClosing(friend.key)
     setConfirmClose(null)
     const round2 = (n: number) => Math.round(n * 100) / 100
-    let splitsClosed = 0
-    try {
-      // 1. Settle the splits between the two of you — both ways: their shares on
-      //    bills you paid AND your shares on bills they paid. (Bills a third
-      //    person paid are not between you two and are left alone.) Any split that
-      //    ends up fully paid is marked settled too.
-      if (friend.splitOwed > 0 || friend.splitYouOwe > 0) {
-        const res = await fetch('/api/splits?type=close_balance', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contact_email: friend.email, contact_name: friend.name }),
-        })
-        const data = await res.json()
-        if (!res.ok) throw new Error(data.error)
-        splitsClosed = data.settledSplits ?? 0
-      }
 
-      // 2. Whatever is left outside the splits (tagged expenses, recorded payments,
-      //    charges) is settled with one entry so the balance lands on exactly zero.
-      if (friend.id) {
-        let remaining = round2(friend.txnOwed - friend.txnReceived + friend.paidToThem - friend.chargedToThem)
-        if (remaining < -0.009 && friend.txnReceived > 0) {
-          // They'd already paid you (logged as income) — that payment has now been
-          // applied to the splits above, so stop counting it a second time.
-          await untagPayments(friend)
-          remaining = round2(friend.txnOwed + friend.paidToThem - friend.chargedToThem)
-        }
-        if (Math.abs(remaining) > 0.009) {
-          // remaining > 0: they owe you → they pay you (income)
-          // remaining < 0: you owe them  → you pay them (expense)
-          const res = await fetch('/api/transactions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              amount: Math.abs(remaining),
-              type: remaining > 0 ? 'income' : 'expense',
-              category: 'Other',
-              description: `Settled balance with ${friend.name}`,
-              date: new Date().toISOString().split('T')[0],
-              contact_id: friend.id,
-              contact_ids: [friend.id],
-            }),
-          })
-          if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error ?? 'Failed to settle') }
-        }
-      }
+    // Anything outside the splits (tagged amounts, recorded payments) can only be
+    // closed by recording the settlement, which needs the settlements table.
+    const leftover = round2(friend.txnOwed - friend.txnReceived + friend.paidToThem - friend.chargedToThem)
+    if (!settlementsAvailable && Math.abs(leftover) > 0.009) {
+      toast.error('One-time setup needed to settle this: run migration 045 (settlements table) in Supabase, then try again.')
+      return
+    }
+
+    setClosing(friend.key)
+    try {
+      const res = await fetch('/api/splits?type=close_balance', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contact_email: friend.email,
+          contact_name: friend.name,
+          person_key: friend.key,
+          contact_id: friend.id,
+          net_before: friend.net,
+          started_at: friend.roundStart,
+          tagged: {
+            expenses: friend.txnOwed,
+            received: friend.txnReceived,
+            paid_to_them: friend.paidToThem,
+            charged_to_them: friend.chargedToThem,
+          },
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      const splitsClosed: number = data.settledSplits ?? 0
 
       toast.success(
         splitsClosed > 0
-          ? `Settled up with ${friend.name} · ${splitsClosed} split${splitsClosed !== 1 ? 's' : ''} marked settled`
-          : `Settled up with ${friend.name}`
+          ? `Settled with ${friend.name} · ${splitsClosed} split${splitsClosed !== 1 ? 's' : ''} marked settled`
+          : `Settled with ${friend.name}`
       )
       await load()
     } catch {
@@ -539,7 +513,9 @@ export default function BalancesPage() {
                 const when = new Date(r.settledAt)
                 const whenValid = !isNaN(when.getTime())
                 const from = new Date(r.startedAt)
-                const net = Math.round((r.theyPaid - r.youPaid) * 100) / 100
+                // What was outstanding when settled (exact for recorded settlements,
+                // the split net for older ones). Settled ≠ paid: it was agreed closed.
+                const net = r.netBefore ?? Math.round((r.theyOwed - r.youOwed) * 100) / 100
                 const open = () => setDetailFor({
                   name: e.cp.name, email: e.cp.email, contactId: e.cp.id,
                   // Show only the bills & payments that belong to THIS settlement
@@ -580,10 +556,10 @@ export default function BalancesPage() {
                       </div>
                     </div>
 
-                    {/* What was paid in this settlement (past tense of the active card's "They owe / You owe") */}
+                    {/* What this settlement covered (past tense of the active card's "They owe / You owe") */}
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                      {r.theyPaid      > 0 && <span>They paid (splits): <span className="font-medium text-foreground">{formatCurrency(r.theyPaid)}</span></span>}
-                      {r.youPaid       > 0 && <span>You paid (splits): <span className="font-medium text-foreground">{formatCurrency(r.youPaid)}</span></span>}
+                      {r.theyOwed      > 0 && <span>They owed (splits): <span className="font-medium text-foreground">{formatCurrency(r.theyOwed)}</span></span>}
+                      {r.youOwed       > 0 && <span>You owed (splits): <span className="font-medium text-foreground">{formatCurrency(r.youOwed)}</span></span>}
                       {r.paidToThem    > 0 && <span>You paid: <span className="font-medium text-foreground">{formatCurrency(r.paidToThem)}</span></span>}
                       {r.chargedToThem > 0 && <span>They paid for you: <span className="font-medium text-foreground">{formatCurrency(r.chargedToThem)}</span></span>}
                       {r.expenses      > 0 && <span>Expenses: <span className="font-medium text-foreground">{formatCurrency(r.expenses)}</span></span>}
@@ -593,12 +569,12 @@ export default function BalancesPage() {
                     {/* Period covered, net outcome, how long ago */}
                     <div className="flex items-center justify-between gap-2 pt-2 border-t text-xs">
                       <span className="text-muted-foreground min-w-0">
-                        {r.shares > 0 && Math.abs(net) > 0.009 ? (
-                          <>Net settled <span className="font-semibold text-foreground">{formatCurrency(Math.abs(net))}</span> — {net > 0 ? 'they paid you' : 'you paid them'}</>
-                        ) : r.shares > 0 ? (
-                          <>Evened out · {r.shares} paid share{r.shares !== 1 ? 's' : ''}</>
+                        {Math.abs(net) > 0.009 ? (
+                          <><span className="font-semibold text-foreground">{formatCurrency(Math.abs(net))}</span> {net > 0 ? 'they owed you' : 'you owed them'} · settled</>
+                        ) : r.shares > 0 || r.source === 'record' ? (
+                          <>Balance was even · settled</>
                         ) : (
-                          <>Settled via recorded payments</>
+                          <>Settled</>
                         )}
                         {whenValid && !isNaN(from.getTime()) && format(from, 'd MMM') !== format(when, 'd MMM') && (
                           <> · {format(from, 'd MMM')} – {format(when, 'd MMM')}</>

@@ -9,6 +9,7 @@ export interface CloseParticipant {
   participant_name: string
   participant_email: string | null
   participant_user_id: string | null
+  amount_owed?: number
   is_paid: boolean
 }
 
@@ -48,7 +49,15 @@ export function splitsInvolving(splits: CloseSplit[], pair: ClosePair): string[]
     .map(s => s.id)
 }
 
-export function selectPairShares(splits: CloseSplit[], pair: ClosePair): { id: string; split_id: string }[] {
+export interface PairShareRow {
+  id: string
+  split_id: string
+  amount: number
+  /** 'them' = their share on a bill you paid · 'you' = your share on a bill they paid */
+  owedBy: 'them' | 'you'
+}
+
+export function selectPairShares(splits: CloseSplit[], pair: ClosePair): PairShareRow[] {
   const nameLower = pair.name.trim().toLowerCase()
   const myEmail = pair.userEmail.toLowerCase()
 
@@ -58,7 +67,7 @@ export function selectPairShares(splits: CloseSplit[], pair: ClosePair): { id: s
   const isMe = (p: CloseParticipant) =>
     p.participant_user_id === pair.userId || (!!myEmail && p.participant_email?.toLowerCase() === myEmail)
 
-  const out: { id: string; split_id: string }[] = []
+  const out: PairShareRow[] = []
   for (const s of splits) {
     // An unregistered payer (email-only or name-only) is never the author
     const unregPayer = !s.paid_by && !!(s.paid_by_email || s.paid_by_name)
@@ -76,7 +85,9 @@ export function selectPairShares(splits: CloseSplit[], pair: ClosePair): { id: s
       : theyAreCreditor
         ? s.split_participants.filter(p => !p.is_paid && isMe(p))
         : [] // a third party paid — not settled by this pair
-    for (const p of rows) out.push({ id: p.id, split_id: s.id })
+    for (const p of rows) {
+      out.push({ id: p.id, split_id: s.id, amount: p.amount_owed ?? 0, owedBy: iAmCreditor ? 'them' : 'you' })
+    }
   }
   return out
 }

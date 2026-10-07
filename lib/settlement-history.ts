@@ -112,14 +112,54 @@ export interface TaggedItem {
 export interface SettlementRound {
   settledAt: string
   startedAt: string
-  theyPaid: number
-  youPaid: number
+  /** Their shares on bills you paid that were closed (what they owed you in splits) */
+  theyOwed: number
+  /** Your shares on bills they paid that were closed (what you owed them in splits) */
+  youOwed: number
   shares: number
   splitIds: string[]
   expenses: number
   received: number
   paidToThem: number
   chargedToThem: number
+  /** 'record' = a settlement saved when you closed the balance · 'derived' = worked out from timestamps */
+  source: 'record' | 'derived'
+  /** Total outstanding at the moment it was settled (+ they owed you, − you owed them). Known for records. */
+  netBefore: number | null
+}
+
+/** A row of the settlements table. */
+export interface SettlementRecord {
+  id: string
+  person_key: string
+  settled_at: string
+  started_at: string | null
+  net_before: number
+  they_owed: number
+  you_owed: number
+  expenses: number
+  received: number
+  paid_to_them: number
+  charged_to_them: number
+  share_count: number
+  split_ids: string[]
+}
+
+export function roundFromRecord(r: SettlementRecord): SettlementRound {
+  return {
+    settledAt: r.settled_at,
+    startedAt: r.started_at ?? r.settled_at,
+    theyOwed: Number(r.they_owed) || 0,
+    youOwed: Number(r.you_owed) || 0,
+    shares: r.share_count ?? 0,
+    splitIds: r.split_ids ?? [],
+    expenses: Number(r.expenses) || 0,
+    received: Number(r.received) || 0,
+    paidToThem: Number(r.paid_to_them) || 0,
+    chargedToThem: Number(r.charged_to_them) || 0,
+    source: 'record',
+    netBefore: Number(r.net_before) || 0,
+  }
 }
 
 // What each tagged item does to "they owe you" (same signs as the Balances net)
@@ -168,17 +208,51 @@ export function buildSettlementRounds(
     rounds.push({
       settledAt: events[i].iso,
       startedAt,
-      theyPaid: round2(paidShares.filter(s => s.owedBy === 'them').reduce((a, s) => a + s.amount, 0)),
-      youPaid: round2(paidShares.filter(s => s.owedBy === 'you').reduce((a, s) => a + s.amount, 0)),
+      theyOwed: round2(paidShares.filter(s => s.owedBy === 'them').reduce((a, s) => a + s.amount, 0)),
+      youOwed: round2(paidShares.filter(s => s.owedBy === 'you').reduce((a, s) => a + s.amount, 0)),
       shares: paidShares.length,
       splitIds: [...new Set(paidShares.map(s => s.splitId).filter(Boolean))],
       expenses: sum('expense'),
       received: sum('income'),
       paidToThem: sum('payment'),
       chargedToThem: sum('charge'),
+      source: 'derived',
+      netBefore: null,
     })
     boundary = events[i].iso
     seg = []
   }
   return { rounds, boundary }
+}
+
+// ── Full history for one person: recorded settlements + derived ones ──────────
+// A recorded settlement closes the round at settled_at EVEN IF an amount was left
+// over (settled mutually, no payment) — so everything recorded before it is ignored
+// from then on. Settlements from before the table existed are still derived.
+export function buildPersonHistory(
+  shares: PairShare[],
+  items: TaggedItem[],
+  records: SettlementRecord[],
+): { rounds: SettlementRound[]; boundary: string | null } {
+  const all = buildSettlementRounds(shares, items)
+  if (records.length === 0) return all
+
+  const recTimes = records.map(r => ts(r.settled_at)).filter(t => !isNaN(t))
+  const recB = Math.max(...recTimes)
+  const latestRec = records.find(r => ts(r.settled_at) === recB)!
+
+  // Earlier derived settlements, minus any a record already covers
+  const GRACE = 5 * 60_000
+  const before = all.rounds.filter(r =>
+    ts(r.settledAt) <= recB && !recTimes.some(t => Math.abs(t - ts(r.settledAt)) < GRACE))
+
+  // Anything after the latest record is derived from only what was recorded after it
+  const after = buildSettlementRounds(
+    shares.filter(s => !(s.isPaid && s.paidAt && ts(s.paidAt) <= recB)),
+    items.filter(i => ts(i.at) > recB),
+  )
+
+  const rounds = [...before, ...records.map(roundFromRecord), ...after.rounds]
+    .sort((a, b) => ts(a.settledAt) - ts(b.settledAt))
+  return { rounds, boundary: after.boundary ?? latestRec.settled_at }
 }

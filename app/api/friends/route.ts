@@ -150,6 +150,17 @@ async function backfillAllReferences(
   if (oldAccountId && idChanged) {
     await run('expense_splits.paid_by', svc.from('expense_splits').update({ paid_by: newAccountId }).eq('created_by', userId).eq('paid_by', oldAccountId))
   }
+  // ── settlements (history of closed balances) — keep them attached to this person
+  // when their email/name changes (keyed by 'e:<email>' or, with no email, 'n:<name>').
+  {
+    const oldKey = oldEmail ? `e:${oldEmail}` : (oldName ? `n:${oldName.trim().toLowerCase()}` : null)
+    const newKey = newEmail ? `e:${newEmail}` : `n:${newName.trim().toLowerCase()}`
+    if (oldKey) {
+      await run('settlements', svc.from('settlements')
+        .update({ person_key: newKey, person_email: newEmail, person_name: newName })
+        .eq('user_id', userId).eq('person_key', oldKey))
+    }
+  }
   // ── on-behalf transactions (created by me in the contact's account) — move them
   // to the contact's new account so they don't strand under an old identity (which
   // shows as "Member" in the trip view). Only when the new email maps to an account.
