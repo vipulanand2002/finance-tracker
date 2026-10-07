@@ -19,8 +19,10 @@ export interface BalanceCounterparty {
   name: string
   email: string | null
   contactId: string | null
-  /** When the balance with this person was last settled (ISO) — shown for settled people */
-  settledAt?: string | null
+  /** Active card: only count tagged amounts recorded after the last settlement (ISO) */
+  since?: string | null
+  /** Settled card: show only the bills & payments that belong to that one settlement */
+  round?: { splitIds: string[]; from: string; to: string }
 }
 
 interface Participant {
@@ -51,7 +53,7 @@ interface SplitRow {
   split_participants: Participant[]
 }
 interface TaggedPayment {
-  id: string; from_email: string | null; from_name: string | null; amount: number; kind?: string; status: string; date: string; description: string | null
+  id: string; from_email: string | null; from_name: string | null; amount: number; kind?: string; status: string; date: string; description: string | null; created_at?: string
 }
 
 interface Props {
@@ -104,16 +106,28 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
         fetch('/api/tagged-payments').then(r => r.json()).catch(() => []),
       ])
 
+      const round = counterparty.round
+      const since = counterparty.since ? Date.parse(counterparty.since) : -Infinity
+      // A Settled card shows one settlement; an Active card shows only what's new since
+      // the last one; otherwise everything.
+      const inScope = (x: { created_at?: string; date: string }) => {
+        const t = Date.parse(x.created_at ?? `${x.date}T00:00:00Z`)
+        if (round) return t >= Date.parse(round.from) && t <= Date.parse(round.to)
+        return t > since
+      }
+
       const allSplits: SplitRow[] = Array.isArray(splitsRes) ? splitsRes : []
-      const mine = allSplits.filter(s => (s.split_participants ?? []).some(matchesCp))
+      const mine = allSplits
+        .filter(s => (s.split_participants ?? []).some(matchesCp))
+        .filter(s => !round || round.splitIds.includes(s.id))
       setSplits(mine)
       fetchProfileNames(mine.flatMap(s => (s.split_participants ?? []).map(p => p.participant_email))).then(setProfileNames)
 
       const txList: Transaction[] = Array.isArray(txnRes) ? txnRes : (txnRes.transactions ?? [])
-      setTxns(txList.filter(t => !t.split_id))
+      setTxns(txList.filter(t => !t.split_id && inScope(t as Transaction & { created_at?: string })))
 
       const payList: TaggedPayment[] = Array.isArray(payRes) ? payRes : []
-      setPayments(emailLower ? payList.filter(p => p.from_email?.toLowerCase() === emailLower) : [])
+      setPayments(emailLower ? payList.filter(p => p.from_email?.toLowerCase() === emailLower && inScope(p)) : [])
     } finally {
       setLoading(false)
     }
@@ -161,7 +175,7 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
   const histThey = histEvents.filter(e => e.direction === 'they_paid').reduce((a, e) => a + e.amount, 0)
   const histYou = histEvents.filter(e => e.direction === 'you_paid').reduce((a, e) => a + e.amount, 0)
   const settledOn = (() => {
-    const iso = counterparty?.settledAt
+    const iso = counterparty?.round?.to
       ?? histEvents.map(e => e.paidAt ?? '').sort().pop()
     const d = iso ? new Date(iso) : null
     return d && !isNaN(d.getTime()) ? d : null
