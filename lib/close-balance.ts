@@ -31,6 +31,23 @@ export interface ClosePair {
   theirId: string | null
 }
 
+/** A split is ready to be marked settled once it has participants and every one has paid. */
+export function fullyPaidSplitIds(splits: { id: string; split_participants: { is_paid: boolean }[] }[]): string[] {
+  return splits
+    .filter(s => s.split_participants.length > 0 && s.split_participants.every(p => p.is_paid))
+    .map(s => s.id)
+}
+
+/** Splits in which this person takes part (as a participant or the payer's own row). */
+export function splitsInvolving(splits: CloseSplit[], pair: ClosePair): string[] {
+  const nameLower = pair.name.trim().toLowerCase()
+  return splits
+    .filter(s => s.split_participants.some(p => pair.email
+      ? p.participant_email?.toLowerCase() === pair.email
+      : !p.participant_email && p.participant_name.trim().toLowerCase() === nameLower))
+    .map(s => s.id)
+}
+
 export function selectPairShares(splits: CloseSplit[], pair: ClosePair): { id: string; split_id: string }[] {
   const nameLower = pair.name.trim().toLowerCase()
   const myEmail = pair.userEmail.toLowerCase()

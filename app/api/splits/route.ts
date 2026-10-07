@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { sendPushToUser } from '@/lib/push'
-import { selectPairShares, type CloseSplit } from '@/lib/close-balance'
+import { selectPairShares, splitsInvolving, fullyPaidSplitIds, type CloseSplit } from '@/lib/close-balance'
 
 async function getUser() {
   const supabase = await createClient()
@@ -239,6 +239,35 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ success: true })
   }
 
+  // PATCH /api/splits?type=settle_many
+  // Body: { ids: string[] } — settle several of MY splits at once. Any share that's
+  // still unpaid is marked paid (so the balances reflect it), then the split is
+  // marked settled. Splits that aren't mine or are already settled are skipped.
+  if (type === 'settle_many') {
+    const ids = Array.isArray(body?.ids) ? (body.ids as unknown[]).filter((x): x is string => typeof x === 'string') : []
+    if (ids.length === 0) return NextResponse.json({ error: 'No splits selected' }, { status: 400 })
+
+    const { data: mineRows, error: mineErr } = await supabase
+      .from('expense_splits').select('id').in('id', ids).eq('created_by', user.id).eq('is_settled', false)
+    if (mineErr) return NextResponse.json({ error: mineErr.message }, { status: 500 })
+    const mineIds = (mineRows ?? []).map((r: { id: string }) => r.id)
+    if (mineIds.length === 0) return NextResponse.json({ settled: 0, sharesMarkedPaid: 0 })
+
+    const { data: marked, error: payErr } = await supabase
+      .from('split_participants')
+      .update({ is_paid: true, paid_at: new Date().toISOString() })
+      .in('split_id', mineIds)
+      .eq('is_paid', false)
+      .select('id')
+    if (payErr) return NextResponse.json({ error: payErr.message }, { status: 500 })
+
+    const { error: setErr } = await supabase
+      .from('expense_splits').update({ is_settled: true }).in('id', mineIds).eq('created_by', user.id)
+    if (setErr) return NextResponse.json({ error: setErr.message }, { status: 500 })
+
+    return NextResponse.json({ settled: mineIds.length, sharesMarkedPaid: marked?.length ?? 0 })
+  }
+
   // PATCH /api/splits?type=close_balance
   // Body: { contact_email: string | null, contact_name: string }
   // Settles the splits between YOU and this person, in both directions:
@@ -270,38 +299,37 @@ export async function PATCH(request: Request) {
     if (userSplits.length === 0) return NextResponse.json({ markedPaid: 0 })
 
     // Only the shares between YOU and this person (never a third party's bill)
-    const matched = selectPairShares(userSplits, {
-      userId: user.id, userEmail: user.email ?? '', email, name: contact_name ?? '', theirId,
-    })
-    if (matched.length === 0) return NextResponse.json({ markedPaid: 0 })
-
-    const participantIds = matched.map(p => p.id)
-    const affectedSplitIds = [...new Set(matched.map(p => p.split_id))]
+    const pair = { userId: user.id, userEmail: user.email ?? '', email, name: contact_name ?? '', theirId }
+    const matched = selectPairShares(userSplits, pair)
 
     // Mark them all paid
-    await supabase
-      .from('split_participants')
-      .update({ is_paid: true, paid_at: new Date().toISOString() })
-      .in('id', participantIds)
-
-    // Auto-settle any split where no unpaid participants remain
-    for (const splitId of affectedSplitIds) {
-      const { data: remaining } = await supabase
+    if (matched.length > 0) {
+      await supabase
         .from('split_participants')
-        .select('id')
-        .eq('split_id', splitId)
-        .eq('is_paid', false)
+        .update({ is_paid: true, paid_at: new Date().toISOString() })
+        .in('id', matched.map(p => p.id))
+    }
 
-      if (!remaining?.length) {
-        await supabase
-          .from('expense_splits')
-          .update({ is_settled: true })
-          .eq('id', splitId)
-          .eq('created_by', user.id)
+    // Auto-settle every split of theirs that's now fully paid — the ones just
+    // closed (they were the last person left to pay, or the only person in it) and
+    // any that were already fully paid but never got marked settled.
+    const candidateIds = [...new Set([...matched.map(p => p.split_id), ...splitsInvolving(userSplits, pair)])]
+    let settledSplits = 0
+    if (candidateIds.length > 0) {
+      const { data: fresh } = await supabase
+        .from('expense_splits')
+        .select('id, split_participants(is_paid)')
+        .in('id', candidateIds)
+        .eq('created_by', user.id)
+        .eq('is_settled', false) as unknown as { data: { id: string; split_participants: { is_paid: boolean }[] }[] | null }
+      const ready = fullyPaidSplitIds(fresh ?? [])
+      if (ready.length > 0) {
+        await supabase.from('expense_splits').update({ is_settled: true }).in('id', ready).eq('created_by', user.id)
+        settledSplits = ready.length
       }
     }
 
-    return NextResponse.json({ markedPaid: participantIds.length })
+    return NextResponse.json({ markedPaid: matched.length, settledSplits })
   }
 
   if (type === 'update') {

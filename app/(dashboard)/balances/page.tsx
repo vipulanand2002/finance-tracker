@@ -303,10 +303,12 @@ export default function BalancesPage() {
     setClosing(friend.key)
     setConfirmClose(null)
     const round2 = (n: number) => Math.round(n * 100) / 100
+    let splitsClosed = 0
     try {
       // 1. Settle the splits between the two of you — both ways: their shares on
       //    bills you paid AND your shares on bills they paid. (Bills a third
-      //    person paid are not between you two and are left alone.)
+      //    person paid are not between you two and are left alone.) Any split that
+      //    ends up fully paid is marked settled too.
       if (friend.splitOwed > 0 || friend.splitYouOwe > 0) {
         const res = await fetch('/api/splits?type=close_balance', {
           method: 'PATCH',
@@ -315,6 +317,7 @@ export default function BalancesPage() {
         })
         const data = await res.json()
         if (!res.ok) throw new Error(data.error)
+        splitsClosed = data.settledSplits ?? 0
       }
 
       // 2. Whatever is left outside the splits (tagged expenses, recorded payments,
@@ -347,7 +350,11 @@ export default function BalancesPage() {
         }
       }
 
-      toast.success(`Settled up with ${friend.name}`)
+      toast.success(
+        splitsClosed > 0
+          ? `Settled up with ${friend.name} · ${splitsClosed} split${splitsClosed !== 1 ? 's' : ''} marked settled`
+          : `Settled up with ${friend.name}`
+      )
       await load()
     } catch {
       toast.error('Failed to close balance')
@@ -497,7 +504,7 @@ export default function BalancesPage() {
               {confirmClose === b.key && (
                 <div className="flex items-center justify-between gap-2 flex-wrap pt-1 border-t">
                   <p className="text-xs text-muted-foreground">
-                    Settle your balance with <span className="font-medium text-foreground">{b.name}</span>? Marks the splits between you two as paid (both ways) and settles anything else, so the balance lands on zero.
+                    Settle your balance with <span className="font-medium text-foreground">{b.name}</span>? Marks the splits between you two as paid (both ways), settles any split that ends up fully paid, and clears anything else so the balance lands on zero.
                   </p>
                   <div className="flex gap-2">
                     <Button size="sm" variant="ghost" className="h-8 px-3 text-xs gap-1" onClick={() => setConfirmClose(null)}>

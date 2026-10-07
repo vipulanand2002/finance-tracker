@@ -12,8 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useRouter } from 'next/navigation'
-import { Plus, CheckCircle2, Circle, Trash2, Users, Mail, Loader2, Pencil, Paperclip, Scale } from 'lucide-react'
-import { formatCurrency } from '@/lib/utils'
+import { Plus, CheckCircle2, Circle, Trash2, Users, Mail, Loader2, Pencil, Paperclip, Scale, CheckSquare, Square, ListChecks, X } from 'lucide-react'
+import { formatCurrency, cn } from '@/lib/utils'
 import { fetchProfileNames } from '@/lib/profile-names'
 import { type EditingSplit } from '@/components/splits/SplitModal'
 const SplitModal = dynamic(() => import('@/components/splits/SplitModal'), { ssr: false })
@@ -68,15 +68,21 @@ interface SplitCardProps {
   onSendReminder: (splitId: string, participantCount: number) => void
   onEdit: (split: Split) => void
   profileNames: Map<string, string>
+  /** Multi-select mode: show a checkbox (only on splits I can settle) */
+  selecting?: boolean
+  selected?: boolean
+  onToggleSelect?: (id: string) => void
 }
 
 const SplitCard = memo(function SplitCard({
   split, myId, myEmail, myDisplayName, friendByEmail,
   sendingReminder, onTogglePaid, onSettle, onDelete, onSendReminder, onEdit, profileNames,
+  selecting = false, selected = false, onToggleSelect,
 }: SplitCardProps) {
   const paid = split.split_participants.filter(p => p.is_paid).length
   const total = split.split_participants.length
   const isCreator = !!myId && split.created_by === myId
+  const canSelect = selecting && isCreator && !split.is_settled
 
   function daysAgo(iso: string) {
     const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000)
@@ -86,9 +92,21 @@ const SplitCard = memo(function SplitCard({
   }
 
   return (
-    <Card>
+    <Card className={cn('transition-shadow', selected && 'ring-2 ring-primary shadow-md', selecting && !canSelect && 'opacity-60')}>
       <CardHeader className="pb-2 flex flex-row items-start justify-between gap-2">
-        <div className="min-w-0">
+        {selecting && (
+          <button
+            type="button"
+            disabled={!canSelect}
+            onClick={() => onToggleSelect?.(split.id)}
+            aria-label={selected ? `Deselect ${split.title}` : `Select ${split.title}`}
+            title={canSelect ? undefined : 'Only splits you created can be settled'}
+            className="shrink-0 mt-0.5 text-muted-foreground hover:text-primary disabled:opacity-40 disabled:hover:text-muted-foreground"
+          >
+            {selected ? <CheckSquare className="w-5 h-5 text-primary" /> : <Square className="w-5 h-5" />}
+          </button>
+        )}
+        <div className="min-w-0 flex-1">
           <CardTitle className="text-base truncate">{split.title}</CardTitle>
           <p className="text-xs text-muted-foreground mt-0.5">
             {format(new Date(split.date + 'T00:00:00'), 'dd MMM yyyy')} · {split.category}
@@ -232,6 +250,12 @@ export default function SplitsPage() {
   const [pickFriend, setPickFriend] = useState(false)
   const [onBehalf, setOnBehalf] = useState<Friend | null>(null)
   const [profileNames, setProfileNames] = useState<Map<string, string>>(new Map())
+  // Multi-select: pick several splits and settle them in one go
+  const [selecting, setSelecting] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [confirmBulk, setConfirmBulk] = useState(false)
+  const [bulkSettling, setBulkSettling] = useState(false)
+  const [tab, setTab] = useState('active')
 
   // Load user info, splits, and friends in parallel
   useEffect(() => {
@@ -319,6 +343,49 @@ export default function SplitsPage() {
     }
   }, [])
 
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }, [])
+
+  const exitSelecting = useCallback(() => {
+    setSelecting(false)
+    setSelectedIds(new Set())
+    setConfirmBulk(false)
+  }, [])
+
+  // Settle every selected split: any unpaid share is marked paid, then the split is settled.
+  async function settleSelected() {
+    const ids = [...selectedIds]
+    if (ids.length === 0) return
+    setBulkSettling(true)
+    try {
+      const res = await fetch('/api/splits?type=settle_many', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error ?? 'Failed')
+      const now = new Date().toISOString()
+      const done = new Set(ids)
+      setSplits(prev => prev.map(s => !done.has(s.id) ? s : {
+        ...s,
+        is_settled: true,
+        split_participants: s.split_participants.map(p => p.is_paid ? p : { ...p, is_paid: true, paid_at: now }),
+      }))
+      toast.success(`${data.settled ?? ids.length} split${(data.settled ?? ids.length) !== 1 ? 's' : ''} marked as settled`)
+      exitSelecting()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to settle splits')
+    } finally {
+      setBulkSettling(false)
+    }
+  }
+
   const deleteSplit = useCallback(async (id: string) => {
     if (!confirm('Delete this split?')) return
     const snapshot = splits.find(s => s.id === id)
@@ -379,6 +446,12 @@ export default function SplitsPage() {
 
   const active = splits.filter(s => !s.is_settled)
   const settled = splits.filter(s => s.is_settled)
+
+  // Multi-select: only splits I created can be settled by me
+  const selectable = active.filter(s => !!myId && s.created_by === myId)
+  const selectedSplits = selectable.filter(s => selectedIds.has(s.id))
+  const pendingShares = selectedSplits.flatMap(s => s.split_participants.filter(p => !p.is_paid))
+  const pendingTotal = pendingShares.reduce((a, p) => a + p.amount_owed, 0)
 
   // Is a given participant row "me"? (creator is auto-added as a participant)
   const isMe = (p: Participant) =>
@@ -455,11 +528,35 @@ export default function SplitsPage() {
           </CardContent>
         </Card>
       ) : (
-        <Tabs defaultValue="active">
-          <TabsList>
-            <TabsTrigger value="active">Active ({active.length})</TabsTrigger>
-            <TabsTrigger value="settled">Settled ({settled.length})</TabsTrigger>
-          </TabsList>
+        <Tabs value={tab} onValueChange={v => { setTab(v); exitSelecting() }}>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <TabsList>
+              <TabsTrigger value="active">Active ({active.length})</TabsTrigger>
+              <TabsTrigger value="settled">Settled ({settled.length})</TabsTrigger>
+            </TabsList>
+
+            {/* Multi-select controls (Active tab only) */}
+            {tab === 'active' && selectable.length > 0 && (
+              selecting ? (
+                <div className="flex items-center gap-1.5 text-sm">
+                  <span className="text-muted-foreground mr-1">{selectedIds.size} selected</span>
+                  <Button
+                    variant="ghost" size="sm" className="h-8"
+                    onClick={() => setSelectedIds(selectedIds.size === selectable.length ? new Set() : new Set(selectable.map(s => s.id)))}
+                  >
+                    {selectedIds.size === selectable.length ? 'Clear' : 'Select all'}
+                  </Button>
+                  <Button variant="ghost" size="sm" className="h-8" onClick={exitSelecting}>
+                    <X className="w-3.5 h-3.5 mr-1" />Cancel
+                  </Button>
+                </div>
+              ) : (
+                <Button variant="outline" size="sm" className="h-8" onClick={() => setSelecting(true)}>
+                  <ListChecks className="w-3.5 h-3.5 mr-1.5" />Select
+                </Button>
+              )
+            )}
+          </div>
 
           <TabsContent value="active" className="mt-4">
             {active.length === 0 ? (
@@ -481,8 +578,25 @@ export default function SplitsPage() {
                     onSendReminder={sendReminder}
                     onEdit={handleEdit}
                     profileNames={profileNames}
+                    selecting={selecting}
+                    selected={selectedIds.has(s.id)}
+                    onToggleSelect={toggleSelect}
                   />
                 ))}
+              </div>
+            )}
+
+            {/* Floating action bar while splits are selected */}
+            {selecting && selectedIds.size > 0 && (
+              <div className="sticky bottom-4 z-20 mt-4 flex items-center justify-between gap-3 flex-wrap rounded-xl border bg-card shadow-lg px-4 py-3">
+                <p className="text-sm">
+                  <span className="font-semibold">{selectedIds.size}</span> split{selectedIds.size !== 1 ? 's' : ''} selected
+                  {pendingTotal > 0 && <span className="text-muted-foreground"> · {formatCurrency(pendingTotal)} still pending</span>}
+                </p>
+                <Button size="sm" onClick={() => setConfirmBulk(true)} disabled={bulkSettling}>
+                  {bulkSettling ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />}
+                  Mark {selectedIds.size} as settled
+                </Button>
               </div>
             )}
           </TabsContent>
@@ -514,6 +628,45 @@ export default function SplitsPage() {
           </TabsContent>
         </Tabs>
       )}
+
+      {/* Confirm settling the selected splits */}
+      <Dialog open={confirmBulk} onOpenChange={v => { if (!bulkSettling) setConfirmBulk(v) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Mark {selectedSplits.length} split{selectedSplits.length !== 1 ? 's' : ''} as settled?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            {pendingShares.length > 0 ? (
+              <p className="text-muted-foreground">
+                <span className="font-semibold text-foreground">{pendingShares.length} unpaid share{pendingShares.length !== 1 ? 's' : ''}</span>
+                {' '}totalling <span className="font-semibold text-foreground">{formatCurrency(pendingTotal)}</span>{' '}
+                will be marked as paid, so these amounts disappear from everyone&apos;s balances.
+              </p>
+            ) : (
+              <p className="text-muted-foreground">Everyone has already paid in these splits — they&apos;ll just move to Settled.</p>
+            )}
+            <ul className="max-h-40 overflow-y-auto rounded-md border divide-y text-xs">
+              {selectedSplits.map(s => (
+                <li key={s.id} className="flex items-center justify-between gap-2 px-3 py-1.5">
+                  <span className="truncate">{s.title}</span>
+                  <span className="text-muted-foreground shrink-0">
+                    {s.split_participants.filter(p => !p.is_paid).length > 0
+                      ? `${s.split_participants.filter(p => !p.is_paid).length} unpaid`
+                      : 'all paid'}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="ghost" onClick={() => setConfirmBulk(false)} disabled={bulkSettling}>Cancel</Button>
+              <Button onClick={settleSelected} disabled={bulkSettling}>
+                {bulkSettling ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <CheckCircle2 className="w-4 h-4 mr-1.5" />}
+                Mark as settled
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* New split → universal add popup, opening straight into the split editor */}
       <TransactionModal
