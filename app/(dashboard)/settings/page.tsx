@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Switch } from '@/components/ui/switch'
 import { Loader2, User, Lock, Mail, Camera, Trash2, Eye } from 'lucide-react'
+import NavOrderCard from '@/components/settings/NavOrderCard'
 
 export default function SettingsPage() {
   const [email, setEmail] = useState('')
@@ -335,6 +336,9 @@ export default function SettingsPage() {
           )}
         </div>
       </div>
+
+      {/* ── Personalise: arrange the sidebar menu ── */}
+      <NavOrderCard />
 
       <input
         ref={fileInputRef}

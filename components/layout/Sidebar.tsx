@@ -8,34 +8,10 @@ import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import {
-  LayoutDashboard,
-  ArrowLeftRight,
-  Target,
-  BrainCircuit,
-  Users,
-  CreditCard,
-  LogOut,
-  TrendingUp,
-  Plane,
-  MessageCircle,
-  Settings,
-  Scale,
-} from 'lucide-react'
+import { LogOut, TrendingUp } from 'lucide-react'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
-
-const navItems = [
-  { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { label: 'Transactions', href: '/transactions', icon: ArrowLeftRight },
-  { label: 'Cards', href: '/cards', icon: CreditCard },
-  { label: 'Trips', href: '/trips', icon: Plane },
-  { label: 'Budgets', href: '/budgets', icon: Target },
-  { label: 'Splits', href: '/splits', icon: Users },
-  { label: 'Balances', href: '/balances', icon: Scale },
-  { label: 'Friends', href: '/friends', icon: MessageCircle },
-  { label: 'AI Assistant', href: '/ai', icon: BrainCircuit },
-  { label: 'Settings', href: '/settings', icon: Settings },
-]
+import { orderNavItems } from '@/lib/nav-items'
+import { useNavOrder, syncNavOrderFromAccount } from '@/lib/use-nav-order'
 
 interface SidebarProps {
   email: string
@@ -47,11 +23,15 @@ export default function Sidebar({ email, onClose }: SidebarProps) {
   const router = useRouter()
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [displayName, setDisplayName] = useState<string>('')
+  // The user's custom menu order (set in Settings → Navigation), cached locally.
+  const navItems = orderNavItems(useNavOrder())
 
   useEffect(() => {
     const supabase = createClient()
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return
+      // Account-level order wins (follows the user across devices / browsers)
+      syncNavOrderFromAccount(user.user_metadata?.nav_order)
       const { data: profile } = await supabase
         .from('profiles')
         .select('avatar_url, full_name')
