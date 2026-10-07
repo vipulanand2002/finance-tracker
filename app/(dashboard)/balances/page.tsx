@@ -4,8 +4,11 @@ import { useEffect, useState, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import { formatCurrency } from '@/lib/utils'
 import { fetchProfileNames } from '@/lib/profile-names'
-import { ArrowUpRight, ArrowDownLeft, CheckCircle2, Loader2, Send, X, Plus } from 'lucide-react'
+import { pairPaidEvents } from '@/lib/settlement-history'
+import { format, formatDistanceToNow } from 'date-fns'
+import { ArrowUpRight, ArrowDownLeft, CheckCircle2, Loader2, Send, X, Plus, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from 'sonner'
 
 const TransactionModal = dynamic(() => import('@/components/transactions/TransactionModal'), { ssr: false })
@@ -18,6 +21,7 @@ interface Participant {
   participant_user_id: string | null
   amount_owed: number
   is_paid: boolean
+  paid_at?: string | null
 }
 
 interface SplitRow {
@@ -53,10 +57,16 @@ interface FriendBalance {
   paidToThem: number     // payments THEY recorded that you made to them (reduces what you owe)
   chargedToThem: number  // charges THEY recorded that you owe them (they paid for you)
   net: number            // positive = they owe you, negative = you owe them
+  // ── Settlement history (shares already marked paid between the two of you) ──
+  theyPaid: number       // their shares on bills you paid, now paid
+  youPaid: number        // your shares on bills they paid, now paid
+  paidBills: number      // how many paid shares make up the history
+  lastSettledAt: string | null  // ISO time the latest share was marked paid / settlement recorded
 }
 
 export default function BalancesPage() {
   const [balances, setBalances] = useState<FriendBalance[]>([])
+  const [settled, setSettled] = useState<FriendBalance[]>([])   // people with nothing outstanding but a settled history
   const [loading, setLoading] = useState(true)
   const [reminding, setReminding] = useState<string | null>(null)
   const [confirmClose, setConfirmClose] = useState<string | null>(null)  // contact id pending confirmation
@@ -94,7 +104,7 @@ export default function BalancesPage() {
           const key = keyOf(email, name)
           let cp = map.get(key)
           if (!cp) {
-            cp = { key, id: id ?? null, name, email: email ?? null, splitOwed: 0, splitYouOwe: 0, txnOwed: 0, txnReceived: 0, paidToThem: 0, chargedToThem: 0, net: 0 }
+            cp = { key, id: id ?? null, name, email: email ?? null, splitOwed: 0, splitYouOwe: 0, txnOwed: 0, txnReceived: 0, paidToThem: 0, chargedToThem: 0, net: 0, theyPaid: 0, youPaid: 0, paidBills: 0, lastSettledAt: null }
             map.set(key, cp)
           } else {
             if (!cp.id && id) cp.id = id
@@ -156,6 +166,19 @@ export default function BalancesPage() {
           else cp.paidToThem += pay.amount
         }
 
+        // Settlement history — shares between the two of you that are already paid
+        // (feeds the Settled tab: what each side paid, and when).
+        const later = (cp: FriendBalance, at: string | null | undefined) => {
+          if (at && (!cp.lastSettledAt || at > cp.lastSettledAt)) cp.lastSettledAt = at
+        }
+        for (const ev of pairPaidEvents(splitList, myId, myEmail)) {
+          const cp = ensure(ev.name, ev.email)
+          if (ev.direction === 'they_paid') cp.theyPaid += ev.amount
+          else cp.youPaid += ev.amount
+          cp.paidBills += 1
+          later(cp, ev.paidAt)
+        }
+
         // Tagged (non-split) transactions only exist for saved friends (need contact_id)
         await Promise.all(
           [...map.values()].filter(cp => cp.id).map(async cp => {
@@ -168,6 +191,10 @@ export default function BalancesPage() {
             cp.txnReceived = txList
               .filter((t: { type: string; split_id: string | null }) => t.type === 'income' && !t.split_id)
               .reduce((s: number, t: { amount: number }) => s + t.amount, 0)
+            // A "Settled balance with …" entry (made by Close Balance) marks a settlement moment
+            for (const t of txList as { description: string | null; created_at?: string; date: string }[]) {
+              if (t.description?.startsWith('Settled balance')) later(cp, t.created_at ?? t.date)
+            }
           })
         )
 
@@ -187,10 +214,18 @@ export default function BalancesPage() {
           net: cp.splitOwed + cp.txnOwed + cp.paidToThem - cp.splitYouOwe - cp.txnReceived - cp.chargedToThem,
         }))
 
-        setBalances(
+        // Active = something is still outstanding. Settled = nothing outstanding, but
+        // there's history (shares paid / payments recorded) — newest settlement first.
+        const outstanding = (b: FriendBalance) =>
+          Math.abs(b.net) > 0.009 || b.splitOwed > 0.009 || b.splitYouOwe > 0.009
+        const hasHistory = (b: FriendBalance) =>
+          b.paidBills > 0 || b.txnOwed > 0 || b.txnReceived > 0 || b.paidToThem > 0 || b.chargedToThem > 0
+
+        setBalances(result.filter(outstanding).sort((a, b) => b.net - a.net))
+        setSettled(
           result
-            .filter(b => Math.abs(b.net) > 0.001 || b.splitOwed > 0 || b.splitYouOwe > 0 || b.txnOwed > 0 || b.txnReceived > 0 || b.paidToThem > 0 || b.chargedToThem > 0)
-            .sort((a, b) => b.net - a.net)
+            .filter(b => !outstanding(b) && hasHistory(b))
+            .sort((a, b) => (b.lastSettledAt ?? '').localeCompare(a.lastSettledAt ?? ''))
         )
       } finally {
         setLoading(false)
@@ -333,7 +368,15 @@ export default function BalancesPage() {
         <div className="flex items-center justify-center py-16">
           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
         </div>
-      ) : balances.length === 0 ? (
+      ) : (
+      <Tabs defaultValue="active">
+        <TabsList>
+          <TabsTrigger value="active">Active ({balances.length})</TabsTrigger>
+          <TabsTrigger value="settled">Settled ({settled.length})</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="active" className="mt-4">
+      {balances.length === 0 ? (
         <div className="text-center py-16 text-muted-foreground">
           <CheckCircle2 className="w-10 h-10 mx-auto mb-3 text-emerald-500" />
           <p className="font-medium">All settled up</p>
@@ -436,6 +479,84 @@ export default function BalancesPage() {
             </div>
           ))}
         </div>
+      )}
+        </TabsContent>
+
+        {/* ── Settled: people with nothing outstanding — what was paid and when ── */}
+        <TabsContent value="settled" className="mt-4">
+          {settled.length === 0 ? (
+            <div className="text-center py-16 text-muted-foreground">
+              <CheckCircle2 className="w-10 h-10 mx-auto mb-3 text-muted-foreground/50" />
+              <p className="font-medium">No settled balances yet</p>
+              <p className="text-sm mt-1">Once you settle up with someone, they show up here with the details</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
+              {settled.map(b => {
+                const when = b.lastSettledAt ? new Date(b.lastSettledAt) : null
+                const whenValid = when && !isNaN(when.getTime())
+                const net = Math.round((b.theyPaid - b.youPaid) * 100) / 100
+                return (
+                  <div
+                    key={b.key}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDetailFor({ name: b.name, email: b.email, contactId: b.id, settledAt: b.lastSettledAt })}
+                    onKeyDown={e => { if (e.key === 'Enter') setDetailFor({ name: b.name, email: b.email, contactId: b.id, settledAt: b.lastSettledAt }) }}
+                    className="rounded-xl border bg-card p-4 space-y-3 cursor-pointer transition-colors hover:border-primary/40 hover:bg-muted/30"
+                  >
+                    {/* Who + when it was settled */}
+                    <div className="flex items-center gap-3">
+                      <span className="w-9 h-9 rounded-full bg-muted flex items-center justify-center font-semibold text-sm shrink-0">
+                        {b.name.charAt(0).toUpperCase()}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-sm leading-tight">{b.name}</p>
+                        {b.email && <p className="text-xs text-muted-foreground truncate mt-0.5">{b.email}</p>}
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <div className="flex items-center justify-end gap-1 text-emerald-600 font-semibold text-sm">
+                          <CheckCircle2 className="w-4 h-4" />Settled
+                        </div>
+                        <p className="text-xs text-muted-foreground" title={whenValid ? when!.toLocaleString() : undefined}>
+                          {whenValid ? format(when!, 'd MMM yyyy') : 'Date not recorded'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* What was paid (past tense of the active card's "They owe / You owe") */}
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      {b.theyPaid      > 0 && <span>They paid (splits): <span className="font-medium text-foreground">{formatCurrency(b.theyPaid)}</span></span>}
+                      {b.youPaid       > 0 && <span>You paid (splits): <span className="font-medium text-foreground">{formatCurrency(b.youPaid)}</span></span>}
+                      {b.paidToThem    > 0 && <span>You paid: <span className="font-medium text-foreground">{formatCurrency(b.paidToThem)}</span></span>}
+                      {b.chargedToThem > 0 && <span>They paid for you: <span className="font-medium text-foreground">{formatCurrency(b.chargedToThem)}</span></span>}
+                      {b.txnOwed       > 0 && <span>Expenses: <span className="font-medium text-foreground">{formatCurrency(b.txnOwed)}</span></span>}
+                      {b.txnReceived   > 0 && <span>Received: <span className="font-medium text-foreground">{formatCurrency(b.txnReceived)}</span></span>}
+                    </div>
+
+                    {/* Net outcome + how long ago */}
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t text-xs">
+                      <span className="text-muted-foreground min-w-0">
+                        {b.paidBills > 0 && Math.abs(net) > 0.009 ? (
+                          <>Net settled <span className="font-semibold text-foreground">{formatCurrency(Math.abs(net))}</span> — {net > 0 ? 'they paid you' : 'you paid them'}</>
+                        ) : b.paidBills > 0 ? (
+                          <>Evened out · {b.paidBills} paid share{b.paidBills !== 1 ? 's' : ''}</>
+                        ) : (
+                          <>Settled via recorded payments</>
+                        )}
+                        {whenValid && <> · {formatDistanceToNow(when!, { addSuffix: true })}</>}
+                      </span>
+                      <span className="flex items-center gap-0.5 text-muted-foreground shrink-0">
+                        View bills<ChevronRight className="w-3.5 h-3.5" />
+                      </span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
       )}
 
       {/* Quick "add expense tagged to this friend" via the global popup */}

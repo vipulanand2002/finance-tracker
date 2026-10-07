@@ -10,6 +10,7 @@ import { format } from 'date-fns'
 import { formatCurrency } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import { fetchProfileNames } from '@/lib/profile-names'
+import { pairPaidEvents } from '@/lib/settlement-history'
 import SplitModal, { type EditingSplit } from '@/components/splits/SplitModal'
 import TransactionModal from '@/components/transactions/TransactionModal'
 import type { Transaction } from '@/types'
@@ -18,6 +19,8 @@ export interface BalanceCounterparty {
   name: string
   email: string | null
   contactId: string | null
+  /** When the balance with this person was last settled (ISO) — shown for settled people */
+  settledAt?: string | null
 }
 
 interface Participant {
@@ -26,6 +29,7 @@ interface Participant {
   participant_user_id: string | null
   amount_owed: number
   is_paid: boolean
+  paid_at?: string | null
 }
 interface SplitRow {
   id: string
@@ -150,6 +154,19 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
   const chargedToThem = payments.filter(p => p.kind === 'charge').reduce((s, p) => s + p.amount, 0)
   const net = splitTheyOwe + txnOwed + paidToThem - splitYouOwe - txnReceived - chargedToThem
 
+  // Settlement history with THIS person: what each side has already paid, and when
+  const histEvents = pairPaidEvents(splits, myId, myEmail).filter(ev =>
+    (!!emailLower && ev.email?.toLowerCase() === emailLower) ||
+    (!ev.email && !!nameLower && ev.name.trim().toLowerCase() === nameLower))
+  const histThey = histEvents.filter(e => e.direction === 'they_paid').reduce((a, e) => a + e.amount, 0)
+  const histYou = histEvents.filter(e => e.direction === 'you_paid').reduce((a, e) => a + e.amount, 0)
+  const settledOn = (() => {
+    const iso = counterparty?.settledAt
+      ?? histEvents.map(e => e.paidAt ?? '').sort().pop()
+    const d = iso ? new Date(iso) : null
+    return d && !isNaN(d.getTime()) ? d : null
+  })()
+
   function editSplit(s: SplitRow) {
     if (s.created_by !== myId) return // only the creator can edit
     setEditingSplit(s as unknown as EditingSplit)
@@ -180,7 +197,19 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
                     {formatCurrency(Math.abs(net))}
                   </p>
                 ) : (
-                  <p className="text-emerald-600 flex items-center gap-1 mt-0.5"><CheckCircle2 className="w-5 h-5" /> Settled</p>
+                  <>
+                    <p className="text-emerald-600 flex items-center gap-1 mt-0.5"><CheckCircle2 className="w-5 h-5" /> Settled</p>
+                    {settledOn && (
+                      <p className="text-xs text-muted-foreground mt-1">Settled on {format(settledOn, 'd MMM yyyy')}</p>
+                    )}
+                  </>
+                )}
+                {/* Once nothing is outstanding, show what was paid between you (past tense) */}
+                {net === 0 && (histThey > 0 || histYou > 0) && (
+                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    {histThey > 0 && <span>They paid (splits): <span className="text-foreground font-medium">{formatCurrency(histThey)}</span></span>}
+                    {histYou  > 0 && <span>You paid (splits): <span className="text-foreground font-medium">{formatCurrency(histYou)}</span></span>}
+                  </div>
                 )}
                 <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                   {splitTheyOwe   > 0 && <span>They owe (splits): <span className="text-foreground font-medium">{formatCurrency(splitTheyOwe)}</span></span>}
@@ -224,20 +253,28 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
                     .filter(matchesCp)
                     .reduce((a, p) => a + (p.is_paid ? 0 : p.amount_owed), 0)
                   const cpAllPaid = s.split_participants.filter(matchesCp).every(p => p.is_paid)
+                  // Latest paid share among a set of rows (to show "paid on …")
+                  const latestPaid = (rows: Participant[]) =>
+                    rows.filter(p => p.is_paid).sort((a, b) => (b.paid_at ?? '').localeCompare(a.paid_at ?? ''))[0]
                   let amt = 0, label = ''
+                  let paidRow: Participant | undefined
                   if (iAmPayer) {
                     amt = cpUnpaid
                     label = 'they owe you'
+                    if (amt === 0) { paidRow = latestPaid(s.split_participants.filter(matchesCp)); if (paidRow) label = 'they paid you' }
                   } else if (payerIsCp) {
                     const mine = s.split_participants.find(isSelf)
                     amt = mine && !mine.is_paid ? mine.amount_owed : 0
                     label = 'your share'
+                    if (mine?.is_paid) { paidRow = mine; label = 'you paid them' }
                   } else {
                     // Third party paid: show the counterparty's unpaid share, labelled
                     // with who it's owed to (not between you and them).
                     amt = cpUnpaid
                     label = cpAllPaid ? 'paid' : `owes ${thirdPartyPayerName}`
+                    if (cpAllPaid) paidRow = latestPaid(s.split_participants.filter(matchesCp))
                   }
+                  const paidOn = paidRow?.paid_at ? new Date(paidRow.paid_at) : null
                   return (
                     <div key={s.id} onClick={() => setViewSplit(s)}
                       className="rounded-lg border p-3 cursor-pointer hover:bg-muted/40 transition-colors">
@@ -249,9 +286,13 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
                         <div className="flex items-center gap-1.5 shrink-0">
                           <div className="text-right">
                             <span className={`text-sm font-semibold ${s.is_settled || amt === 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                              {s.is_settled ? 'Settled' : amt > 0 ? formatCurrency(amt) : '—'}
+                              {s.is_settled ? 'Settled' : amt > 0 ? formatCurrency(amt) : paidRow ? 'Paid' : '—'}
                             </span>
-                            {!s.is_settled && label && <p className="text-[10px] text-muted-foreground leading-tight">{label}</p>}
+                            {label && (
+                              <p className="text-[10px] text-muted-foreground leading-tight">
+                                {label}{paidOn && !isNaN(paidOn.getTime()) ? ` · ${format(paidOn, 'd MMM')}` : ''}
+                              </p>
+                            )}
                           </div>
                           {s.created_by === myId && !s.is_settled && (
                             <button onClick={e => { e.stopPropagation(); editSplit(s) }} title="Edit" className="text-muted-foreground hover:text-foreground"><Pencil className="w-3.5 h-3.5" /></button>
