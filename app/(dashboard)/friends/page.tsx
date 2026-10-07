@@ -53,6 +53,7 @@ interface SplitRow {
   created_by?: string
   paid_by?: string | null
   paid_by_email?: string | null
+  paid_by_name?: string | null
   is_settled?: boolean
   split_participants?: { id: string; participant_name: string; participant_email: string | null; participant_user_id?: string | null; amount_owed: number; is_paid: boolean }[]
 }
@@ -405,11 +406,14 @@ export default function FriendsPage() {
   // Creditor-aware split balance (same logic as the Balances tab / detail sheet):
   //  - I paid the bill  → the friend's unpaid share is owed to me
   //  - someone else paid → my unpaid share is what I owe them
-  // Registered payer = paid_by; unregistered (email-only) payer = paid_by_email.
+  // Registered payer = paid_by; unregistered payer = paid_by_email (has an email)
+  // or paid_by_name (name-only, no email) — in both, the author is NOT the creditor.
   let splitTheyOwe = 0, splitYouOwe = 0
   for (const s of splits) {
     if (s.is_settled) continue
-    const unregPayer = !s.paid_by && !!s.paid_by_email
+    const unregEmailPayer = !s.paid_by && !!s.paid_by_email
+    const unregNamePayer = !s.paid_by && !s.paid_by_email && !!s.paid_by_name
+    const unregPayer = unregEmailPayer || unregNamePayer
     const creditorId = s.paid_by || (unregPayer ? null : s.created_by)
     if (!unregPayer && !!myId && creditorId === myId) {
       // I paid → the friend's unpaid share is owed to me
@@ -418,9 +422,11 @@ export default function FriendsPage() {
       // Someone else paid → I owe them. Only count it toward THIS friend when the
       // friend is the actual payer (matches how the Balances tab attributes it),
       // so a bill a third party paid doesn't get charged to this friend.
-      const payerIsFriend = unregPayer
+      const payerIsFriend = unregEmailPayer
         ? s.paid_by_email?.toLowerCase() === selectedEmailLower
-        : (!!selected?.friend_user_id && creditorId === selected.friend_user_id)
+        : unregNamePayer
+          ? s.paid_by_name?.trim().toLowerCase() === selectedNameLower
+          : (!!selected?.friend_user_id && creditorId === selected.friend_user_id)
       if (payerIsFriend) {
         const mine = (s.split_participants ?? []).find(isSelf)
         if (mine && !mine.is_paid) splitYouOwe += mine.amount_owed
