@@ -90,8 +90,11 @@ export default function WalletsPage() {
 
   const visible = useMemo(() => accounts.filter(a => showArchived || !a.is_archived), [accounts, showArchived])
   const active = useMemo(() => accounts.filter(a => !a.is_archived), [accounts])
-  const total = active.reduce((s, a) => s + a.balance, 0)
-  const walletTotal = active.filter(a => a.kind === 'wallet').reduce((s, a) => s + a.balance, 0)
+  // Accounts switched off for "total balance" are shown but not summed
+  const counted = active.filter(a => a.include_in_total !== false)
+  const total = counted.reduce((s, a) => s + a.balance, 0)
+  const walletTotal = counted.filter(a => a.kind === 'wallet').reduce((s, a) => s + a.balance, 0)
+  const notCounted = active.length - counted.length
   const archivedCount = accounts.length - active.length
   const detail = accounts.find(a => a.id === detailId) ?? null
 
@@ -200,7 +203,9 @@ export default function WalletsPage() {
               <CardContent className="py-4">
                 <p className="text-xs text-muted-foreground">Total across accounts</p>
                 <p className={cn('text-2xl font-bold', total < 0 && 'text-red-500')}>{formatCurrency(total)}</p>
-                <p className="text-xs text-muted-foreground">{active.length} active</p>
+                <p className="text-xs text-muted-foreground">
+                  {counted.length} counted{notCounted > 0 ? ` · ${notCounted} left out` : ''}
+                </p>
               </CardContent>
             </Card>
             <Card>
@@ -228,6 +233,8 @@ export default function WalletsPage() {
                     <p className="text-xs text-muted-foreground">
                       {a.institution ?? getProvider(a.provider)?.label ?? KIND_LABEL[a.kind]}
                       {a.is_archived && ' · Archived'}
+                      {a.include_in_total === false && ' · Not in total'}
+                      {a.include_in_spending === false && ' · Not in spending'}
                     </p>
                   </div>
                   <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
@@ -364,6 +371,7 @@ export default function WalletsPage() {
           transaction={txModal.tx}
           defaultType={txModal.type}
           defaultAccountId={detailId}
+          walletMode
           onClose={() => setTxModal(t => ({ ...t, open: false, tx: null }))}
           onSaved={refresh}
         />

@@ -66,6 +66,10 @@ export interface Account {
   institution?: string | null
   /** Domain used to fetch the logo (migration 047) */
   logo_domain?: string | null
+  /** Counts in the overall total balance (migration 048; undefined = yes) */
+  include_in_total?: boolean
+  /** Its income & expenses count in monthly totals, charts and budgets (migration 048; undefined = yes) */
+  include_in_spending?: boolean
 }
 
 export interface AccountTransfer {

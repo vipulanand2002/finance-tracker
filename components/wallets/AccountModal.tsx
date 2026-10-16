@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Switch } from '@/components/ui/switch'
 import { getProvider, providerLogoUrl, type Account, type AccountKind } from '@/lib/wallet-providers'
 import { resolveKnown, type AccountIdentity } from '@/lib/account-resolve'
 import { findBank } from '@/lib/bank-logos'
@@ -61,6 +62,9 @@ export default function AccountModal({ open, onClose, onSaved, account }: Props)
   const [bankText, setBankText] = useState<string | null>(null) // null = not edited, follow the name
   const [opening, setOpening] = useState('')
   const [notes, setNotes] = useState('')
+  // What this account counts in — both on by default
+  const [inTotal, setInTotal] = useState(true)
+  const [inSpending, setInSpending] = useState(true)
   const [saving, setSaving] = useState(false)
   // AI answers, tagged with the text they answer so a stale reply is ignored
   const [aiName, setAiName] = useState<{ text: string; identity: AccountIdentity | null } | null>(null)
@@ -76,6 +80,8 @@ export default function AccountModal({ open, onClose, onSaved, account }: Props)
     setBankText(null)
     setOpening(account ? String(account.opening_balance ?? '') : '')
     setNotes(account?.notes ?? '')
+    setInTotal(account?.include_in_total !== false)
+    setInSpending(account?.include_in_spending !== false)
     setAiName(null)
     setAiBank(null)
     /* eslint-enable react-hooks/set-state-in-effect */
@@ -150,6 +156,7 @@ export default function AccountModal({ open, onClose, onSaved, account }: Props)
         name: trimmed, provider, kind, color,
         institution, logo_domain: logoDomain,
         opening_balance: openingNum, notes,
+        include_in_total: inTotal, include_in_spending: inSpending,
       }
       const res = await fetch(account ? `/api/accounts?id=${account.id}` : '/api/accounts', {
         method: account ? 'PATCH' : 'POST',
@@ -275,6 +282,24 @@ export default function AccountModal({ open, onClose, onSaved, account }: Props)
                 ? 'The balance before anything recorded here. Changing it shifts the current balance by the same amount.'
                 : 'What’s in it right now. Expenses, income and top-ups you record will adjust it from here.'}
             </p>
+          </div>
+
+          {/* Where this account counts */}
+          <div className="rounded-lg border divide-y">
+            <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Count in total balance</p>
+                <p className="text-xs text-muted-foreground">Adds this account to your overall balance on the dashboard and Wallets.</p>
+              </div>
+              <Switch checked={inTotal} onCheckedChange={setInTotal} />
+            </div>
+            <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Count in monthly spending</p>
+                <p className="text-xs text-muted-foreground">Its income and expenses appear in monthly totals, charts and budgets.</p>
+              </div>
+              <Switch checked={inSpending} onCheckedChange={setInSpending} />
+            </div>
           </div>
 
           <div className="space-y-1.5">

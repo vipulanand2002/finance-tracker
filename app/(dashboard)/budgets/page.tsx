@@ -41,16 +41,23 @@ export default function BudgetsPage() {
       const txUrl = includeCards
         ? `/api/transactions`
         : `/api/transactions?exclude_card=true`
-      const [budgetRes, txRes] = await Promise.all([
+      const [budgetRes, txRes, accRes] = await Promise.all([
         fetch(`/api/budgets?month=${month}&year=${year}`),
         fetch(txUrl),
+        fetch('/api/accounts').catch(() => null),
       ])
+      // accounts switched off for monthly spending don't count toward budgets
+      const accData = accRes && accRes.ok ? await accRes.json().catch(() => ({})) : {}
+      const excludedAccounts = new Set<string>(
+        ((accData.accounts ?? []) as { id: string; include_in_spending?: boolean }[]).filter(a => a.include_in_spending === false).map(a => a.id),
+      )
       const [rawBudgets, rawTx]: [Budget[], Transaction[]] = await Promise.all([
         budgetRes.json(),
         txRes.json(),
       ])
 
       const monthTx = (rawTx ?? []).filter(t => {
+        if (t.account_id && excludedAccounts.has(t.account_id)) return false
         const d = new Date(t.date + 'T00:00:00')
         return d.getMonth() + 1 === month && d.getFullYear() === year
       })

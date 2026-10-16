@@ -29,11 +29,14 @@ function pickFields(body: Record<string, unknown>, partial: boolean) {
     const d = typeof body.logo_domain === 'string' ? body.logo_domain.trim().toLowerCase() : ''
     out.logo_domain = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d) ? d : null
   }
+  // What this account counts in (migration 048)
+  if (!partial || body.include_in_total !== undefined) out.include_in_total = body.include_in_total !== false
+  if (!partial || body.include_in_spending !== undefined) out.include_in_spending = body.include_in_spending !== false
   return out
 }
 
-// Columns added in migration 047 — dropped (and the write retried) if it isn't applied yet
-const IDENTITY_COLS = ['institution', 'logo_domain']
+// Columns added in migrations 047/048 — dropped (and the write retried) if not applied yet
+const IDENTITY_COLS = ['institution', 'logo_domain', 'include_in_total', 'include_in_spending']
 const isIdentityColError = (msg?: string) => !!msg && IDENTITY_COLS.some(c => msg.includes(c))
 const withoutIdentity = (f: Record<string, unknown>) => Object.fromEntries(Object.entries(f).filter(([k]) => !IDENTITY_COLS.includes(k)))
 
@@ -112,7 +115,7 @@ export async function PATCH(request: Request) {
     .single()
   if (isIdentityColError(error?.message)) {
     const rest = withoutIdentity(fields)
-    if (Object.keys(rest).length === 0) return NextResponse.json({ error: 'Run migration 047 to save the identified logo' }, { status: 400 })
+    if (Object.keys(rest).length === 0) return NextResponse.json({ error: 'Run migrations 047 and 048 to save this setting' }, { status: 400 })
     ;({ data, error } = await supabase.from('accounts').update(rest).eq('id', id).eq('user_id', user.id).select().single())
   }
 

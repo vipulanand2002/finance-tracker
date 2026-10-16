@@ -49,6 +49,8 @@ interface Props {
   onBehalfContactId?: string | null
   onBehalfName?: string
   onBehalfEmail?: string | null
+  /** Opened from a wallet: the account is fixed, so hide the card / trip / split / friends options */
+  walletMode?: boolean
 }
 
 const DATE_KEY = 'lastTransactionDate'
@@ -129,7 +131,7 @@ interface CardStatement { id: string; cycle_start: string; cycle_end: string }
 interface CardInfo { id: string; card_name: string; last_four: string | null }
 interface AccountInfo { id: string; name: string; provider: string | null; balance: number; is_archived: boolean }
 
-export default function TransactionModal({ open, onClose, onSaved, transaction, defaultTripId, defaultCardId, defaultAccountId, defaultSplitOpen, defaultAmount, defaultDescription, defaultSplitParticipants, defaultContactIds, defaultType, onBehalfContactId, onBehalfName, onBehalfEmail }: Props) {
+export default function TransactionModal({ open, onClose, onSaved, transaction, defaultTripId, defaultCardId, defaultAccountId, defaultSplitOpen, defaultAmount, defaultDescription, defaultSplitParticipants, defaultContactIds, defaultType, onBehalfContactId, onBehalfName, onBehalfEmail, walletMode = false }: Props) {
   const [form, setForm] = useState(() => buildEmptyForm(defaultTripId, defaultCardId, defaultAccountId))
   const [saving, setSaving] = useState(false)
   const [scanningReceipt, setScanningReceipt] = useState(false)
@@ -765,7 +767,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
             </div>
 
             {/* ── Options: progressive disclosure ── */}
-            {!optionsLoaded ? (
+            {walletMode ? null : !optionsLoaded ? (
               <div className="space-y-2">
                 <Skeleton className="h-10 w-full rounded-lg" />
                 <Skeleton className="h-10 w-full rounded-lg" />

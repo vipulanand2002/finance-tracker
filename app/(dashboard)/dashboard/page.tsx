@@ -12,6 +12,7 @@ import StatsCards from '@/components/dashboard/StatsCards'
 import SpendingChart from '@/components/dashboard/SpendingChart'
 import RecentTransactions from '@/components/dashboard/RecentTransactions'
 import BudgetProgress from '@/components/dashboard/BudgetProgress'
+import { useExcludedFromSpending } from '@/lib/use-account-flags'
 import { useCardToggle } from '@/lib/useCardToggle'
 import type { Transaction, Budget, BudgetWithSpent, CategoryTotal, MonthlyData } from '@/types'
 
@@ -26,6 +27,8 @@ export default function DashboardPage() {
   const [year, setYear] = useState(now.getFullYear())
   const [includeCards, setIncludeCards] = useCardToggle()
 
+  // Wallets/accounts switched off for monthly spending don't count here
+  const excludedAccounts = useExcludedFromSpending()
   const [allTx, setAllTx] = useState<Transaction[]>([])
   const [budgets, setBudgets] = useState<Budget[]>([])
   const [loading, setLoading] = useState(true)
@@ -81,8 +84,11 @@ export default function DashboardPage() {
   // Cards ON: include everything — card expenses count as expenses, Card Payment counts as income
   // Cards OFF: exclude card imports and Card Payment entries entirely
   const isCountable = useCallback(
-    (t: Transaction) => includeCards ? true : (!t.card_id && t.category !== 'Card Payment'),
-    [includeCards],
+    (t: Transaction) => {
+      if (t.account_id && excludedAccounts.has(t.account_id)) return false
+      return includeCards ? true : (!t.card_id && t.category !== 'Card Payment')
+    },
+    [includeCards, excludedAccounts],
   )
 
   const isExpense = useCallback(
