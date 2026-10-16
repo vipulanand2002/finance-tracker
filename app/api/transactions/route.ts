@@ -85,6 +85,7 @@ export async function GET(request: Request) {
   const cardId = searchParams.get('card_id')
   const hasCard = searchParams.get('has_card') === 'true'
   const contactId = searchParams.get('contact_id')
+  const accountId = searchParams.get('account_id')
 
   // For trip-scoped queries: RLS handles visibility (own txs + trip participant txs)
   // For all other queries: restrict to own transactions only
@@ -104,6 +105,7 @@ export async function GET(request: Request) {
     if (cardId) query = query.eq('card_id', cardId)
     else if (hasCard) query = query.not('card_id', 'is', null)
     if (contactId) query = query.or(`contact_id.eq.${contactId},contact_ids.cs.{${contactId}}`)
+    if (accountId) query = query.eq('account_id', accountId)
   }
 
   const { data, error } = await query
@@ -138,9 +140,15 @@ export async function POST(request: Request) {
   // Only include contact columns once the schema has them (graceful degradation)
   if (body.contact_id !== undefined) payload.contact_id = body.contact_id ?? null
   if (body.contact_ids !== undefined) payload.contact_ids = body.contact_ids ?? []
+  // Wallet / account it was paid from (migration 046)
+  if (body.account_id !== undefined) payload.account_id = body.account_id ?? null
 
   // First attempt with all fields; if schema cache error, retry without contact columns
   let { data, error } = await supabase.from('transactions').insert(payload).select().single()
+  if (error?.message?.includes('account_id')) {
+    delete payload.account_id
+    ;({ data, error } = await supabase.from('transactions').insert(payload).select().single())
+  }
   if (error?.message?.includes('contact_id')) {
     delete payload.contact_id
     delete payload.contact_ids
@@ -188,8 +196,13 @@ export async function PUT(request: Request) {
   }
   if (body.contact_id !== undefined) patch.contact_id = body.contact_id ?? null
   if (body.contact_ids !== undefined) patch.contact_ids = body.contact_ids ?? []
+  if (body.account_id !== undefined) patch.account_id = body.account_id ?? null
 
   let { data, error } = await supabase.from('transactions').update(patch).eq('id', id).eq('user_id', user.id).select().single()
+  if (error?.message?.includes('account_id')) {
+    delete patch.account_id
+    ;({ data, error } = await supabase.from('transactions').update(patch).eq('id', id).eq('user_id', user.id).select().single())
+  }
   if (error?.message?.includes('contact_id')) {
     delete patch.contact_id
     delete patch.contact_ids

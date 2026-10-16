@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
-import { EyeOff, Loader2, Settings2, Upload, X, SplitSquareVertical, CreditCard, MapPin, Users, Plus, Trash2, UserPlus } from 'lucide-react'
+import { EyeOff, Loader2, Settings2, Upload, X, SplitSquareVertical, CreditCard, Wallet, MapPin, Users, Plus, Trash2, UserPlus } from 'lucide-react'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, TRIP_EXPENSE_CATEGORIES } from '@/lib/constants'
 import { ManageCategories } from '@/components/categories/ManageCategories'
 import { FriendPicker } from '@/components/friends/FriendPicker'
@@ -28,6 +28,8 @@ interface Props {
   transaction?: Transaction | null
   defaultTripId?: string | null
   defaultCardId?: string | null
+  // Pre-select the wallet / account the money came from (e.g. from the Wallets page)
+  defaultAccountId?: string | null
   // When true (and creating a new expense), the split toggle starts enabled —
   // used when launching this modal from the Splits area.
   defaultSplitOpen?: boolean
@@ -106,7 +108,7 @@ function getDefaultDate() {
   return format(new Date(), 'yyyy-MM-dd')
 }
 
-function buildEmptyForm(tripId?: string | null, cardId?: string | null) {
+function buildEmptyForm(tripId?: string | null, cardId?: string | null, accountId?: string | null) {
   return {
     amount: '',
     type: 'expense' as 'income' | 'expense',
@@ -119,14 +121,16 @@ function buildEmptyForm(tripId?: string | null, cardId?: string | null) {
     trip_id: tripId ?? null,
     contact_ids: [] as string[],
     card_id: cardId ?? null,
+    account_id: accountId ?? null,
   }
 }
 
 interface CardStatement { id: string; cycle_start: string; cycle_end: string }
 interface CardInfo { id: string; card_name: string; last_four: string | null }
+interface AccountInfo { id: string; name: string; provider: string | null; balance: number; is_archived: boolean }
 
-export default function TransactionModal({ open, onClose, onSaved, transaction, defaultTripId, defaultCardId, defaultSplitOpen, defaultAmount, defaultDescription, defaultSplitParticipants, defaultContactIds, defaultType, onBehalfContactId, onBehalfName, onBehalfEmail }: Props) {
-  const [form, setForm] = useState(() => buildEmptyForm(defaultTripId, defaultCardId))
+export default function TransactionModal({ open, onClose, onSaved, transaction, defaultTripId, defaultCardId, defaultAccountId, defaultSplitOpen, defaultAmount, defaultDescription, defaultSplitParticipants, defaultContactIds, defaultType, onBehalfContactId, onBehalfName, onBehalfEmail }: Props) {
+  const [form, setForm] = useState(() => buildEmptyForm(defaultTripId, defaultCardId, defaultAccountId))
   const [saving, setSaving] = useState(false)
   const [scanningReceipt, setScanningReceipt] = useState(false)
   const [trips, setTrips] = useState<Trip[]>([])
@@ -135,6 +139,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
   const [splitOpen, setSplitOpen] = useState(false)
   const [linkedSplitId, setLinkedSplitId] = useState<string | null>(null)
   const [cards, setCards] = useState<CardInfo[]>([])
+  const [accounts, setAccounts] = useState<AccountInfo[]>([])
   const [cardStatements, setCardStatements] = useState<CardStatement[]>([])
   const [currentUser, setCurrentUser] = useState<{ name: string; email: string } | null>(null)
   const [selectedCycleId, setSelectedCycleId] = useState<string>('none')
@@ -149,6 +154,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
   // Progressive-disclosure toggles for the optional sections
   const [tripEnabled, setTripEnabled] = useState(false)
   const [cardEnabled, setCardEnabled] = useState(false)
+  const [accountEnabled, setAccountEnabled] = useState(false)
   const [friendsEnabled, setFriendsEnabled] = useState(false)
   const [splitEnabled, setSplitEnabled] = useState(false)
   const [splitMode, setSplitMode] = useState<SplitMode>('equal')
@@ -180,11 +186,13 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       fetch('/api/contacts').then(r => r.json()).catch(() => []),
       fetch('/api/cards').then(r => r.json()).catch(() => []),
       fetch('/api/friends').then(r => r.json()).catch(() => []),
-    ]).then(([t, c, cd, fr]) => {
+      fetch('/api/accounts').then(r => r.json()).catch(() => ({ accounts: [] })),
+    ]).then(([t, c, cd, fr, ac]) => {
       setTrips(Array.isArray(t) ? t : [])
       setContacts(Array.isArray(c) ? c : [])
       setCards(Array.isArray(cd) ? cd : [])
       setFriends(Array.isArray(fr) ? fr : [])
+      setAccounts(Array.isArray(ac?.accounts) ? ac.accounts : [])
       setOptionsLoaded(true)
     })
     loadCategories()
@@ -240,18 +248,20 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
           ? transaction.contact_ids
           : transaction.contact_id ? [transaction.contact_id] : [],
         card_id: transaction.card_id ?? null,
+        account_id: transaction.account_id ?? null,
       }
       const hasSplit = !!transaction.split_id
       setForm(populated)
       originalFormRef.current = populated
       setTripEnabled(!!populated.trip_id)
       setCardEnabled(!!populated.card_id)
+      setAccountEnabled(!!populated.account_id)
       setSplitEnabled(hasSplit)
       // Split and friend-tagging are mutually exclusive
       setFriendsEnabled(!hasSplit && populated.contact_ids.length > 0)
       setParticipants(seedParticipants())
     } else {
-      const empty = buildEmptyForm(defaultTripId, defaultCardId)
+      const empty = buildEmptyForm(defaultTripId, defaultCardId, defaultAccountId)
       if (defaultAmount != null && String(defaultAmount) !== '') empty.amount = String(defaultAmount)
       if (defaultDescription) empty.description = defaultDescription
       if (defaultType) empty.type = defaultType
@@ -262,6 +272,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       originalFormRef.current = empty
       setTripEnabled(!!defaultTripId)
       setCardEnabled(!!defaultCardId)
+      setAccountEnabled(!!defaultAccountId)
       setSplitEnabled(wantSplit)
       setFriendsEnabled(!wantSplit && preTagged.length > 0)
       setParticipants(initialParticipants())
@@ -273,7 +284,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
     // Default props (amount/description/participants) are only read on open; leaving
     // them out of deps keeps re-renders from resetting an in-progress form.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transaction, open, defaultTripId, defaultCardId, defaultSplitOpen])
+  }, [transaction, open, defaultTripId, defaultCardId, defaultAccountId, defaultSplitOpen])
 
   const categories = form.type === 'income'
     ? incomeCategories
@@ -296,11 +307,26 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
     }
   }
 
+  // A transaction is paid with a card OR from a wallet / account, never both
   function toggleCard(on: boolean) {
     setCardEnabled(on)
-    if (!on) {
+    if (on) {
+      setAccountEnabled(false)
+      set('account_id', null)
+    } else {
       set('card_id', null)
       setSelectedCycleId('none')
+    }
+  }
+
+  function toggleAccount(on: boolean) {
+    setAccountEnabled(on)
+    if (on) {
+      setCardEnabled(false)
+      setForm(prev => ({ ...prev, card_id: null }))
+      setSelectedCycleId('none')
+    } else {
+      set('account_id', null)
     }
   }
 
@@ -551,6 +577,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         // Full contact list (requires contact_ids uuid[] column in DB)
         contact_ids: form.contact_ids,
         card_id: form.card_id || null,
+        account_id: form.account_id || null,
         split_id: linkedSplitId || null,
       }
       const url = transaction ? `/api/transactions?id=${transaction.id}` : '/api/transactions'
@@ -1013,6 +1040,37 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                           </div>
                         )}
                       </>
+                    )}
+                  </div>
+                )}
+
+                {/* Wallet / account toggle — mutually exclusive with Card */}
+                {!onBehalfContactId && accounts.some(a => !a.is_archived || a.id === form.account_id) && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium flex items-center gap-2">
+                        <Wallet className="w-4 h-4 text-muted-foreground" />
+                        {form.type === 'income' ? 'Received into a wallet / account?' : 'Paid from a wallet / account?'}
+                      </span>
+                      <Switch checked={accountEnabled} onCheckedChange={toggleAccount} />
+                    </div>
+                    {accountEnabled && (
+                      <Select value={form.account_id ?? ''} onValueChange={v => { if (v) set('account_id', v) }}>
+                        <SelectTrigger>
+                          <span className="truncate text-sm">
+                            {form.account_id
+                              ? (accounts.find(a => a.id === form.account_id)?.name ?? '…')
+                              : <span className="text-muted-foreground">Select a wallet or account</span>}
+                          </span>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {accounts.filter(a => !a.is_archived || a.id === form.account_id).map(a => (
+                            <SelectItem key={a.id} value={a.id}>
+                              {a.name} · {formatCurrency(a.balance)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     )}
                   </div>
                 )}

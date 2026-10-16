@@ -10,6 +10,8 @@ export interface Transaction {
   receipt_url: string | null
   trip_id: string | null
   card_id: string | null
+  /** Wallet / account it was paid from or received into (migration 046) */
+  account_id?: string | null
   split_id: string | null
   is_discrete: boolean
   contact_id: string | null

@@ -9,6 +9,7 @@ import {
   MessageCircle,
   Settings,
   Scale,
+  Wallet,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -24,6 +25,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { label: 'Transactions', href: '/transactions', icon: ArrowLeftRight },
   { label: 'Cards', href: '/cards', icon: CreditCard },
+  { label: 'Wallets', href: '/wallets', icon: Wallet },
   { label: 'Trips', href: '/trips', icon: Plane },
   { label: 'Budgets', href: '/budgets', icon: Target },
   { label: 'Splits', href: '/splits', icon: Users },

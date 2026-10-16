@@ -4,7 +4,7 @@
 
 Personal-finance PWA for Indian users (all money is **INR**, formatted with `formatCurrency` from `lib/utils.ts`, `en-IN` locale). One developer (GitHub `vipulanand2002`, commits as `Vipul2002`), deployed on **Vercel**, backed by **Supabase** (Postgres + Auth + Storage + Realtime). No test suite.
 
-Features: transactions (income/expense, receipts, recurring), budgets, credit/debit cards with statement import (PDF upload or Gmail), trips (members, invitations, budgets, chat), Splitwise-style splits, cross-person balances and settlements, friends with DMs, push notifications, reminder emails, Gemini-powered AI chat/insights/receipt scanning, a public `/demo` with mock data, and an Android share target for UPI SMS.
+Features: transactions (income/expense, receipts, recurring), budgets, credit/debit cards with statement import (PDF upload or Gmail), wallets & accounts (Amazon Pay, MobiKwik, Paytm, bank, cash…) with balances and transfers, trips (members, invitations, budgets, chat), Splitwise-style splits, cross-person balances and settlements, friends with DMs, push notifications, reminder emails, Gemini-powered AI chat/insights/receipt scanning, a public `/demo` with mock data, and an Android share target for UPI SMS.
 
 ## Stack
 
@@ -33,7 +33,7 @@ Baseline (Oct 2026): `tsc` passes clean. `eslint` reports **51 errors / 24 warni
 app/
   (auth)/login, signup           client pages, demo teaser in layout
   (dashboard)/                   layout.tsx = server auth check → DashboardShell
-    dashboard transactions cards trips budgets splits balances friends ai share
+    dashboard transactions cards wallets trips budgets splits balances friends ai share
     settings/{profile,security,navigation}   hub driven by lib/settings-sections.ts
     contacts/                    redirect only (contacts live under Friends)
   api/<resource>/route.ts        all data access — see "API conventions"
@@ -48,10 +48,11 @@ lib/
   constants.ts                   category lists + CATEGORY_COLORS
   nav-items.ts, use-nav-order.ts sidebar items + per-user order
   email-templates/*.ts           HTML builders for reminder/summary emails
+  wallet-providers.ts            wallet/account provider list + computeBalances
   parse-upi.ts                   regex parser for bank/UPI SMS (share target)
   push.ts                        sendPushToUser (service role, prunes 410s)
 types/index.ts                   shared row types (partial — many files define local interfaces)
-supabase/migrations/001…045      schema history, applied manually
+supabase/migrations/001…046      schema history, applied manually
 public/sw.js, sw-push.js, manifest.json   PWA (share_target → POST /share)
 ```
 
@@ -96,6 +97,8 @@ Largest/most intricate files: `components/trips/TripDetailSheet.tsx` (~1.8k line
 - **Settling is an agreement, not a payment.** "Close Balance" (`PATCH /api/splits?type=close_balance`) marks the pair's unpaid shares paid, settles splits that become fully paid, and writes a `settlements` row. It must **never** create income/expense transactions. Activity recorded before `settled_at` belongs to the closed round.
 - Settlement history = recorded `settlements` rows + rounds derived from timestamps for older data (`buildPersonHistory`).
 - The same rules feed the Friends tab, the balance detail sheet and reminder emails (`/api/mail/reminder`); keep them consistent.
+
+**Wallets & accounts** (`/wallets`, migration 046): `accounts` rows (kind wallet|bank|cash|other, `provider` key from `lib/wallet-providers.ts` — never rename keys, `opening_balance`, `is_archived`). A transaction links to one via `transactions.account_id`; card and account are mutually exclusive in `TransactionModal`. `account_transfers` records top-ups (only `to_account_id`), withdrawals (only `from_account_id`) and moves between accounts — these change balances but are **never** income or expenses. Balance = opening + income − expenses + transfers in − transfers out, computed by `computeBalances` in `GET /api/accounts` (returns `{ available, accounts }`; `available: false` before the migration).
 
 **Trips**: owner in `trips.user_id`. Membership source of truth is `trip_invitations` (friends / no-account / name-only → `accepted` immediately; registered non-friends → `pending`). Accepting copies the person into `trip_members` by trigger. `is_trip_member()` (SECURITY DEFINER, by `auth.email()`) grants read access to trip, members, budgets and non-discrete transactions. Also: `trip_budgets` (per category), `trip_personal_budgets` (`is_private`), `trip_messages` (realtime chat), `budget_visible_to_members`, `is_closed`. "Temporary members" in the trip view are name-only people who appear in splits but aren't members.
 
