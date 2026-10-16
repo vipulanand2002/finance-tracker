@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
@@ -87,6 +88,24 @@ export default function WalletsPage() {
     load()
     if (detailId) loadActivity(detailId)
   }, [load, loadActivity, detailId])
+
+  // Flip what an account counts in — saves straight away
+  async function setCounts(id: string, field: 'include_in_total' | 'include_in_spending', value: boolean) {
+    try {
+      const res = await fetch(`/api/accounts?id=${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [field]: value }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error ?? 'Failed to update')
+      }
+      refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update')
+    }
+  }
 
   const visible = useMemo(() => accounts.filter(a => showArchived || !a.is_archived), [accounts, showArchived])
   const active = useMemo(() => accounts.filter(a => !a.is_archived), [accounts])
@@ -282,6 +301,24 @@ export default function WalletsPage() {
                   <div className="rounded-lg border p-2.5"><p className="text-xs text-muted-foreground">Spent</p><p className="font-medium text-red-500">−{formatCurrency(detail.expenses)}</p></div>
                   <div className="rounded-lg border p-2.5"><p className="text-xs text-muted-foreground">Received</p><p className="font-medium text-green-600">+{formatCurrency(detail.income)}</p></div>
                   <div className="rounded-lg border p-2.5"><p className="text-xs text-muted-foreground">Transfers (net)</p><p className="font-medium">{formatCurrency(detail.transfersIn - detail.transfersOut)}</p></div>
+                </div>
+
+                {/* What this account counts in */}
+                <div className="rounded-lg border divide-y">
+                  <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">Count in total balance</p>
+                      <p className="text-xs text-muted-foreground">Part of your overall balance (dashboard &amp; Wallets total)</p>
+                    </div>
+                    <Switch checked={detail.include_in_total !== false} onCheckedChange={v => setCounts(detail.id, 'include_in_total', v)} />
+                  </div>
+                  <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">Count in monthly spending</p>
+                      <p className="text-xs text-muted-foreground">Its income &amp; expenses show in monthly totals, charts and budgets</p>
+                    </div>
+                    <Switch checked={detail.include_in_spending !== false} onCheckedChange={v => setCounts(detail.id, 'include_in_spending', v)} />
+                  </div>
                 </div>
 
                 {!detail.is_archived && (
