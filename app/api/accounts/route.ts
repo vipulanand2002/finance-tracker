@@ -23,8 +23,19 @@ function pickFields(body: Record<string, unknown>, partial: boolean) {
   if (!partial || body.color !== undefined) out.color = typeof body.color === 'string' && body.color ? body.color : null
   if (!partial || body.notes !== undefined) out.notes = typeof body.notes === 'string' && body.notes.trim() ? body.notes.trim() : null
   if (body.is_archived !== undefined) out.is_archived = !!body.is_archived
+  // Identified by AI from the name (migration 047)
+  if (!partial || body.institution !== undefined) out.institution = typeof body.institution === 'string' && body.institution.trim() ? body.institution.trim().slice(0, 60) : null
+  if (!partial || body.logo_domain !== undefined) {
+    const d = typeof body.logo_domain === 'string' ? body.logo_domain.trim().toLowerCase() : ''
+    out.logo_domain = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d) ? d : null
+  }
   return out
 }
+
+// Columns added in migration 047 — dropped (and the write retried) if it isn't applied yet
+const IDENTITY_COLS = ['institution', 'logo_domain']
+const isIdentityColError = (msg?: string) => !!msg && IDENTITY_COLS.some(c => msg.includes(c))
+const withoutIdentity = (f: Record<string, unknown>) => Object.fromEntries(Object.entries(f).filter(([k]) => !IDENTITY_COLS.includes(k)))
 
 // GET /api/accounts — the user's wallets & accounts with current balances.
 // Reports { available: false } if migration 046 hasn't been applied yet, so the
@@ -63,11 +74,14 @@ export async function POST(request: Request) {
   const fields = pickFields(await request.json(), false)
   if (!fields.name) return NextResponse.json({ error: 'Name is required' }, { status: 400 })
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('accounts')
     .insert({ ...fields, user_id: user.id })
     .select()
     .single()
+  if (isIdentityColError(error?.message)) {
+    ;({ data, error } = await supabase.from('accounts').insert({ ...withoutIdentity(fields), user_id: user.id }).select().single())
+  }
 
   if (error) {
     if (error.message?.includes('accounts')) {
@@ -89,13 +103,18 @@ export async function PATCH(request: Request) {
   if (fields.name !== undefined && !fields.name) return NextResponse.json({ error: 'Name is required' }, { status: 400 })
   if (Object.keys(fields).length === 0) return NextResponse.json({ error: 'Nothing to update' }, { status: 400 })
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('accounts')
     .update(fields)
     .eq('id', id)
     .eq('user_id', user.id)
     .select()
     .single()
+  if (isIdentityColError(error?.message)) {
+    const rest = withoutIdentity(fields)
+    if (Object.keys(rest).length === 0) return NextResponse.json({ error: 'Run migration 047 to save the identified logo' }, { status: 400 })
+    ;({ data, error } = await supabase.from('accounts').update(rest).eq('id', id).eq('user_id', user.id).select().single())
+  }
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(data)

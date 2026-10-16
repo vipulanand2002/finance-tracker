@@ -62,6 +62,10 @@ export interface Account {
   notes: string | null
   is_archived: boolean
   created_at: string
+  /** Brand / bank name identified for this account, e.g. 'HDFC Bank' (migration 047) */
+  institution?: string | null
+  /** Domain used to fetch the logo (migration 047) */
+  logo_domain?: string | null
 }
 
 export interface AccountTransfer {

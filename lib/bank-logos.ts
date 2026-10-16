@@ -183,3 +183,30 @@ export function detectNetwork(cardNumber: string): 'visa' | 'mastercard' | 'rupa
 export function formatCardDisplay(last4: string): string {
   return `•••• •••• •••• ${last4}`
 }
+
+// ── Bank lookup by free text (used by the wallet/account form) ────────────────
+const BANK_DISPLAY_NAMES: Record<string, string> = {
+  'hdfcbank.com': 'HDFC Bank', 'icicibank.com': 'ICICI Bank', 'sbi.co.in': 'State Bank of India',
+  'axisbank.com': 'Axis Bank', 'kotak.com': 'Kotak Mahindra Bank', 'yesbank.in': 'YES Bank',
+  'indusind.com': 'IndusInd Bank', 'americanexpress.com': 'American Express', 'citibank.co.in': 'Citibank',
+  'rblbank.com': 'RBL Bank', 'idfcfirstbank.com': 'IDFC FIRST Bank', 'federalbank.co.in': 'Federal Bank',
+  'hsbc.co.in': 'HSBC', 'bankofindia.co.in': 'Bank of India', 'pnbindia.in': 'Punjab National Bank',
+  'bankofbaroda.in': 'Bank of Baroda', 'canarabank.com': 'Canara Bank', 'unionbankofindia.co.in': 'Union Bank of India',
+  'sc.com': 'Standard Chartered', 'aubank.in': 'AU Small Finance Bank', 'bandhanbank.com': 'Bandhan Bank',
+  'karnatakabank.com': 'Karnataka Bank', 'dcbbank.com': 'DCB Bank', 'southindianbank.com': 'South Indian Bank',
+  'kvb.co.in': 'Karur Vysya Bank', 'tnmercantilebank.com': 'Tamilnad Mercantile Bank', 'indianbank.in': 'Indian Bank',
+  'iob.in': 'Indian Overseas Bank', 'centralbankofindia.co.in': 'Central Bank of India', 'ucobank.com': 'UCO Bank',
+  'paytmbank.com': 'Paytm Payments Bank', 'jupiter.money': 'Jupiter', 'fi.money': 'Fi Money',
+  'sliceit.com': 'slice', 'getonecard.app': 'OneCard', 'navi.com': 'Navi',
+}
+
+/** Find a known bank mentioned in free text, e.g. "hdfc salary" → HDFC Bank. */
+export function findBank(text: string): { institution: string; domain: string } | null {
+  const lower = text.toLowerCase()
+  for (const [keyword, domain] of BANK_DOMAIN_MAP) {
+    // whole-word match so "axis" doesn't fire inside other words
+    const re = new RegExp(`(^|[^a-z0-9])${keyword.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9]|$)`)
+    if (re.test(lower)) return { institution: BANK_DISPLAY_NAMES[domain] ?? keyword, domain }
+  }
+  return null
+}

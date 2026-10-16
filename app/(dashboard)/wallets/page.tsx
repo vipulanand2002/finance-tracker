@@ -222,11 +222,11 @@ export default function WalletsPage() {
                 style={{ borderLeftWidth: 4, borderLeftColor: a.color ?? getProvider(a.provider)?.color ?? undefined }}
               >
                 <div className="flex items-center gap-3">
-                  <AccountLogo provider={a.provider} size={36} />
+                  <AccountLogo provider={a.provider} domain={a.logo_domain} kind={a.kind} color={a.color} label={a.institution ?? a.name} size={36} />
                   <div className="min-w-0 flex-1">
                     <p className="font-medium truncate">{a.name}</p>
                     <p className="text-xs text-muted-foreground">
-                      {getProvider(a.provider)?.label ?? KIND_LABEL[a.kind]}
+                      {a.institution ?? getProvider(a.provider)?.label ?? KIND_LABEL[a.kind]}
                       {a.is_archived && ' · Archived'}
                     </p>
                   </div>
@@ -256,7 +256,7 @@ export default function WalletsPage() {
             <>
               <SheetHeader>
                 <SheetTitle className="flex items-center gap-3">
-                  <AccountLogo provider={detail.provider} size={32} />
+                  <AccountLogo provider={detail.provider} domain={detail.logo_domain} kind={detail.kind} color={detail.color} label={detail.institution ?? detail.name} size={32} />
                   <span className="truncate">{detail.name}</span>
                 </SheetTitle>
               </SheetHeader>
@@ -264,7 +264,7 @@ export default function WalletsPage() {
                 <div>
                   <p className={cn('text-3xl font-bold', detail.balance < 0 && 'text-red-500')}>{formatCurrency(detail.balance)}</p>
                   <div className="flex flex-wrap gap-1.5 mt-2">
-                    <Badge variant="secondary">{getProvider(detail.provider)?.label ?? KIND_LABEL[detail.kind]}</Badge>
+                    <Badge variant="secondary">{detail.institution ?? getProvider(detail.provider)?.label ?? KIND_LABEL[detail.kind]}</Badge>
                     {detail.is_archived && <Badge variant="outline">Archived</Badge>}
                   </div>
                   {detail.notes && <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap">{detail.notes}</p>}
