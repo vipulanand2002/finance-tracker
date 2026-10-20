@@ -256,6 +256,8 @@ export default function SplitsPage() {
   const [confirmBulk, setConfirmBulk] = useState(false)
   const [bulkSettling, setBulkSettling] = useState(false)
   const [tab, setTab] = useState('active')
+  const [personFilter, setPersonFilter] = useState('all')
+  const [paidFilter, setPaidFilter] = useState<'all' | 'me' | 'friend'>('all')
 
   // Load user info, splits, and friends in parallel
   useEffect(() => {
@@ -444,15 +446,6 @@ export default function SplitsPage() {
     [friends]
   )
 
-  const active = splits.filter(s => !s.is_settled)
-  const settled = splits.filter(s => s.is_settled)
-
-  // Multi-select: only splits I created can be settled by me
-  const selectable = active.filter(s => !!myId && s.created_by === myId)
-  const selectedSplits = selectable.filter(s => selectedIds.has(s.id))
-  const pendingShares = selectedSplits.flatMap(s => s.split_participants.filter(p => !p.is_paid))
-  const pendingTotal = pendingShares.reduce((a, p) => a + p.amount_owed, 0)
-
   // Is a given participant row "me"? (creator is auto-added as a participant)
   const isMe = (p: Participant) =>
     (p.participant_user_id && p.participant_user_id === myId) ||
@@ -468,13 +461,52 @@ export default function SplitsPage() {
       : (s.paid_by_email || s.paid_by_name) ? false  // unregistered payer (email or name-only) is never me
       : (!!myId && s.created_by === myId)
 
-  const owedToYou = active
+  // Filters: by person (anyone on the split, or its payer) and by who paid
+  const personKeyOf = (name: string | null | undefined, email: string | null | undefined) =>
+    email ? email.toLowerCase() : name ? `name:${name.trim().toLowerCase()}` : null
+  const personOptions = (() => {
+    const m = new Map<string, string>()
+    for (const s of splits) {
+      for (const p of s.split_participants) {
+        if ((p.participant_user_id && p.participant_user_id === myId) || (!!myEmail && p.participant_email?.toLowerCase() === myEmail)) continue
+        const k = personKeyOf(p.participant_name, p.participant_email)
+        if (k && !m.has(k)) m.set(k, p.participant_name || p.participant_email || k)
+      }
+      const pk = personKeyOf(s.paid_by_name, s.paid_by_email)
+      if (pk && !m.has(pk)) m.set(pk, s.paid_by_name || s.paid_by_email || pk)
+    }
+    return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1]))
+  })()
+  const matchesFilters = (s: Split) => {
+    if (personFilter !== 'all') {
+      const hit = s.split_participants.some(p => personKeyOf(p.participant_name, p.participant_email) === personFilter)
+        || personKeyOf(s.paid_by_name, s.paid_by_email) === personFilter
+      if (!hit) return false
+    }
+    if (paidFilter === 'me' && !iAmPayer(s)) return false
+    if (paidFilter === 'friend' && iAmPayer(s)) return false
+    return true
+  }
+  const filtering = personFilter !== 'all' || paidFilter !== 'all'
+
+  const allActive = splits.filter(s => !s.is_settled)
+  const active = allActive.filter(matchesFilters)
+  const settled = splits.filter(s => s.is_settled && matchesFilters(s))
+
+  // Multi-select: only splits I created can be settled by me
+  const selectable = active.filter(s => !!myId && s.created_by === myId)
+  const selectedSplits = selectable.filter(s => selectedIds.has(s.id))
+  const pendingShares = selectedSplits.flatMap(s => s.split_participants.filter(p => !p.is_paid))
+  const pendingTotal = pendingShares.reduce((a, p) => a + p.amount_owed, 0)
+
+
+  const owedToYou = allActive
     .filter(iAmPayer)
     .reduce((sum, s) => sum + s.split_participants
       .filter(p => !p.is_paid && !isMe(p))
       .reduce((a, p) => a + p.amount_owed, 0), 0)
 
-  const youOwe = active
+  const youOwe = allActive
     .filter(s => !iAmPayer(s))
     .reduce((sum, s) => sum + s.split_participants
       .filter(p => !p.is_paid && isMe(p))
@@ -500,7 +532,7 @@ export default function SplitsPage() {
         </div>
       </div>
 
-      {active.length > 0 && (
+      {allActive.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:gap-4 sm:max-w-xl">
           <div className="rounded-xl border bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 px-4 py-3">
             <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">Others owe you</p>
@@ -510,7 +542,7 @@ export default function SplitsPage() {
           <div className="rounded-xl border bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800 px-4 py-3">
             <p className="text-xs text-blue-700 dark:text-blue-300 font-medium">You owe</p>
             <p className="text-xl font-bold text-blue-700 dark:text-blue-300 mt-0.5">{formatCurrency(youOwe)}</p>
-            <p className="text-[11px] text-blue-700/70 dark:text-blue-300/70 mt-0.5">across {active.length} active split{active.length !== 1 ? 's' : ''}</p>
+            <p className="text-[11px] text-blue-700/70 dark:text-blue-300/70 mt-0.5">across {allActive.length} active split{allActive.length !== 1 ? 's' : ''}</p>
           </div>
         </div>
       )}
@@ -529,9 +561,31 @@ export default function SplitsPage() {
         </Card>
       ) : (
         <Tabs value={tab} onValueChange={v => { setTab(v); exitSelecting() }}>
+          {personOptions.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap mb-3">
+              <select
+                value={personFilter}
+                onChange={e => { setPersonFilter(e.target.value); setSelectedIds(new Set()) }}
+                className="h-8 rounded-md border bg-background px-2 text-sm"
+                aria-label="Filter by person"
+              >
+                <option value="all">Everyone</option>
+                {personOptions.map(([k, n]) => <option key={k} value={k}>{n}</option>)}
+              </select>
+              {([['all', 'All'], ['me', 'I paid'], ['friend', 'Friend paid']] as const).map(([v, label]) => (
+                <Button key={v} size="sm" className="h-8" variant={paidFilter === v ? 'default' : 'outline'}
+                  onClick={() => { setPaidFilter(v); setSelectedIds(new Set()) }}>{label}</Button>
+              ))}
+              {filtering && (
+                <Button size="sm" variant="ghost" className="h-8" onClick={() => { setPersonFilter('all'); setPaidFilter('all'); setSelectedIds(new Set()) }}>
+                  <X className="w-3.5 h-3.5 mr-1" />Clear filters
+                </Button>
+              )}
+            </div>
+          )}
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <TabsList>
-              <TabsTrigger value="active">Active ({active.length})</TabsTrigger>
+              <TabsTrigger value="active">Active ({active.length}{filtering ? ` of ${allActive.length}` : ''})</TabsTrigger>
               <TabsTrigger value="settled">Settled ({settled.length})</TabsTrigger>
             </TabsList>
 
@@ -560,7 +614,7 @@ export default function SplitsPage() {
 
           <TabsContent value="active" className="mt-4">
             {active.length === 0 ? (
-              <p className="text-center text-muted-foreground py-8">No active splits</p>
+              <p className="text-center text-muted-foreground py-8">{filtering ? 'No active splits match these filters' : 'No active splits'}</p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {active.map(s => (
