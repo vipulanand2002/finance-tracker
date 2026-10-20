@@ -338,15 +338,20 @@ export default function BalancesPage() {
   }
 
   async function remind(friend: FriendBalance) {
-    if (!friend.email) { toast.error('No email for this friend'); return }
+    if (!friend.email || !friend.id) { toast.error('Add an email to this friend to send reminders'); return }
     setReminding(friend.key)
     try {
       const res = await fetch('/api/mail/reminder', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ friendName: friend.name, friendEmail: friend.email, amount: friend.net }),
+        body: JSON.stringify({ type: 'contact', contact_id: friend.id }),
       })
-      if (!res.ok) throw new Error()
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        if (data.error === 'no_pending_splits') toast.info(`No pending splits to remind ${friend.name} about`)
+        else toast.error(data.error ?? 'Failed to send reminder')
+        return
+      }
       toast.success(`Reminder sent to ${friend.name}`)
     } catch {
       toast.error('Failed to send reminder')
