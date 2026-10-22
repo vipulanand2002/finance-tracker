@@ -10,9 +10,14 @@ on:
 jobs:
   ping:
     runs-on: ubuntu-latest
+    env:
+      NOTIFY_SECRET: ${{ secrets.NOTIFY_SECRET }}
+      APP_URL: ${{ secrets.APP_URL }}
     steps:
+      # Skipped (not failed) until both repository secrets have been added
       - name: Trigger due notifications
+        if: ${{ env.NOTIFY_SECRET != '' && env.APP_URL != '' }}
         run: |
           curl --fail --silent --show-error --max-time 60 \
-            -H "Authorization: Bearer ${{ secrets.NOTIFY_SECRET }}" \
-            "${{ secrets.APP_URL }}/api/cron/notify"
+            -H "Authorization: Bearer $NOTIFY_SECRET" \
+            "$APP_URL/api/cron/notify"
