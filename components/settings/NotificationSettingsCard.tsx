@@ -97,7 +97,7 @@ export default function NotificationSettingsCard() {
           Reminder notifications
         </CardTitle>
         <CardDescription>
-          A short check-in on your spending at the times you choose, sent to every device where you’ve allowed notifications.
+          A nudge to add your transactions at the times you choose, sent to every device where you’ve allowed notifications.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
