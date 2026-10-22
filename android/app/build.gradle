@@ -1,0 +1,28 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.vipul.financetracker'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.vipul.financetracker'
+        minSdk 24
+        targetSdk 34
+        // CI bumps versionCode from the run number so each build installs over the last
+        versionCode (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
+        versionName '1.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

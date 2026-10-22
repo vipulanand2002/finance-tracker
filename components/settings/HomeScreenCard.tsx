@@ -38,6 +38,24 @@ export default function HomeScreenCard() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
+          <CardTitle className="flex items-center gap-2"><Smartphone className="w-5 h-5 text-primary" /> Android app with widget</CardTitle>
+          <CardDescription>A real home-screen widget with one-tap + Expense and + Income buttons.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <ol className="list-decimal pl-5 space-y-1.5 text-muted-foreground">
+            <li>Download <strong className="text-foreground">FinanceTracker.apk</strong> and open it (allow “install unknown apps” if asked).</li>
+            <li>Press and hold an empty spot on your home screen → <strong className="text-foreground">Widgets</strong> → <strong className="text-foreground">Finance Tracker</strong>.</li>
+            <li>Drop the Quick add widget where you like and sign in once in the app.</li>
+          </ol>
+          <a href="https://github.com/vipulanand2002/finance-tracker/releases/tag/android-latest" target="_blank" rel="noreferrer">
+            <Button variant="outline" size="sm"><Download className="w-4 h-4 mr-2" /> Get the Android app</Button>
+          </a>
+          <p className="text-xs text-muted-foreground">The app always shows the latest version of this site, so you only reinstall it when the widget itself changes. Use email &amp; password to sign in (Google sign-in is blocked inside app windows).</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle className="flex items-center gap-2"><Smartphone className="w-5 h-5 text-primary" /> Install on your phone</CardTitle>
           <CardDescription>Put Finance Tracker on your home screen so it opens like an app.</CardDescription>
         </CardHeader>

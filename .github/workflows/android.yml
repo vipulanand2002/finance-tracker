@@ -1,0 +1,52 @@
+name: Android app
+
+# Builds the Android app (a native shell + home-screen widget around the live Vercel
+# site) on every push to master that touches android/, and publishes the APK to the
+# "android-latest" release. The screens themselves come from Vercel, so web changes
+# need no new APK — only changes under android/ do.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Build debug APK
+        working-directory: android
+        run: gradle assembleDebug --no-daemon
+
+      - name: Name the APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk FinanceTracker.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FinanceTracker-apk
+          path: FinanceTracker.apk
+
+      - name: Publish to the android-latest release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-latest
+          name: Android app (latest)
+          body: Install FinanceTracker.apk on your Android phone. It always shows the latest deployed web app.
+          files: FinanceTracker.apk
+          overwrite_files: true

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Finance Tracker</string>
+    <string name="widget_title">Finance Tracker · Quick add</string>
+    <string name="widget_expense">+ Expense</string>
+    <string name="widget_income">+ Income</string>
+    <string name="widget_description">Add an expense or income in one tap</string>
+</resources>
