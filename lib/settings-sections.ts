@@ -1,4 +1,4 @@
-import { User, Lock, ListOrdered, type LucideIcon } from 'lucide-react'
+import { User, Lock, ListOrdered, Bell, type LucideIcon } from 'lucide-react'
 
 export interface SettingsSection {
   key: string
@@ -37,5 +37,13 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     description: 'Arrange the order of your sidebar menu',
     pageDescription: 'Put the pages you use most at the top of your menu.',
     icon: ListOrdered,
+  },
+  {
+    key: 'notifications',
+    href: '/settings/notifications',
+    title: 'Notifications',
+    description: 'Reminders on your phone or computer',
+    pageDescription: 'Turn on reminders and choose how many a day and at what times.',
+    icon: Bell,
   },
 ]

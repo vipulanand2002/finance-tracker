@@ -1,0 +1,18 @@
+name: Scheduled notifications
+
+# Vercel's free plan only runs crons once a day, so this pings the app every 15
+# minutes; the endpoint itself decides who is due a reminder (and sends it once).
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger due notifications
+        run: |
+          curl --fail --silent --show-error --max-time 60 \
+            -H "Authorization: Bearer ${{ secrets.NOTIFY_SECRET }}" \
+            "${{ secrets.APP_URL }}/api/cron/notify"
