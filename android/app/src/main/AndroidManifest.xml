@@ -20,6 +20,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Returning from Google sign-in (done in the phone's browser) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="financetracker" android:host="auth" />
+            </intent-filter>
         </activity>
 
         <!-- Home-screen widget: one-tap Add expense / Add income -->

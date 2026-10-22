@@ -50,7 +50,7 @@ export default function HomeScreenCard() {
           <a href="https://github.com/vipulanand2002/finance-tracker/releases/tag/android-latest" target="_blank" rel="noreferrer">
             <Button variant="outline" size="sm"><Download className="w-4 h-4 mr-2" /> Get the Android app</Button>
           </a>
-          <p className="text-xs text-muted-foreground">The app always shows the latest version of this site, so you only reinstall it when the widget itself changes. Use email &amp; password to sign in (Google sign-in is blocked inside app windows).</p>
+          <p className="text-xs text-muted-foreground">The app always shows the latest version of this site, so you only reinstall it when the widget itself changes. Google sign-in opens in your phone’s browser and then returns to the app.</p>
         </CardContent>
       </Card>
 

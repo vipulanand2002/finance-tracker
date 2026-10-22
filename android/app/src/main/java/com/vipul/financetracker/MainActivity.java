@@ -51,7 +51,11 @@ public class MainActivity extends Activity {
                 String host = uri.getHost();
                 // Keep the app's own pages and the sign-in providers inside the app;
                 // send everything else (mailto:, tel:, other sites) to the system.
-                if (host != null && (host.equals(Uri.parse(BASE_URL).getHost()) || host.endsWith(".supabase.co") || host.endsWith("google.com"))) {
+                // Google refuses to sign in inside an app window, so the sign-in step is
+                // opened in the phone's browser; it comes back through financetracker://auth.
+                boolean isSignIn = host != null && host.endsWith(".supabase.co")
+                        && uri.getPath() != null && uri.getPath().startsWith("/auth/v1/authorize");
+                if (!isSignIn && host != null && host.equals(Uri.parse(BASE_URL).getHost())) {
                     return false;
                 }
                 try {
@@ -85,6 +89,11 @@ public class MainActivity extends Activity {
     }
 
     private static String urlFor(Intent intent) {
+        // Back from Google sign-in: finish the login inside the app
+        if (intent != null && intent.getData() != null && "financetracker".equals(intent.getData().getScheme())) {
+            String q = intent.getData().getEncodedQuery();
+            return BASE_URL + "/auth/callback" + (q != null ? "?" + q : "");
+        }
         String path = intent != null ? intent.getStringExtra(EXTRA_PATH) : null;
         return BASE_URL + (path != null ? path : "/dashboard");
     }
@@ -94,7 +103,7 @@ public class MainActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        if (intent.getStringExtra(EXTRA_PATH) != null) web.loadUrl(urlFor(intent));
+        if (intent.getStringExtra(EXTRA_PATH) != null || intent.getData() != null) web.loadUrl(urlFor(intent));
     }
 
     @Override
