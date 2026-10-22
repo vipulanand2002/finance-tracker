@@ -54,21 +54,10 @@
     }
   ],
   "shortcuts": [
-    {
-      "name": "Add Transaction",
-      "url": "/transactions",
-      "description": "Add a new transaction"
-    },
-    {
-      "name": "Trips",
-      "url": "/trips",
-      "description": "View your trips"
-    },
-    {
-      "name": "Splits",
-      "url": "/splits",
-      "description": "View your splits"
-    }
+    { "name": "Add expense", "short_name": "Expense", "url": "/add?type=expense", "description": "Record an expense", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Add income", "short_name": "Income", "url": "/add?type=income", "description": "Record income", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Splits", "url": "/splits", "description": "View your splits", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Trips", "url": "/trips", "description": "View your trips", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
   ],
   "categories": ["finance", "productivity"],
   "share_target": {

@@ -1,4 +1,4 @@
-import { User, Lock, ListOrdered, Bell, type LucideIcon } from 'lucide-react'
+import { User, Lock, ListOrdered, Bell, Smartphone, type LucideIcon } from 'lucide-react'
 
 export interface SettingsSection {
   key: string
@@ -45,5 +45,13 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     description: 'Reminders on your phone or computer',
     pageDescription: 'Turn on reminders and choose how many a day and at what times.',
     icon: Bell,
+  },
+  {
+    key: 'home-screen',
+    href: '/settings/home-screen',
+    title: 'Home screen',
+    description: 'Install the app and add quick-add shortcuts',
+    pageDescription: 'Add Finance Tracker and one-tap shortcuts to your phone’s home screen.',
+    icon: Smartphone,
   },
 ]
