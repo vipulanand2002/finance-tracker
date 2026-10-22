@@ -11,15 +11,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   Upload, Loader2, CheckSquare, Square, Eye, EyeOff,
   ChevronDown, ChevronUp, FileText, ArrowUpCircle, ArrowDownCircle, KeyRound,
-  Plus, X,
+  Plus,
 } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
-import type { Trip } from '@/types'
+import { createClient } from '@/lib/supabase/client'
+import SplitEditor, { amountsFor, mkParticipant, round2, type SplitMode, type SplitParticipant } from '@/components/splits/SplitEditor'
+import type { Trip, Friend as FullFriend } from '@/types'
 
 interface Friend { id: string; name: string; email: string | null }
-
-interface SplitParticipant { name: string; email: string; amount: string }
 
 interface EditableTx {
   date: string
@@ -31,6 +31,7 @@ interface EditableTx {
   trip_id: string | null
   contact_id: string | null
   split_enabled: boolean
+  split_mode: SplitMode
   split_participants: SplitParticipant[]
   selected: boolean
   expanded: boolean
@@ -62,6 +63,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
   const [cycleEnd, setCycleEnd] = useState('')
   const [trips, setTrips] = useState<Trip[]>([])
   const [friends, setFriends] = useState<Friend[]>([])
+  const [currentUser, setCurrentUser] = useState<{ name: string; email: string } | null>(null)
   // inline "add new friend" state per-row
   const [addingFriendRow, setAddingFriendRow] = useState<number | null>(null)
   const [newFriendName, setNewFriendName] = useState('')
@@ -77,6 +79,10 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
   useEffect(() => {
     if (!open) return
     fetch('/api/trips').then(r => r.json()).then(d => setTrips(Array.isArray(d) ? d : [])).catch(() => {})
+    createClient().auth.getUser().then(({ data: { user } }) => {
+      if (!user?.email) return
+      setCurrentUser({ name: user.user_metadata?.full_name || user.user_metadata?.name || user.email.split('@')[0] || 'You', email: user.email })
+    }).catch(() => {})
     fetch('/api/friends').then(r => r.json()).then(d => setFriends(Array.isArray(d) ? d : [])).catch(() => {})
     fetch('/api/categories')
       .then(r => r.json())
@@ -160,7 +166,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
 
       const parsed: EditableTx[] = data.transactions.map(
         (t: Omit<EditableTx, 'note' | 'trip_id' | 'contact_id' | 'selected' | 'expanded'>) => ({
-          ...t, note: '', trip_id: null, contact_id: null, split_enabled: false, split_participants: [], selected: true, expanded: false,
+          ...t, note: '', trip_id: null, contact_id: null, split_enabled: false, split_mode: 'equal' as SplitMode, split_participants: [], selected: true, expanded: false,
         })
       )
       setTransactions(parsed)
@@ -252,7 +258,10 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
           imported++
           // Create a split if requested
           if (t.split_enabled && t.split_participants.length > 0) {
-            const validParticipants = t.split_participants.filter(p => p.name.trim() && parseFloat(p.amount) > 0)
+            const amts = amountsFor(t.split_mode, t.split_participants, t.amount)
+            const validParticipants = t.split_participants
+              .map((p, i) => ({ name: p.name.trim(), email: p.email.trim(), amount: round2(amts[i] || 0) }))
+              .filter(p => p.name && p.amount > 0)
             if (validParticipants.length > 0) {
               await fetch('/api/splits', {
                 method: 'POST',
@@ -263,11 +272,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                   category: t.category,
                   date: t.date,
                   contact_id: t.contact_id ?? null,
-                  participants: validParticipants.map(p => ({
-                    name: p.name.trim(),
-                    email: p.email.trim() || '',
-                    amount: parseFloat(p.amount),
-                  })),
+                  participants: validParticipants,
                 }),
               }).catch(() => {})
             }
@@ -644,7 +649,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                                           updateTx(absIdx, {
                                             split_enabled: enabled,
                                             split_participants: enabled && tx.split_participants.length === 0
-                                              ? [{ name: '', email: '', amount: (tx.amount / 2).toFixed(2) }]
+                                              ? (currentUser ? [mkParticipant(currentUser.name, currentUser.email), mkParticipant()] : [mkParticipant(), mkParticipant()])
                                               : tx.split_participants,
                                           })
                                         }}
@@ -655,98 +660,13 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                                       </Label>
                                     </div>
                                     {tx.split_enabled && (
-                                      <div className="pl-5 space-y-2">
-                                        {tx.split_participants.map((p, pIdx) => (
-                                          <div key={pIdx} className="space-y-1 p-2 rounded-lg border bg-background">
-                                            <div className="flex items-center gap-1.5">
-                                              {/* name: pick from friends or type new */}
-                                              <div className="flex-1 min-w-0">
-                                                <Select
-                                                  value={friends.find(f => f.name === p.name)?.id ?? '__custom__'}
-                                                  onValueChange={v => {
-                                                    const friend = friends.find(f => f.id === v)
-                                                    const updated = [...tx.split_participants]
-                                                    updated[pIdx] = { ...updated[pIdx], name: friend?.name ?? '', email: friend?.email ?? updated[pIdx].email }
-                                                    updateTx(absIdx, { split_participants: updated })
-                                                  }}
-                                                >
-                                                  <SelectTrigger className="h-7 text-xs">
-                                                    <span className="text-xs truncate">
-                                                      {p.name || <span className="text-muted-foreground">Pick friend…</span>}
-                                                    </span>
-                                                  </SelectTrigger>
-                                                  <SelectContent>
-                                                    <SelectItem value="__custom__">Type a name…</SelectItem>
-                                                    {friends.map(f => (
-                                                      <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
-                                                    ))}
-                                                  </SelectContent>
-                                                </Select>
-                                              </div>
-                                              <button
-                                                onClick={() => {
-                                                  const updated = tx.split_participants.filter((_, i) => i !== pIdx)
-                                                  updateTx(absIdx, { split_participants: updated })
-                                                }}
-                                                className="text-muted-foreground hover:text-destructive shrink-0"
-                                              >
-                                                <X className="w-3.5 h-3.5" />
-                                              </button>
-                                            </div>
-                                            {/* custom name input if not from friends list */}
-                                            {!friends.some(f => f.name === p.name) && (
-                                              <Input
-                                                placeholder="Name *"
-                                                value={p.name}
-                                                onChange={e => {
-                                                  const updated = [...tx.split_participants]
-                                                  updated[pIdx] = { ...updated[pIdx], name: e.target.value }
-                                                  updateTx(absIdx, { split_participants: updated })
-                                                }}
-                                                className="h-7 text-xs"
-                                              />
-                                            )}
-                                            <div className="flex gap-1.5">
-                                              <Input
-                                                placeholder="Email (optional)"
-                                                type="email"
-                                                value={p.email}
-                                                onChange={e => {
-                                                  const updated = [...tx.split_participants]
-                                                  updated[pIdx] = { ...updated[pIdx], email: e.target.value }
-                                                  updateTx(absIdx, { split_participants: updated })
-                                                }}
-                                                className="h-7 text-xs flex-1"
-                                              />
-                                              <Input
-                                                type="number" min="0.01" step="0.01"
-                                                placeholder="Amount"
-                                                value={p.amount}
-                                                onChange={e => {
-                                                  const updated = [...tx.split_participants]
-                                                  updated[pIdx] = { ...updated[pIdx], amount: e.target.value }
-                                                  updateTx(absIdx, { split_participants: updated })
-                                                }}
-                                                className="h-7 text-xs w-24"
-                                              />
-                                            </div>
-                                          </div>
-                                        ))}
-                                        <button
-                                          onClick={() => {
-                                            const updated = [...tx.split_participants, { name: '', email: '', amount: '' }]
-                                            updateTx(absIdx, { split_participants: updated })
-                                          }}
-                                          className="flex items-center gap-1 text-xs text-primary hover:underline"
-                                        >
-                                          <Plus className="w-3 h-3" /> Add person
-                                        </button>
-                                        <p className="text-[10px] text-muted-foreground">
-                                          Total: {formatCurrency(tx.amount)} · Remaining: {formatCurrency(
-                                            tx.amount - tx.split_participants.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
-                                          )}
-                                        </p>
-                                      </div>
+                                      <SplitEditor
+                                        total={tx.amount}
+                                        value={{ mode: tx.split_mode, participants: tx.split_participants }}
+                                        onChange={v => updateTx(absIdx, { split_mode: v.mode, split_participants: v.participants })}
+                                        friends={friends as unknown as FullFriend[]}
+                                        currentUser={currentUser}
+                                      />
                                     )}
                                   </div>
                                 )}
