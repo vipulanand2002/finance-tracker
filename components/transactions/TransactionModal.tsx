@@ -659,7 +659,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
 
   return (
     <>
-      <Dialog open={open} onOpenChange={v => { if (!v) handleCloseAttempt() }}>
+      <Dialog open={open} onOpenChange={(v, details) => { if (!v && details?.reason !== 'outside-press') handleCloseAttempt() }}>
         <DialogContent className="sm:max-w-md max-h-[92vh] overflow-y-auto">
           {saving && (
             <div className="flex items-center gap-2.5 rounded-lg bg-primary/8 border border-primary/20 px-3.5 py-2.5 text-sm text-primary mb-1">
