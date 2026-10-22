@@ -1,93 +1,90 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import Link from 'next/link'
 import { toast } from 'sonner'
-import { Bell, BellOff, Plus, Trash2, Send, Loader2 } from 'lucide-react'
+import { Bell, BellOff, Plus, Trash2, Send, Smartphone } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Skeleton } from '@/components/ui/skeleton'
-import { createClient } from '@/lib/supabase/client'
-import { usePush } from '@/lib/use-push'
 import {
-  DEFAULT_NOTIFY_TIMES, MAX_NOTIFY_TIMES, defaultNotifySettings, formatTime12, isValidTime,
-  parseNotifySettings, type NotifySettings,
+  DEFAULT_NOTIFY_TIMES, MAX_NOTIFY_TIMES, formatTime12, isValidTime,
+  type AndroidReminderState,
 } from '@/lib/notify-settings'
 
-const deviceTz = () => {
-  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata' } catch { return 'Asia/Kolkata' }
-}
-
+// Reminders run on the phone itself (the Android app schedules them with the
+// device clock), so this page only controls them when opened inside that app.
 export default function NotificationSettingsCard() {
-  const push = usePush()
-  const [settings, setSettings] = useState<NotifySettings | null>(null)
-  const [loaded, setLoaded] = useState(false)
-  const [testing, setTesting] = useState(false)
+  const [checked, setChecked] = useState(false)
+  const [inApp, setInApp] = useState(false)
+  const [state, setState] = useState<AndroidReminderState | null>(null)
 
-  useEffect(() => {
-    createClient().auth.getUser().then(({ data: { user } }) => {
-      setSettings(parseNotifySettings(user?.user_metadata?.notify) ?? { ...defaultNotifySettings(deviceTz()), enabled: false })
-      setLoaded(true)
-    })
+  const read = useCallback(() => {
+    try {
+      const raw = window.AndroidApp?.getState()
+      if (raw) setState(JSON.parse(raw) as AndroidReminderState)
+    } catch { /* bridge unavailable */ }
   }, [])
 
-  async function save(next: NotifySettings) {
-    const prev = settings
-    setSettings(next)
-    const { error } = await createClient().auth.updateUser({ data: { notify: next } })
-    if (error) { setSettings(prev); toast.error('Could not save your notification settings') }
-    return !error
+  useEffect(() => {
+    const present = !!window.AndroidApp
+    // The app tells the page when permission / alarm access changes
+    window.addEventListener('androidstate', read)
+    Promise.resolve().then(() => { setInApp(present); setChecked(true); if (present) read() })
+    return () => window.removeEventListener('androidstate', read)
+  }, [read])
+
+  function persist(enabled: boolean, times: string[]) {
+    window.AndroidApp?.save(enabled, times.join(','))
+    read()
   }
 
-  async function toggleEnabled(on: boolean) {
-    if (!settings) return
-    if (on) {
-      if (!(await push.enable())) return
-      if (await save({ ...settings, enabled: true, tz: deviceTz(), times: settings.times.length ? settings.times : DEFAULT_NOTIFY_TIMES })) {
-        toast.success('Notifications turned on')
-      }
-    } else {
-      await push.disable()
-      if (await save({ ...settings, enabled: false })) toast.success('Notifications turned off')
+  function toggleEnabled(on: boolean) {
+    if (!state) return
+    if (on && !state.permission) {
+      // Android asks the user; the app notifies us when they answer
+      window.AndroidApp?.requestPermission()
+      persist(true, state.times.length ? state.times : DEFAULT_NOTIFY_TIMES)
+      return
     }
+    persist(on, state.times.length ? state.times : DEFAULT_NOTIFY_TIMES)
+    toast.success(on ? 'Reminders turned on' : 'Reminders turned off')
   }
 
   function setTime(i: number, value: string) {
-    if (!settings || !isValidTime(value)) return
-    const times = settings.times.map((t, idx) => (idx === i ? value : t))
-    save({ ...settings, times: Array.from(new Set(times)).sort() })
+    if (!state || !isValidTime(value)) return
+    const times = Array.from(new Set(state.times.map((t, idx) => (idx === i ? value : t)))).sort()
+    persist(state.enabled, times)
   }
 
   function addTime() {
-    if (!settings || settings.times.length >= MAX_NOTIFY_TIMES) return
-    // Pick the first free hour that isn't already scheduled
-    const free = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}:00`).find(t => !settings.times.includes(t)) ?? '12:00'
-    save({ ...settings, times: [...settings.times, free].sort() })
+    if (!state || state.times.length >= MAX_NOTIFY_TIMES) return
+    const free = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}:00`).find(t => !state.times.includes(t)) ?? '12:00'
+    persist(state.enabled, [...state.times, free].sort())
   }
 
-  function removeTime(i: number) {
-    if (!settings) return
-    save({ ...settings, times: settings.times.filter((_, idx) => idx !== i) })
+  if (!checked) return <Skeleton className="h-72" />
+
+  if (!inApp || !state) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><BellOff className="w-5 h-5 text-muted-foreground" /> Reminder notifications</CardTitle>
+          <CardDescription>Reminders to add your transactions are available in the Android app only.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
+          <p>They’re set on your phone and follow its clock, so they work even without a connection.</p>
+          <Link href="/settings/home-screen">
+            <Button variant="outline" size="sm"><Smartphone className="w-4 h-4 mr-2" /> Get the Android app</Button>
+          </Link>
+        </CardContent>
+      </Card>
+    )
   }
 
-  async function sendTest() {
-    setTesting(true)
-    try {
-      const res = await fetch('/api/push/test', { method: 'POST' })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(data.error ?? 'Failed')
-      toast.success('Test notification sent')
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to send test')
-    } finally {
-      setTesting(false)
-    }
-  }
-
-  if (!loaded || !settings) return <Skeleton className="h-72" />
-
-  const on = settings.enabled && push.subscribed
+  const on = state.enabled && state.permission
 
   return (
     <Card>
@@ -97,7 +94,7 @@ export default function NotificationSettingsCard() {
           Reminder notifications
         </CardTitle>
         <CardDescription>
-          A nudge to add your transactions at the times you choose, sent to every device where you’ve allowed notifications.
+          A nudge to add your transactions at the times you choose, using this phone’s clock.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -105,19 +102,12 @@ export default function NotificationSettingsCard() {
           <div className="min-w-0">
             <p className="text-sm font-medium">Enable notifications</p>
             <p className="text-xs text-muted-foreground">
-              {!push.supported
-                ? 'This browser can’t receive push notifications. On iPhone, add the app to your Home Screen first.'
-                : push.denied
-                  ? 'Blocked for this site — allow notifications in your browser or phone settings, then try again.'
-                  : on ? 'On for this device' : 'Off — you won’t get any reminders'}
+              {state.enabled && !state.permission
+                ? 'Notifications are blocked for this app — allow them in your phone’s app settings.'
+                : on ? 'On for this phone' : 'Off — you won’t get any reminders'}
             </p>
           </div>
-          <Switch
-            checked={on}
-            disabled={!push.supported || push.loading || (push.denied && !on)}
-            onCheckedChange={toggleEnabled}
-            aria-label="Enable notifications"
-          />
+          <Switch checked={on} onCheckedChange={toggleEnabled} aria-label="Enable notifications" />
         </div>
 
         <div className={on ? 'space-y-3' : 'space-y-3 opacity-50 pointer-events-none'} aria-disabled={!on}>
@@ -125,18 +115,18 @@ export default function NotificationSettingsCard() {
             <div>
               <p className="text-sm font-medium">When to remind you</p>
               <p className="text-xs text-muted-foreground">
-                {settings.times.length === 0
+                {state.times.length === 0
                   ? 'No reminders scheduled'
-                  : `${settings.times.length} reminder${settings.times.length !== 1 ? 's' : ''} a day · ${settings.tz.replace('_', ' ')}`}
+                  : `${state.times.length} reminder${state.times.length !== 1 ? 's' : ''} a day`}
               </p>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => save({ ...settings, times: DEFAULT_NOTIFY_TIMES })}>
+            <Button variant="ghost" size="sm" onClick={() => persist(state.enabled, DEFAULT_NOTIFY_TIMES)}>
               Reset to 10 AM · 2 PM · 10 PM
             </Button>
           </div>
 
           <ul className="space-y-2">
-            {settings.times.map((t, i) => (
+            {state.times.map((t, i) => (
               <li key={t} className="flex items-center gap-3 rounded-lg border px-3 py-2">
                 <Input
                   type="time"
@@ -146,7 +136,10 @@ export default function NotificationSettingsCard() {
                   aria-label={`Reminder ${i + 1} time`}
                 />
                 <span className="text-sm text-muted-foreground flex-1">{formatTime12(t)}</span>
-                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => removeTime(i)} aria-label="Remove this reminder">
+                <Button
+                  variant="ghost" size="icon" className="h-8 w-8" aria-label="Remove this reminder"
+                  onClick={() => persist(state.enabled, state.times.filter((_, idx) => idx !== i))}
+                >
                   <Trash2 className="w-4 h-4 text-muted-foreground" />
                 </Button>
               </li>
@@ -154,16 +147,25 @@ export default function NotificationSettingsCard() {
           </ul>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <Button variant="outline" size="sm" onClick={addTime} disabled={settings.times.length >= MAX_NOTIFY_TIMES}>
+            <Button variant="outline" size="sm" onClick={addTime} disabled={state.times.length >= MAX_NOTIFY_TIMES}>
               <Plus className="w-4 h-4 mr-1.5" /> Add a time
             </Button>
-            <Button variant="outline" size="sm" onClick={sendTest} disabled={testing}>
-              {testing ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Send className="w-4 h-4 mr-1.5" />} Send a test
+            <Button variant="outline" size="sm" onClick={() => { window.AndroidApp?.sendTest(); toast.success('Test notification sent') }}>
+              <Send className="w-4 h-4 mr-1.5" /> Send a test
             </Button>
-            {settings.times.length >= MAX_NOTIFY_TIMES && (
+            {state.times.length >= MAX_NOTIFY_TIMES && (
               <span className="text-xs text-muted-foreground">Up to {MAX_NOTIFY_TIMES} a day</span>
             )}
           </div>
+
+          {!state.exact && (
+            <p className="text-xs text-muted-foreground">
+              Reminders may arrive a few minutes late.{' '}
+              <button type="button" className="underline" onClick={() => window.AndroidApp?.openExactAlarmSettings()}>
+                Allow exact timing
+              </button>
+            </p>
+          )}
         </div>
       </CardContent>
     </Card>

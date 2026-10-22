@@ -42,8 +42,8 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     key: 'notifications',
     href: '/settings/notifications',
     title: 'Notifications',
-    description: 'Reminders on your phone or computer',
-    pageDescription: 'Turn on reminders and choose how many a day and at what times.',
+    description: 'Daily reminders to add transactions (Android app)',
+    pageDescription: 'Choose how many reminders you get a day and at what times — set on your phone’s clock.',
     icon: Bell,
   },
   {

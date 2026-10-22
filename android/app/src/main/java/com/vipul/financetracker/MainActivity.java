@@ -1,19 +1,27 @@
 package com.vipul.financetracker;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 /**
  * A thin shell around the live web app. Everything on screen comes from the Vercel
@@ -24,6 +32,7 @@ public class MainActivity extends Activity {
     static final String BASE_URL = "https://finance-tracker-mauve-sigma-65.vercel.app";
     static final String EXTRA_PATH = "path";
     private static final int FILE_CHOOSER = 1001;
+    private static final int REQ_NOTIFICATIONS = 1002;
 
     private WebView web;
     private ValueCallback<Uri[]> filePathCallback;
@@ -81,6 +90,10 @@ public class MainActivity extends Activity {
             }
         });
 
+        // Lets the Settings page control the on-device reminders
+        web.addJavascriptInterface(new Bridge(), "AndroidApp");
+        Reminders.schedule(this); // keep alarms in step after updates / clock changes
+
         if (savedInstanceState != null) {
             web.restoreState(savedInstanceState);
         } else {
@@ -120,6 +133,74 @@ public class MainActivity extends Activity {
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
         web.saveState(outState);
+    }
+
+    /** window.AndroidApp — only exists inside this app, which is how the web page knows it's on Android. */
+    private class Bridge {
+        @JavascriptInterface
+        public String getState() {
+            try {
+                JSONObject o = new JSONObject();
+                o.put("enabled", Reminders.enabled(MainActivity.this));
+                JSONArray times = new JSONArray();
+                for (String t : Reminders.timesCsv(MainActivity.this).split(",")) if (!t.trim().isEmpty()) times.put(t.trim());
+                o.put("times", times);
+                o.put("permission", Reminders.canPost(MainActivity.this));
+                o.put("exact", Reminders.canScheduleExact(MainActivity.this));
+                return o.toString();
+            } catch (JSONException e) {
+                return "{}";
+            }
+        }
+
+        @JavascriptInterface
+        public void save(boolean enabled, String timesCsv) {
+            Reminders.save(MainActivity.this, enabled, timesCsv);
+        }
+
+        @JavascriptInterface
+        public void requestPermission() {
+            runOnUiThread(() -> {
+                if (Build.VERSION.SDK_INT >= 33 && !Reminders.canPost(MainActivity.this)) {
+                    requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIFICATIONS);
+                } else {
+                    notifyWeb();
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void sendTest() {
+            Reminders.notifyNow(MainActivity.this);
+        }
+
+        @JavascriptInterface
+        public void openExactAlarmSettings() {
+            if (Build.VERSION.SDK_INT >= 31) {
+                runOnUiThread(() -> {
+                    try {
+                        startActivity(new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:" + getPackageName())));
+                    } catch (ActivityNotFoundException ignored) { }
+                });
+            }
+        }
+    }
+
+    /** Tell the page to re-read the reminder state (permission may just have changed). */
+    private void notifyWeb() {
+        web.evaluateJavascript("window.dispatchEvent(new Event('androidstate'))", null);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQ_NOTIFICATIONS) notifyWeb();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        notifyWeb(); // e.g. back from the system "alarms & reminders" screen
     }
 
     @Override
