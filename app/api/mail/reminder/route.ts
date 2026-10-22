@@ -320,12 +320,19 @@ export async function POST(request: Request) {
     }
   }
 
+  // A single-person reminder covers only the balance between that person and the
+  // sender — not what they owe other people on splits the sender entered for them.
+  const pairOnly = type === 'contact'
+  const senderToken = tokenOf(user.id)
+  const isSender = (p: Participant) =>
+    !!user.email && p.participant_email?.toLowerCase() === user.email.toLowerCase()
+
   for (const email of recipientEmails) {
     const name = nameByEmail.get(email) ?? email.split('@')[0]
 
     // Splits THIS recipient owes on: they're an unpaid participant and not the payer.
     const recipientSplits = splits
-      .filter(s => creditorTokenOf(s) !== email)
+      .filter(s => creditorTokenOf(s) !== email && (!pairOnly || creditorTokenOf(s) === senderToken))
       .map(s => {
         const mine = s.split_participants.find(p => !p.is_paid && canonEmail(p.participant_name, p.participant_email) === email)
         return mine ? { split: s, amountOwed: mine.amount_owed } : null
@@ -366,13 +373,14 @@ export async function POST(request: Request) {
           if (pe === email) continue
           const tk = canonEmail(p.participant_name, pe) || (p.participant_name?.trim() ? `name:${p.participant_name.trim().toLowerCase()}` : '')
           if (!tk || tk === email) continue
+          if (pairOnly && !isSender(p)) continue
           if (tk.startsWith('name:') && p.participant_name) tokenName.set(tk, p.participant_name.trim())
           oweFrom.set(tk, (oweFrom.get(tk) ?? 0) + p.amount_owed)
         }
       } else {
         // Someone else paid — if the recipient has an unpaid share, they owe them.
         const rp = s.split_participants.find(p => !p.is_paid && p.participant_email?.toLowerCase() === email)
-        if (rp) oweTo.set(cToken, (oweTo.get(cToken) ?? 0) + rp.amount_owed)
+        if (rp && (!pairOnly || cToken === senderToken)) oweTo.set(cToken, (oweTo.get(cToken) ?? 0) + rp.amount_owed)
       }
     }
     const oweByPerson = Array.from(new Set([...oweTo.keys(), ...oweFrom.keys()]))
@@ -415,7 +423,7 @@ export async function POST(request: Request) {
     // (e.g. Kailash paid a ₹3,000 bill; Simran & Isha owe their shares.)
     // Others' unpaid share on a bill the recipient paid — any participant who
     // isn't the recipient and hasn't paid, including no-email ones (e.g. Simran).
-    const owesRecipient = (p: Participant) => !p.is_paid && p.participant_email?.toLowerCase() !== email
+    const owesRecipient = (p: Participant) => !p.is_paid && p.participant_email?.toLowerCase() !== email && (!pairOnly || isSender(p))
     const owedToYouSplits = splits
       .filter(s => creditorTokenOf(s) === email
         && s.split_participants.some(owesRecipient))
