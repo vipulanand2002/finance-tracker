@@ -8,10 +8,11 @@ import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { LogOut, TrendingUp } from 'lucide-react'
+import { LogOut, ShieldCheck, TrendingUp } from 'lucide-react'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { orderNavItems } from '@/lib/nav-items'
 import { useNavOrder, syncNavOrderFromAccount } from '@/lib/use-nav-order'
+import { isAdminEmail } from '@/lib/access'
 
 interface SidebarProps {
   email: string
@@ -82,6 +83,23 @@ export default function Sidebar({ email, onClose }: SidebarProps) {
             {label}
           </Link>
         ))}
+
+        {/* Admin only: approve new users, bug notebook */}
+        {isAdminEmail(email) && (
+          <Link
+            href="/admin"
+            onClick={onClose}
+            className={cn(
+              'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+              pathname.startsWith('/admin')
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+            )}
+          >
+            <ShieldCheck className="w-4 h-4 shrink-0" />
+            Admin
+          </Link>
+        )}
       </nav>
 
       <div className="p-3 border-t space-y-1">

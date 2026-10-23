@@ -58,7 +58,7 @@ export default function SignupPage() {
           </div>
         </div>
         <CardTitle className="text-2xl">Create account</CardTitle>
-        <CardDescription>Start tracking your finances today — it&apos;s free</CardDescription>
+        <CardDescription>New accounts are approved by the admin before they can be used</CardDescription>
       </CardHeader>
 
       <CardContent className="space-y-4">

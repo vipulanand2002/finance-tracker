@@ -4,13 +4,14 @@ import { useState, useEffect, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { Bell, Check, X, UserCheck, UserX, Loader2, IndianRupee, Download } from 'lucide-react'
+import { Bell, Check, X, UserCheck, UserX, Loader2, IndianRupee, Download, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { toast } from 'sonner'
 import { formatDistanceToNow } from 'date-fns'
 import { formatCurrency } from '@/lib/utils'
+import { isAdminEmail } from '@/lib/access'
 const TransactionModal = dynamic(() => import('@/components/transactions/TransactionModal'), { ssr: false })
 
 interface TaggedPayment {
@@ -69,10 +70,12 @@ export default function NotificationBell() {
   // Update notices the app has shown (kept in the app, newest first)
   const [updates, setUpdates] = useState<AppUpdateItem[]>([])
   const router = useRouter()
+  // Admin only: people waiting to be let in
+  const [accessRequests, setAccessRequests] = useState<{ id: string; email: string; name: string; provider: string }[]>([])
   // Don't list the same build twice (once from history, once from the live check)
   const showAppUpdate = !!appUpdate && !updates.some(u => u.kind === 'apk' && u.number >= appUpdate.number)
 
-  const unreadCount = requests.length + notifs.filter(n => !n.read).length + payments.length + updates.length + (showAppUpdate ? 1 : 0)
+  const unreadCount = requests.length + notifs.filter(n => !n.read).length + payments.length + updates.length + accessRequests.length + (showAppUpdate ? 1 : 0)
 
   const readUpdates = useCallback(() => {
     try {
@@ -117,12 +120,31 @@ export default function NotificationBell() {
     setRequests(reqs ?? [])
     setNotifs(ns ?? [])
 
+    if (isAdminEmail(user.email)) {
+      try {
+        const r = await fetch('/api/admin/requests', { cache: 'no-store' })
+        if (r.ok) setAccessRequests((await r.json()).pending ?? [])
+      } catch { /* ignore */ }
+    }
+
     // Cross-user "you paid / you owe" records addressed to me
     try {
       const pays = await fetch('/api/tagged-payments').then(r => r.ok ? r.json() : [])
       setPayments(Array.isArray(pays) ? pays.filter((p: TaggedPayment) => p.status === 'pending') : [])
     } catch { /* ignore */ }
   }, [])
+
+  async function decideAccess(id: string, action: 'approve' | 'reject') {
+    setProcessing(id)
+    try {
+      const res = await fetch('/api/admin/requests', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action }),
+      })
+      if (!res.ok) throw new Error()
+      setAccessRequests(prev => prev.filter(x => x.id !== id))
+      toast.success(action === 'approve' ? 'Approved — they can sign in now' : 'Request declined')
+    } catch { toast.error('Could not update the request') } finally { setProcessing(null) }
+  }
 
   async function dismissPayment(p: TaggedPayment) {
     setProcessing(p.id)
@@ -189,7 +211,7 @@ export default function NotificationBell() {
     setNotifs(prev => prev.map(n => ({ ...n, read: true })))
   }
 
-  const isEmpty = requests.length === 0 && notifs.length === 0 && payments.length === 0 && updates.length === 0 && !showAppUpdate
+  const isEmpty = requests.length === 0 && notifs.length === 0 && payments.length === 0 && updates.length === 0 && accessRequests.length === 0 && !showAppUpdate
 
   return (
     <>
@@ -222,6 +244,35 @@ export default function NotificationBell() {
           ) : (
             <div className="divide-y">
               {/* ── New Android build available ── */}
+              {/* ── Access requests (admin only) ── */}
+              {accessRequests.length > 0 && (
+                <div>
+                  <p className="px-4 py-2 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide bg-muted/40">
+                    Access requests
+                  </p>
+                  {accessRequests.map(a => (
+                    <div key={a.id} className="px-4 py-3 flex items-start gap-3">
+                      <div className="mt-0.5 w-8 h-8 rounded-full flex items-center justify-center shrink-0 bg-primary/10 text-primary">
+                        <ShieldCheck className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium leading-tight">{a.name || a.email}</p>
+                        {a.name && <p className="text-xs text-muted-foreground truncate">{a.email}</p>}
+                        <p className="text-xs text-muted-foreground mt-0.5">wants to use Finance Tracker · {a.provider === 'google' ? 'Google' : 'Email'}</p>
+                        <div className="flex gap-2 mt-2">
+                          <Button size="sm" variant="outline" className="h-7 text-xs" disabled={!!processing} onClick={() => decideAccess(a.id, 'reject')}>
+                            {processing === a.id ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Decline'}
+                          </Button>
+                          <Button size="sm" className="h-7 text-xs" disabled={!!processing} onClick={() => decideAccess(a.id, 'approve')}>
+                            {processing === a.id ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Approve'}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* ── Update notices from the app (new build / web update) ── */}
               {updates.length > 0 && (
                 <div>

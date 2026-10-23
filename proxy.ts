@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { isApproved } from '@/lib/access'
 
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
@@ -35,7 +36,24 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  if (user && isAuthPage) {
+  // Signed in but not approved yet: only the "waiting for approval" page and the
+  // access-request endpoints are reachable. Everything else (pages and API) is closed
+  // so an unapproved account can't create data.
+  if (user && !isApproved(user)) {
+    const allowed = pathname === '/pending' || pathname.startsWith('/api/access/') || pathname.startsWith('/api/cron/') || pathname === '/api/version'
+    if (!allowed) {
+      if (pathname.startsWith('/api/')) {
+        return NextResponse.json({ error: 'pending_approval' }, { status: 403 })
+      }
+      const url = request.nextUrl.clone()
+      url.pathname = '/pending'
+      url.search = ''
+      return NextResponse.redirect(url)
+    }
+    return supabaseResponse
+  }
+
+  if (user && (isAuthPage || pathname === '/pending')) {
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
     return NextResponse.redirect(url)
