@@ -168,7 +168,7 @@ export default function NotificationSettingsCard() {
             </p>
           )}
         </div>
-        {state.build ? <p className="text-xs text-muted-foreground">App build {state.build}</p> : null}
+        {state.version ? <p className="text-xs text-muted-foreground">Finance App v{state.version}</p> : null}
       </CardContent>
     </Card>
   )

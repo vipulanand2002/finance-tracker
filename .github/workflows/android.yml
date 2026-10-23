@@ -1,9 +1,10 @@
 name: Android app
 
 # Builds the Android app (a native shell + home-screen widget around the live Vercel
-# site) on every push to master that touches android/, and publishes the APK to the
-# "android-latest" release. The screens themselves come from Vercel, so web changes
-# need no new APK — only changes under android/ do.
+# site) on every push to master that touches android/. Each build becomes its own
+# release, "Finance App v1.0.<build number>", and installed apps notify their users
+# that a new version is available. The screens themselves come from Vercel, so web
+# changes need no new APK — only changes under android/ do.
 on:
   push:
     branches: [master]
@@ -18,6 +19,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      VERSION: 1.0.${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
 
@@ -46,18 +49,20 @@ jobs:
         run: gradle assembleDebug --no-daemon
 
       - name: Name the APK
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk FinanceTracker.apk
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk "Finance-App-v${VERSION}.apk"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: FinanceTracker-apk
-          path: FinanceTracker.apk
+          name: Finance-App-v${{ env.VERSION }}
+          path: Finance-App-v${{ env.VERSION }}.apk
 
-      - name: Publish to the android-latest release
+      - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: android-latest
-          name: Android app build ${{ github.run_number }}
-          body: Install FinanceTracker.apk on your Android phone. It always shows the latest deployed web app.
-          files: FinanceTracker.apk
-          overwrite_files: true
+          tag_name: v${{ env.VERSION }}
+          name: Finance App v${{ env.VERSION }}
+          body: |
+            Download **Finance-App-v${{ env.VERSION }}.apk** and install it over your current app (allow "install unknown apps" if asked).
+            The app always shows the latest deployed web app; a new APK is only needed when the app itself or its widget changes.
+          files: Finance-App-v${{ env.VERSION }}.apk
+          make_latest: true

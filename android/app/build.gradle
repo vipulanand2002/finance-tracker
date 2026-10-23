@@ -16,7 +16,8 @@ android {
         targetSdk 34
         // CI bumps versionCode from the run number so each build installs over the last
         versionCode Integer.parseInt(System.getenv('GITHUB_RUN_NUMBER') ?: '1')
-        versionName '1.0'
+        // Shown as "v1.0.<build>" and used in the APK / release name
+        versionName '1.0.' + (System.getenv('GITHUB_RUN_NUMBER') ?: '0')
     }
 
     if (ciKeystore) {

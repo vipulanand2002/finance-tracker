@@ -155,7 +155,8 @@ public class MainActivity extends Activity {
                 o.put("permission", Reminders.canPost(MainActivity.this));
                 o.put("exact", Reminders.canScheduleExact(MainActivity.this));
                 android.content.pm.PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
-                o.put("build", Build.VERSION.SDK_INT >= 28 ? info.getLongVersionCode() : info.versionCode);
+                o.put("version", info.versionName);
+                o.put("build",Build.VERSION.SDK_INT >= 28 ? info.getLongVersionCode() : info.versionCode);
                 return o.toString();
             } catch (JSONException | android.content.pm.PackageManager.NameNotFoundException e) {
                 return "{}";

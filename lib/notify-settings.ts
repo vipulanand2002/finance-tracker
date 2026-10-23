@@ -28,6 +28,8 @@ export interface AndroidReminderState {
   exact: boolean
   /** Installed app build number */
   build?: number
+  /** Installed app version name, e.g. 1.0.5 */
+  version?: string
 }
 
 declare global {

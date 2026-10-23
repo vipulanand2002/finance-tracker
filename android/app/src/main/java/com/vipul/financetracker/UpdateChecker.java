@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
 /**
  * Tells the user when something new has shipped, with a notification that stays in the
  * panel until they dismiss it:
- *  - a new Android build (GitHub release "Android app build N") → tap to download it
+ *  - a new Android build (GitHub release "Finance App v1.0.N") → tap to download it
  *  - a new web deployment on Vercel → the app already shows it, the notification says so
  * It checks when the app opens and roughly every hour in the background.
  */
@@ -34,7 +34,7 @@ final class UpdateChecker {
     private static final String KEY_WEB = "web_deployment";
     private static final String KEY_APK = "apk_notified";
     private static final String CHANNEL = "updates";
-    private static final String RELEASE_API = "https://api.github.com/repos/vipulanand2002/finance-tracker/releases/tags/android-latest";
+    private static final String RELEASE_API = "https://api.github.com/repos/vipulanand2002/finance-tracker/releases/latest";
 
     private UpdateChecker() { }
 
@@ -97,7 +97,8 @@ final class UpdateChecker {
 
     private static void checkApk(Context c) throws Exception {
         JSONObject rel = new JSONObject(get(RELEASE_API, true));
-        Matcher m = Pattern.compile("build\\s+(\\d+)", Pattern.CASE_INSENSITIVE).matcher(rel.optString("name", ""));
+        // Release tags look like v1.0.5; the last number is the build number
+        Matcher m = Pattern.compile("v\\d+\\.\\d+\\.(\\d+)").matcher(rel.optString("tag_name", ""));
         if (!m.find()) return;
         int latest = Integer.parseInt(m.group(1));
 
@@ -113,8 +114,9 @@ final class UpdateChecker {
         p.edit().putInt(KEY_APK, latest).apply();
         Intent view = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
         view.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        String name = rel.optString("name", "").isEmpty() ? "Finance App" : rel.optString("name", "");
         post(c, 2000 + (latest % 1000), "New app version available",
-                "Build " + latest + " is ready. Tap to download and install it over the current app.",
+                name + " is ready. Tap to download it, then open the file to update the app.",
                 PendingIntent.getActivity(c, 2000 + (latest % 1000), view, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
     }
 
