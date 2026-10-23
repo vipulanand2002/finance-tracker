@@ -10,6 +10,15 @@ async function getUser() {
   return { supabase, user }
 }
 
+// Marks splits settled and stamps when it happened (expense_splits.settled_at, migration
+// 049 — used to clear old settled splits). Still works if that migration isn't applied yet.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function markSettled(supabase: Awaited<ReturnType<typeof createClient>>, scope: (q: any) => PromiseLike<{ error: { message: string } | null }>) {
+  let res = await scope(supabase.from('expense_splits').update({ is_settled: true, settled_at: new Date().toISOString() }))
+  if (res.error?.message?.includes('settled_at')) res = await scope(supabase.from('expense_splits').update({ is_settled: true }))
+  return res.error
+}
+
 // GET /api/splits             — all splits for the user
 // GET /api/splits?trip_id=X   — splits linked to a specific trip
 // GET /api/splits?contact_id=X — splits linked to a specific contact
@@ -229,11 +238,7 @@ export async function PATCH(request: Request) {
   }
 
   if (type === 'settle') {
-    const { error } = await supabase
-      .from('expense_splits')
-      .update({ is_settled: true })
-      .eq('id', id!)
-      .eq('created_by', user.id)
+    const error = await markSettled(supabase, q => q.eq('id', id!).eq('created_by', user.id))
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json({ success: true })
@@ -261,8 +266,7 @@ export async function PATCH(request: Request) {
       .select('id')
     if (payErr) return NextResponse.json({ error: payErr.message }, { status: 500 })
 
-    const { error: setErr } = await supabase
-      .from('expense_splits').update({ is_settled: true }).in('id', mineIds).eq('created_by', user.id)
+    const setErr = await markSettled(supabase, q => q.in('id', mineIds).eq('created_by', user.id))
     if (setErr) return NextResponse.json({ error: setErr.message }, { status: 500 })
 
     return NextResponse.json({ settled: mineIds.length, sharesMarkedPaid: marked?.length ?? 0 })
@@ -336,7 +340,7 @@ export async function PATCH(request: Request) {
         .eq('is_settled', false) as unknown as { data: { id: string; split_participants: { is_paid: boolean }[] }[] | null }
       const ready = fullyPaidSplitIds(fresh ?? [])
       if (ready.length > 0) {
-        await supabase.from('expense_splits').update({ is_settled: true }).in('id', ready).eq('created_by', user.id)
+        await markSettled(supabase, q => q.in('id', ready).eq('created_by', user.id))
         settledSplits = ready.length
       }
     }
