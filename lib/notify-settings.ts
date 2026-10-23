@@ -17,6 +17,9 @@ export interface AndroidAppBridge {
   requestPermission(): void
   sendTest(): void
   openExactAlarmSettings(): void
+  /** Update notices kept by the app (JSON array) — absent on older builds */
+  getUpdates?(): string
+  clearUpdates?(): void
 }
 
 export interface AndroidReminderState {

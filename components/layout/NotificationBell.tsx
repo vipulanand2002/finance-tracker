@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import dynamic from 'next/dynamic'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Bell, Check, X, UserCheck, UserX, Loader2, IndianRupee, Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -32,6 +33,17 @@ interface FriendRequest {
   created_at: string
 }
 
+// An update notice kept by the Android app (new build / new web version)
+interface AppUpdateItem {
+  kind: 'web' | 'apk'
+  number: number
+  title: string
+  body: string
+  path: string
+  url: string
+  time: number
+}
+
 interface AppNotification {
   id: string
   type: string
@@ -53,9 +65,21 @@ export default function NotificationBell() {
   const [processing, setProcessing] = useState<string | null>(null)
   const [userId, setUserId] = useState<string>('')
   // A newer Android build than the one installed (only when running inside the app)
-  const [appUpdate, setAppUpdate] = useState<{ name: string; url: string } | null>(null)
+  const [appUpdate, setAppUpdate] = useState<{ name: string; url: string; number: number } | null>(null)
+  // Update notices the app has shown (kept in the app, newest first)
+  const [updates, setUpdates] = useState<AppUpdateItem[]>([])
+  const router = useRouter()
+  // Don't list the same build twice (once from history, once from the live check)
+  const showAppUpdate = !!appUpdate && !updates.some(u => u.kind === 'apk' && u.number >= appUpdate.number)
 
-  const unreadCount = requests.length + notifs.filter(n => !n.read).length + payments.length + (appUpdate ? 1 : 0)
+  const unreadCount = requests.length + notifs.filter(n => !n.read).length + payments.length + updates.length + (showAppUpdate ? 1 : 0)
+
+  const readUpdates = useCallback(() => {
+    try {
+      const raw = window.AndroidApp?.getUpdates?.()
+      if (raw) setUpdates(JSON.parse(raw) as AppUpdateItem[])
+    } catch { /* older app build or bad data */ }
+  }, [])
 
   const checkAppUpdate = useCallback(async () => {
     try {
@@ -65,7 +89,7 @@ export default function NotificationBell() {
       const res = await fetch('https://api.github.com/repos/vipulanand2002/finance-tracker/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })
       const rel = res.ok ? await res.json() : null
       const m = /vd+.d+.(d+)/.exec(rel?.tag_name ?? '')
-      setAppUpdate(m && Number(m[1]) > installed ? { name: rel.name ?? rel.tag_name, url: rel.html_url } : null)
+      setAppUpdate(m && Number(m[1]) > installed ? { name: rel.name ?? rel.tag_name, url: rel.html_url, number: Number(m[1]) } : null)
     } catch { /* offline or rate-limited — try again next time */ }
   }, [])
 
@@ -113,6 +137,7 @@ export default function NotificationBell() {
   useEffect(() => {
     loadData()
     checkAppUpdate()
+    readUpdates()
     const supabase = createClient()
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return
@@ -137,7 +162,7 @@ export default function NotificationBell() {
         .subscribe()
       return () => { supabase.removeChannel(channel) }
     })
-  }, [loadData, checkAppUpdate])
+  }, [loadData, checkAppUpdate, readUpdates])
 
   async function handleAction(requestId: string, action: 'accept' | 'reject') {
     setProcessing(requestId)
@@ -164,11 +189,11 @@ export default function NotificationBell() {
     setNotifs(prev => prev.map(n => ({ ...n, read: true })))
   }
 
-  const isEmpty = requests.length === 0 && notifs.length === 0 && payments.length === 0 && !appUpdate
+  const isEmpty = requests.length === 0 && notifs.length === 0 && payments.length === 0 && updates.length === 0 && !showAppUpdate
 
   return (
     <>
-    <Sheet open={open} onOpenChange={o => { setOpen(o); if (o) { loadData(); checkAppUpdate() } }}>
+    <Sheet open={open} onOpenChange={o => { setOpen(o); if (o) { loadData(); checkAppUpdate(); readUpdates() } }}>
       <SheetTrigger className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" aria-label="Notifications">
         <Bell className="w-4 h-4" />
         {unreadCount > 0 && (
@@ -197,7 +222,44 @@ export default function NotificationBell() {
           ) : (
             <div className="divide-y">
               {/* ── New Android build available ── */}
-              {appUpdate && (
+              {/* ── Update notices from the app (new build / web update) ── */}
+              {updates.length > 0 && (
+                <div>
+                  <div className="px-4 py-2 flex items-center justify-between bg-muted/40">
+                    <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">App updates</p>
+                    <button
+                      type="button"
+                      className="text-[11px] text-muted-foreground hover:text-foreground underline"
+                      onClick={() => { window.AndroidApp?.clearUpdates?.(); setUpdates([]) }}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  {updates.map(u => (
+                    <button
+                      key={u.time}
+                      type="button"
+                      className="w-full text-left px-4 py-3 flex items-start gap-3 hover:bg-muted/40 transition-colors"
+                      onClick={() => {
+                        if (u.path) { router.push(u.path); setOpen(false) }
+                        else if (u.url) window.location.href = u.url
+                      }}
+                    >
+                      <div className="mt-0.5 w-8 h-8 rounded-full flex items-center justify-center shrink-0 bg-primary/10 text-primary">
+                        <Download className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium leading-snug">{u.title}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{u.body}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{formatDistanceToNow(new Date(u.time), { addSuffix: true })}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* ── New Android build available (live check) ── */}
+              {showAppUpdate && appUpdate && (
                 <div>
                   <p className="px-4 py-2 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide bg-muted/40">
                     App update

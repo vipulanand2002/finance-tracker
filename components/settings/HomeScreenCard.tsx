@@ -14,6 +14,8 @@ interface InstallPromptEvent extends Event {
 export default function HomeScreenCard() {
   const [installEvent, setInstallEvent] = useState<InstallPromptEvent | null>(null)
   const [installed, setInstalled] = useState(false)
+  // Inside the Android app: the installed version and the newest published one
+  const [appVersion, setAppVersion] = useState<{ installed: string; build: number; latest: string | null; latestBuild: number; url: string } | null>(null)
 
   useEffect(() => {
     Promise.resolve().then(() => setInstalled(window.matchMedia('(display-mode: standalone)').matches))
@@ -25,6 +27,26 @@ export default function HomeScreenCard() {
       window.removeEventListener('beforeinstallprompt', onPrompt)
       window.removeEventListener('appinstalled', onInstalled)
     }
+  }, [])
+
+  useEffect(() => {
+    const raw = window.AndroidApp?.getState()
+    if (!raw) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const st = JSON.parse(raw) as { version?: string; build?: number }
+        const res = await fetch('https://api.github.com/repos/vipulanand2002/finance-tracker/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })
+        const rel = res.ok ? await res.json() : null
+        const m = /v(d+.d+.(d+))/.exec(rel?.tag_name ?? '')
+        if (!cancelled) setAppVersion({
+          installed: st.version ?? '?', build: st.build ?? 0,
+          latest: m ? m[1] : null, latestBuild: m ? Number(m[2]) : 0,
+          url: rel?.html_url ?? 'https://github.com/vipulanand2002/finance-tracker/releases/latest',
+        })
+      } catch { /* offline — leave the status out */ }
+    })()
+    return () => { cancelled = true }
   }, [])
 
   async function install() {
@@ -47,6 +69,21 @@ export default function HomeScreenCard() {
             <li>Press and hold an empty spot on your home screen → <strong className="text-foreground">Widgets</strong> → <strong className="text-foreground">Finance Tracker</strong>.</li>
             <li>Drop the Quick add widget where you like and sign in once in the app.</li>
           </ol>
+          {appVersion && (
+            <div className={'rounded-lg border px-3 py-2 text-sm ' + (appVersion.latestBuild > appVersion.build ? 'border-primary/40 bg-primary/5' : '')}>
+              <p className="font-medium">Installed: Finance App v{appVersion.installed}</p>
+              <p className="text-xs text-muted-foreground">
+                {appVersion.latestBuild > appVersion.build
+                  ? `Update available: v${appVersion.latest}. Download it, then open the file to update.`
+                  : 'You’re on the latest version.'}
+              </p>
+              {appVersion.latestBuild > appVersion.build && (
+                <Button size="sm" className="mt-2" onClick={() => { window.location.href = appVersion.url }}>
+                  <Download className="w-4 h-4 mr-2" /> Open download page
+                </Button>
+              )}
+            </div>
+          )}
           <a href="https://github.com/vipulanand2002/finance-tracker/releases/latest" target="_blank" rel="noreferrer">
             <Button variant="outline" size="sm"><Download className="w-4 h-4 mr-2" /> Get the Android app</Button>
           </a>

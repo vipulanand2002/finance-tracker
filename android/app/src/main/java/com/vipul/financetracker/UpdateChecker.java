@@ -39,6 +39,36 @@ final class UpdateChecker {
 
     private UpdateChecker() { }
 
+    private static final String KEY_HISTORY = "history";
+
+    /** Every update notice is also kept here so the app's bell panel can list it. */
+    static void addHistory(Context c, String kind, int number, String title, String body, String path, String url) {
+        try {
+            SharedPreferences p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            JSONArray old = new JSONArray(p.getString(KEY_HISTORY, "[]"));
+            JSONObject o = new JSONObject();
+            o.put("kind", kind);
+            o.put("number", number);
+            o.put("title", title);
+            o.put("body", body);
+            o.put("path", path == null ? "" : path);
+            o.put("url", url == null ? "" : url);
+            o.put("time", System.currentTimeMillis());
+            JSONArray next = new JSONArray();
+            next.put(o);
+            for (int i = 0; i < old.length() && next.length() < 20; i++) next.put(old.get(i));
+            p.edit().putString(KEY_HISTORY, next.toString()).apply();
+        } catch (Exception ignored) { }
+    }
+
+    static String history(Context c) {
+        return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_HISTORY, "[]");
+    }
+
+    static void clearHistory(Context c) {
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY_HISTORY).apply();
+    }
+
     static PendingIntent checkIntent(Context c) {
         Intent i = new Intent(c, UpdateReceiver.class);
         i.setAction("com.vipul.financetracker.CHECK_UPDATES");
@@ -92,9 +122,10 @@ final class UpdateChecker {
 
         String message = v.optString("message", "");
         // No download involved: the app itself already shows the new web version
-        post(c, 3000 + Math.abs(id.hashCode() % 1000), "Web update applied — no download needed",
-                (message.isEmpty() ? "A new version of the site is live." : message) + " Tap to open the app.",
-                openApp(c));
+        String title = "Web update applied — no download needed";
+        String body = (message.isEmpty() ? "A new version of the site is live." : message) + " Tap to see the app version.";
+        addHistory(c, "web", 0, title, body, "/settings/home-screen", null);
+        post(c, 3000 + Math.abs(id.hashCode() % 1000), title, body, openApp(c, "/settings/home-screen"));
     }
 
     private static void checkApk(Context c) throws Exception {
@@ -118,9 +149,10 @@ final class UpdateChecker {
         int id = 2000 + (latest % 1000);
         String name = rel.optString("name", "").isEmpty() ? "Finance App" : rel.optString("name", "");
         // Tapping opens the release page (notes + Download button); the action downloads the APK directly
-        post(c, id, "New app version available",
-                name + " is ready. Tap to open the download page, then open the file to update the app.",
-                browse(c, id, page), "Download APK", browse(c, id + 1000, apk));
+        String title = "New app version available";
+        String body = name + " is ready. Tap to open the download page, then open the file to update the app.";
+        addHistory(c, "apk", latest, title, body, null, page);
+        post(c, id, title, body, browse(c, id, page), "Download APK", browse(c, id + 1000, apk));
     }
 
     private static PendingIntent browse(Context c, int requestCode, String url) {
@@ -129,10 +161,10 @@ final class UpdateChecker {
         return PendingIntent.getActivity(c, requestCode, view, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
-    private static PendingIntent openApp(Context c) {
+    private static PendingIntent openApp(Context c, String path) {
         Intent open = new Intent(c, MainActivity.class);
         open.setAction("com.vipul.financetracker.OPEN_FROM_UPDATE");
-        open.putExtra(MainActivity.EXTRA_PATH, "/dashboard");
+        open.putExtra(MainActivity.EXTRA_PATH, path);
         open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         return PendingIntent.getActivity(c, 7002, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }

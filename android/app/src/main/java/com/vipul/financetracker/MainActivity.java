@@ -180,6 +180,16 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public String getUpdates() {
+            return UpdateChecker.history(MainActivity.this);
+        }
+
+        @JavascriptInterface
+        public void clearUpdates() {
+            UpdateChecker.clearHistory(MainActivity.this);
+        }
+
+        @JavascriptInterface
         public void sendTest() {
             Reminders.notifyNow(MainActivity.this);
         }
