@@ -76,6 +76,7 @@ export default function NotificationSettingsCard() {
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
           <p>They’re set on your phone and follow its clock, so they work even without a connection.</p>
+          <p className="text-xs">Already installed? Open the app from your home screen (not Chrome) and come back here. If this message still shows inside the app, install the latest build over it.</p>
           <Link href="/settings/home-screen">
             <Button variant="outline" size="sm"><Smartphone className="w-4 h-4 mr-2" /> Get the Android app</Button>
           </Link>
@@ -167,6 +168,7 @@ export default function NotificationSettingsCard() {
             </p>
           )}
         </div>
+        {state.build ? <p className="text-xs text-muted-foreground">App build {state.build}</p> : null}
       </CardContent>
     </Card>
   )

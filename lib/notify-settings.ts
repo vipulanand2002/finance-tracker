@@ -26,6 +26,8 @@ export interface AndroidReminderState {
   permission: boolean
   /** Alarms can fire at the exact minute (otherwise they may be a few minutes late) */
   exact: boolean
+  /** Installed app build number */
+  build?: number
 }
 
 declare global {

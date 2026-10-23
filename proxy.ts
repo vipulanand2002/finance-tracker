@@ -27,7 +27,7 @@ export async function proxy(request: NextRequest) {
 
   const { pathname } = request.nextUrl
   const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/signup')
-  const isPublicPage = isAuthPage || pathname.startsWith('/demo') || pathname.startsWith('/api/cron/')
+  const isPublicPage = isAuthPage || pathname.startsWith('/demo') || pathname.startsWith('/api/cron/') || pathname === '/api/version'
 
   if (!user && !isPublicPage) {
     const url = request.nextUrl.clone()

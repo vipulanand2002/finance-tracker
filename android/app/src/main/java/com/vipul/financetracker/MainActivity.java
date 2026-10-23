@@ -94,6 +94,13 @@ public class MainActivity extends Activity {
         web.addJavascriptInterface(new Bridge(), "AndroidApp");
         Reminders.schedule(this); // keep alarms in step after updates / clock changes
 
+        // Update notifications need permission on Android 13+; ask once up front
+        if (Build.VERSION.SDK_INT >= 33 && !Reminders.canPost(this)) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIFICATIONS);
+        }
+        UpdateChecker.schedule(this);
+        UpdateChecker.checkAsync(this, null);
+
         if (savedInstanceState != null) {
             web.restoreState(savedInstanceState);
         } else {
@@ -147,8 +154,10 @@ public class MainActivity extends Activity {
                 o.put("times", times);
                 o.put("permission", Reminders.canPost(MainActivity.this));
                 o.put("exact", Reminders.canScheduleExact(MainActivity.this));
+                android.content.pm.PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
+                o.put("build", Build.VERSION.SDK_INT >= 28 ? info.getLongVersionCode() : info.versionCode);
                 return o.toString();
-            } catch (JSONException e) {
+            } catch (JSONException | android.content.pm.PackageManager.NameNotFoundException e) {
                 return "{}";
             }
         }

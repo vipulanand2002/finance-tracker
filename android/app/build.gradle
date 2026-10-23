@@ -2,6 +2,10 @@ plugins {
     id 'com.android.application'
 }
 
+// CI supplies a fixed signing key, so every build is signed the same way and installs
+// over the previous one. Without it (local builds) the default debug key is used.
+def ciKeystore = System.getenv('ANDROID_KEYSTORE_FILE')
+
 android {
     namespace 'com.vipul.financetracker'
     compileSdk 34
@@ -15,7 +19,21 @@ android {
         versionName '1.0'
     }
 
+    if (ciKeystore) {
+        signingConfigs {
+            ci {
+                storeFile file(ciKeystore)
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias 'financetracker'
+                keyPassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            if (ciKeystore) signingConfig signingConfigs.ci
+        }
         release {
             minifyEnabled false
         }

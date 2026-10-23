@@ -30,8 +30,19 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Build debug APK
+      - name: Restore the signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/finance-tracker.keystore"
+            echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/finance-tracker.keystore" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build APK
         working-directory: android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: gradle assembleDebug --no-daemon
 
       - name: Name the APK
@@ -46,7 +57,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: android-latest
-          name: Android app (latest)
+          name: Android app build ${{ github.run_number }}
           body: Install FinanceTracker.apk on your Android phone. It always shows the latest deployed web app.
           files: FinanceTracker.apk
           overwrite_files: true
