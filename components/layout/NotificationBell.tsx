@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase/client'
-import { Bell, Check, X, UserCheck, UserX, Loader2, IndianRupee } from 'lucide-react'
+import { Bell, Check, X, UserCheck, UserX, Loader2, IndianRupee, Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -52,8 +52,22 @@ export default function NotificationBell() {
   const [open, setOpen] = useState(false)
   const [processing, setProcessing] = useState<string | null>(null)
   const [userId, setUserId] = useState<string>('')
+  // A newer Android build than the one installed (only when running inside the app)
+  const [appUpdate, setAppUpdate] = useState<{ name: string; url: string } | null>(null)
 
-  const unreadCount = requests.length + notifs.filter(n => !n.read).length + payments.length
+  const unreadCount = requests.length + notifs.filter(n => !n.read).length + payments.length + (appUpdate ? 1 : 0)
+
+  const checkAppUpdate = useCallback(async () => {
+    try {
+      const raw = window.AndroidApp?.getState()
+      if (!raw) return
+      const installed = Number(JSON.parse(raw).build) || 0
+      const res = await fetch('https://api.github.com/repos/vipulanand2002/finance-tracker/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })
+      const rel = res.ok ? await res.json() : null
+      const m = /vd+.d+.(d+)/.exec(rel?.tag_name ?? '')
+      setAppUpdate(m && Number(m[1]) > installed ? { name: rel.name ?? rel.tag_name, url: rel.html_url } : null)
+    } catch { /* offline or rate-limited — try again next time */ }
+  }, [])
 
   const loadData = useCallback(async () => {
     const supabase = createClient()
@@ -98,6 +112,7 @@ export default function NotificationBell() {
 
   useEffect(() => {
     loadData()
+    checkAppUpdate()
     const supabase = createClient()
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return
@@ -122,7 +137,7 @@ export default function NotificationBell() {
         .subscribe()
       return () => { supabase.removeChannel(channel) }
     })
-  }, [loadData])
+  }, [loadData, checkAppUpdate])
 
   async function handleAction(requestId: string, action: 'accept' | 'reject') {
     setProcessing(requestId)
@@ -149,11 +164,11 @@ export default function NotificationBell() {
     setNotifs(prev => prev.map(n => ({ ...n, read: true })))
   }
 
-  const isEmpty = requests.length === 0 && notifs.length === 0 && payments.length === 0
+  const isEmpty = requests.length === 0 && notifs.length === 0 && payments.length === 0 && !appUpdate
 
   return (
     <>
-    <Sheet open={open} onOpenChange={o => { setOpen(o); if (o) loadData() }}>
+    <Sheet open={open} onOpenChange={o => { setOpen(o); if (o) { loadData(); checkAppUpdate() } }}>
       <SheetTrigger className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" aria-label="Notifications">
         <Bell className="w-4 h-4" />
         {unreadCount > 0 && (
@@ -181,6 +196,27 @@ export default function NotificationBell() {
             </div>
           ) : (
             <div className="divide-y">
+              {/* ── New Android build available ── */}
+              {appUpdate && (
+                <div>
+                  <p className="px-4 py-2 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide bg-muted/40">
+                    App update
+                  </p>
+                  <div className="px-4 py-3 flex items-start gap-3 bg-primary/5">
+                    <div className="mt-0.5 w-8 h-8 rounded-full flex items-center justify-center shrink-0 bg-primary/10 text-primary">
+                      <Download className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm leading-snug"><span className="font-medium">{appUpdate.name}</span> is available</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Download it, then open the file to update the app.</p>
+                      <Button size="sm" className="h-7 text-xs mt-2" onClick={() => { window.location.href = appUpdate.url }}>
+                        Open download page
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* ── Payment records (you paid / you owe) ── */}
               {payments.length > 0 && (
                 <div>

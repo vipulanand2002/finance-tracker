@@ -91,8 +91,9 @@ final class UpdateChecker {
         if (last == null || last.equals(id)) return; // first run just records the baseline
 
         String message = v.optString("message", "");
-        post(c, 3000 + Math.abs(id.hashCode() % 1000), "Finance Tracker updated",
-                message.isEmpty() ? "A new version of the app is live. Open it to see what’s new." : message,
+        // No download involved: the app itself already shows the new web version
+        post(c, 3000 + Math.abs(id.hashCode() % 1000), "Web update applied — no download needed",
+                (message.isEmpty() ? "A new version of the site is live." : message) + " Tap to open the app.",
                 openApp(c));
     }
 
