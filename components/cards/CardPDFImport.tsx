@@ -256,6 +256,7 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
         })
         if (res.ok) {
           imported++
+          const created = await res.json().catch(() => null)
           // Create a split if requested
           if (t.split_enabled && t.split_participants.length > 0) {
             const amts = amountsFor(t.split_mode, t.split_participants, t.amount)
@@ -272,6 +273,10 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                   category: t.category,
                   date: t.date,
                   contact_id: t.contact_id ?? null,
+                  trip_id: t.trip_id ?? null,
+                  card_id: cardId ?? null,
+                  // Attach the split to the transaction just imported, so no second one is created
+                  transaction_id: created?.id ?? null,
                   participants: validParticipants,
                 }),
               }).catch(() => {})
