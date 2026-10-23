@@ -9,6 +9,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
+import android.graphics.drawable.Icon;
 import android.net.Uri;
 import android.os.Build;
 
@@ -107,17 +108,24 @@ final class UpdateChecker {
         SharedPreferences p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         if (latest <= installed || latest <= p.getInt(KEY_APK, 0)) return;
 
-        String url = rel.optString("html_url", "");
+        String page = rel.optString("html_url", "");
+        String apk = page;
         JSONArray assets = rel.optJSONArray("assets");
-        if (assets != null && assets.length() > 0) url = assets.getJSONObject(0).optString("browser_download_url", url);
+        if (assets != null && assets.length() > 0) apk = assets.getJSONObject(0).optString("browser_download_url", page);
 
         p.edit().putInt(KEY_APK, latest).apply();
+        int id = 2000 + (latest % 1000);
+        String name = rel.optString("name", "").isEmpty() ? "Finance App" : rel.optString("name", "");
+        // Tapping opens the release page (notes + Download button); the action downloads the APK directly
+        post(c, id, "New app version available",
+                name + " is ready. Tap to open the download page, then open the file to update the app.",
+                browse(c, id, page), "Download APK", browse(c, id + 1000, apk));
+    }
+
+    private static PendingIntent browse(Context c, int requestCode, String url) {
         Intent view = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
         view.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        String name = rel.optString("name", "").isEmpty() ? "Finance App" : rel.optString("name", "");
-        post(c, 2000 + (latest % 1000), "New app version available",
-                name + " is ready. Tap to download it, then open the file to update the app.",
-                PendingIntent.getActivity(c, 2000 + (latest % 1000), view, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
+        return PendingIntent.getActivity(c, requestCode, view, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
     private static PendingIntent openApp(Context c) {
@@ -130,6 +138,10 @@ final class UpdateChecker {
 
     /** Each update gets its own id and is not auto-cancelled, so they pile up in the panel as a record. */
     private static void post(Context c, int id, String title, String body, PendingIntent tap) {
+        post(c, id, title, body, tap, null, null);
+    }
+
+    private static void post(Context c, int id, String title, String body, PendingIntent tap, String actionLabel, PendingIntent action) {
         if (!Reminders.canPost(c)) return;
         NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm == null) return;
@@ -144,6 +156,9 @@ final class UpdateChecker {
                 .setContentIntent(tap)
                 .setAutoCancel(false)
                 .setWhen(System.currentTimeMillis());
+        if (action != null && actionLabel != null) {
+            b.addAction(new Notification.Action.Builder(Icon.createWithResource(c, R.drawable.ic_notification), actionLabel, action).build());
+        }
         nm.notify(id, b.build());
     }
 }
