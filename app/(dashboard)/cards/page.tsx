@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { format, subMonths, startOfMonth } from 'date-fns'
 import {
@@ -12,6 +11,7 @@ import {
   Legend as RechartsLegend,
   ResponsiveContainer,
 } from 'recharts'
+import { usePasteSms } from '@/components/transactions/PasteSmsDialog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -290,7 +290,6 @@ function BudgetSection({
 
 // ── Main Page ──
 export default function CardsPage() {
-  const router = useRouter()
   const [cards, setCards] = useState<CardData[]>([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
@@ -433,13 +432,7 @@ export default function CardsPage() {
 
   const canEditBudgets = selectedCardId !== 'all' && selectedMonth !== 'all' && periodMode === 'monthly'
 
-  async function pasteSms() {
-    try {
-      const text = await navigator.clipboard.readText()
-      if (!text.trim()) { toast.error('Clipboard is empty'); return }
-      router.push(`/share?text=${encodeURIComponent(text)}`)
-    } catch { toast.error('Could not read clipboard. Allow clipboard access and try again.') }
-  }
+  const { pasteSms, dialog: pasteSmsDialog } = usePasteSms()
 
   const analyticsCard = selectedCardId !== 'all' ? cards.find(c => c.id === selectedCardId) ?? null : null
 
@@ -767,6 +760,7 @@ export default function CardsPage() {
         onSaved={() => { fetchCardTxs(selectedCardId); refreshAllCardTxs() }}
         defaultCardId={selectedCardId !== 'all' ? selectedCardId : null}
       />
+      {pasteSmsDialog}
     </div>
   )
 }

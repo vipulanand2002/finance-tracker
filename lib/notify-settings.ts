@@ -20,6 +20,8 @@ export interface AndroidAppBridge {
   /** Update notices kept by the app (JSON array) — absent on older builds */
   getUpdates?(): string
   clearUpdates?(): void
+  /** Clipboard text (empty if none) — absent on older builds */
+  readClipboard?(): string
 }
 
 export interface AndroidReminderState {

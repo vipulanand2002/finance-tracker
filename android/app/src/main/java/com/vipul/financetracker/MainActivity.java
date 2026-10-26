@@ -189,6 +189,34 @@ public class MainActivity extends Activity {
             UpdateChecker.clearHistory(MainActivity.this);
         }
 
+        /** Clipboard text for "Paste SMS" — a WebView can't read the clipboard from JS, the app can. */
+        @JavascriptInterface
+        public String readClipboard() {
+            final String[] out = {""};
+            final java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
+            runOnUiThread(() -> {
+                try {
+                    android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                    if (cm != null && cm.hasPrimaryClip()) {
+                        android.content.ClipData clip = cm.getPrimaryClip();
+                        if (clip != null && clip.getItemCount() > 0) {
+                            CharSequence text = clip.getItemAt(0).coerceToText(MainActivity.this);
+                            if (text != null) out[0] = text.toString();
+                        }
+                    }
+                } catch (RuntimeException ignored) {
+                    // clipboard unavailable — the page falls back to a paste box
+                }
+                done.countDown();
+            });
+            try {
+                done.await(2, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return out[0];
+        }
+
         @JavascriptInterface
         public void sendTest() {
             Reminders.notifyNow(MainActivity.this);

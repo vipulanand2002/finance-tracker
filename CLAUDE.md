@@ -66,6 +66,7 @@ Largest/most intricate files: `components/trips/TripDetailSheet.tsx` (~1.8k line
 - **Graceful degradation for un-applied migrations** is a deliberate convention: probe a column/table, or catch the error and retry without the new column (see `/api/transactions` contact columns, `paid_by` in splits, `/api/settlements` returning `{ available: false }`). Keep doing this when adding columns, since migrations are applied by hand.
 - Emails are compared **lowercased** everywhere; store them lowercased.
 - Commit messages: `Area: imperative summary of the behaviour change` (e.g. `Balances: add a Settled tab…`, `Fix Close Balance: …`).
+- **Ship every change**: the owner wants each finished change committed, pushed to `master` and deployed without asking first (standing instruction, Oct 2026). Before pushing, `git fetch` and fast-forward — other sessions/devices push to `master` too, so never force-push. Pushing deploys the web app on Vercel; pushes touching `android/` also build a new APK release via GitHub Actions. If a database migration is needed, say so — it still has to be run by hand in Supabase.
 
 ## Domain model (read before touching money logic)
 

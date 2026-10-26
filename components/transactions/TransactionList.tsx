@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { format, subMonths, startOfMonth, endOfMonth } from 'date-fns'
+import { usePasteSms } from '@/components/transactions/PasteSmsDialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -73,7 +73,6 @@ function applySort(txs: Transaction[], sort: SortBy): Transaction[] {
 }
 
 export default function TransactionList() {
-  const router = useRouter()
   const [rawTransactions, setRawTransactions] = useState<Transaction[]>([])
   const [cards, setCards] = useState<CardInfo[]>([])
   const [loading, setLoading] = useState(true)
@@ -230,13 +229,7 @@ export default function TransactionList() {
     toast.success('Exported to Excel')
   }
 
-  async function pasteSms() {
-    try {
-      const text = await navigator.clipboard.readText()
-      if (!text.trim()) { toast.error('Clipboard is empty'); return }
-      router.push(`/share?text=${encodeURIComponent(text)}`)
-    } catch { toast.error('Could not read clipboard. Allow clipboard access and try again.') }
-  }
+  const { pasteSms, dialog: pasteSmsDialog } = usePasteSms()
 
   function txAmountColor(t: Transaction) {
     if (t.category === 'Card Payment') return 'text-blue-500'
@@ -649,6 +642,7 @@ export default function TransactionList() {
 
       <TransactionModal open={modalOpen} onClose={() => setModalOpen(false)} onSaved={fetchTransactions} transaction={editing} />
       <PDFImport open={pdfOpen} onClose={() => setPdfOpen(false)} onImported={fetchTransactions} />
+      {pasteSmsDialog}
     </div>
   )
 }
