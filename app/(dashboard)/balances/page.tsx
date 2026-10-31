@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import { formatCurrency } from '@/lib/utils'
 import { fetchProfileNames } from '@/lib/profile-names'
-import { pairShares, buildPersonHistory, type PairShare, type TaggedItem, type SettlementRound, type SettlementRecord } from '@/lib/settlement-history'
+import { pairShares, buildPersonHistory, closedOnMySide, type PairShare, type TaggedItem, type SettlementRound, type SettlementRecord } from '@/lib/settlement-history'
 import { format, formatDistanceToNow } from 'date-fns'
 import { ArrowUpRight, ArrowDownLeft, CheckCircle2, Loader2, Send, X, Plus, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -139,6 +139,15 @@ export default function BalancesPage() {
         // Seed with saved friends so tagged transactions can be attributed to them
         for (const f of friendList) ensure(f.name, f.email, f.id)
 
+        // Latest settlement you recorded with each person. Your unpaid share on a split
+        // THEY created before it is closed on your side (closedOnMySide) — closing can't
+        // mark it paid, because that split is their record.
+        const lastSettled = new Map<string, number>()
+        for (const r of settleRecords) {
+          const t = Date.parse(r.settled_at)
+          if (!isNaN(t) && t > (lastSettled.get(r.person_key) ?? -Infinity)) lastSettled.set(r.person_key, t)
+        }
+
         for (const sp of splitList) {
           if (sp.is_settled) continue
           // The person who PAID the bill is the creditor. Registered → paid_by
@@ -160,17 +169,18 @@ export default function BalancesPage() {
             // I only participate → my unpaid share is what I owe the payer
             const myRow = (sp.split_participants ?? []).find(isSelf)
             if (myRow && !myRow.is_paid) {
+              let cp: FriendBalance
               if (unregPayerEmail) {
                 // Unregistered payer with an email — attribute by their email/name
-                ensure(sp.paid_by_name ?? 'Split payer', sp.paid_by_email ?? null).splitYouOwe += myRow.amount_owed
+                cp = ensure(sp.paid_by_name ?? 'Split payer', sp.paid_by_email ?? null)
               } else if (unregPayerName) {
                 // Name-only payer — attribute by name
-                ensure(unregPayerName, null).splitYouOwe += myRow.amount_owed
+                cp = ensure(unregPayerName, null)
               } else {
                 const payer = (sp.split_participants ?? []).find(p => p.participant_user_id === creditorId)
-                ensure(payer?.participant_name ?? 'Split payer', payer?.participant_email ?? null)
-                  .splitYouOwe += myRow.amount_owed
+                cp = ensure(payer?.participant_name ?? 'Split payer', payer?.participant_email ?? null)
               }
+              if (!closedOnMySide(sp, myId, lastSettled.get(cp.key))) cp.splitYouOwe += myRow.amount_owed
             }
           }
         }
@@ -189,8 +199,11 @@ export default function BalancesPage() {
 
         // Every share between the two of you (paid or not), grouped per person
         const sharesByKey = new Map<string, PairShare[]>()
+        const splitById = new Map(splitList.map(sp => [sp.id, sp]))
         for (const sh of pairShares(splitList, myId, myEmail)) {
           const cp = ensure(sh.name, sh.email)
+          const sp = splitById.get(sh.splitId)
+          if (sh.owedBy === 'you' && !sh.isPaid && sp && closedOnMySide(sp, myId, lastSettled.get(cp.key))) continue
           sharesByKey.set(cp.key, [...(sharesByKey.get(cp.key) ?? []), sh])
         }
 
@@ -453,7 +466,7 @@ export default function BalancesPage() {
               )}
 
               {/* Row 3: action buttons */}
-              {(b.net > 0 || b.splitOwed > 0 || !!b.id) && confirmClose !== b.key && (
+              {confirmClose !== b.key && (
                 <div className="flex gap-2 justify-end pt-1 border-t flex-wrap">
                   {b.id && (
                     <Button size="sm" variant="outline" className="h-8 px-3 text-xs gap-1.5"
@@ -468,7 +481,8 @@ export default function BalancesPage() {
                       Remind
                     </Button>
                   )}
-                  {b.net > 0 && (
+                  {/* Either direction — settle up whether they owe you or you owe them */}
+                  {(Math.abs(b.net) > 0.009 || b.splitOwed > 0.009 || b.splitYouOwe > 0.009) && (
                     <Button size="sm" variant="outline"
                       className="h-8 px-3 text-xs gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
                       disabled={closing === b.key} onClick={() => setConfirmClose(b.key)}>
@@ -483,7 +497,11 @@ export default function BalancesPage() {
               {confirmClose === b.key && (
                 <div className="flex items-center justify-between gap-2 flex-wrap pt-1 border-t">
                   <p className="text-xs text-muted-foreground">
-                    Settle your balance with <span className="font-medium text-foreground">{b.name}</span>? Marks the splits between you two as paid (both ways), settles any split that ends up fully paid, and clears anything else so the balance lands on zero.
+                    {b.net < 0 ? (
+                      <>Settle up with <span className="font-medium text-foreground">{b.name}</span>? You owe <span className="font-medium text-foreground">{formatCurrency(Math.abs(b.net))}</span>. This records that you two are settled, so the balance lands on zero for you. {b.name}&apos;s own splits aren&apos;t changed — they&apos;ll still see it until they close it too.</>
+                    ) : (
+                      <>Settle your balance with <span className="font-medium text-foreground">{b.name}</span>? Marks the splits between you two as paid (both ways), settles any split that ends up fully paid, and clears anything else so the balance lands on zero.</>
+                    )}
                   </p>
                   <div className="flex gap-2">
                     <Button size="sm" variant="ghost" className="h-8 px-3 text-xs gap-1" onClick={() => setConfirmClose(null)}>

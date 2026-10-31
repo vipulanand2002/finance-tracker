@@ -10,7 +10,7 @@ import { format } from 'date-fns'
 import { formatCurrency } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import { fetchProfileNames } from '@/lib/profile-names'
-import { pairPaidEvents } from '@/lib/settlement-history'
+import { pairPaidEvents, closedOnMySide } from '@/lib/settlement-history'
 import SplitModal, { type EditingSplit } from '@/components/splits/SplitModal'
 import TransactionModal from '@/components/transactions/TransactionModal'
 import type { Transaction } from '@/types'
@@ -42,6 +42,7 @@ interface SplitRow {
   date: string
   is_settled: boolean
   created_by: string
+  created_at?: string | null
   paid_by?: string | null
   paid_by_email?: string | null
   paid_by_name?: string | null
@@ -158,7 +159,10 @@ export default function BalanceDetailSheet({ open, onClose, counterparty, onChan
       if (payerIsCp) {
         const mine = s.split_participants.find(p =>
           (p.participant_user_id && p.participant_user_id === myId) || (myEmail && p.participant_email?.toLowerCase() === myEmail))
-        if (mine && !mine.is_paid) splitYouOwe += mine.amount_owed
+        // On an Active card, a share on their split from before your last settlement
+        // was closed on your side (see closedOnMySide) — don't count it again.
+        const closed = !counterparty?.round && closedOnMySide(s, myId, counterparty?.since)
+        if (mine && !mine.is_paid && !closed) splitYouOwe += mine.amount_owed
       }
     }
   }

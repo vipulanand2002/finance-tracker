@@ -83,6 +83,23 @@ export function pairShares(splits: HistSplit[], myId: string, myEmail: string): 
   return out
 }
 
+// ── Your share on someone else's split, closed by a settlement on your side ───
+// "Close Balance" can only mark shares paid on splits YOU created — your share on a
+// split the other person created is their record, so it stays unpaid there. Once
+// you've recorded a settlement with them, an unpaid share of yours on a split they
+// created BEFORE that settlement belongs to the closed round and isn't owed any more
+// on your side. (They still see it until they close the balance too.)
+export function closedOnMySide(
+  split: { created_by: string; created_at?: string | null },
+  myId: string,
+  settledAt: string | number | null | undefined,
+): boolean {
+  if (split.created_by === myId || !split.created_at || settledAt == null) return false
+  const boundary = typeof settledAt === 'number' ? settledAt : Date.parse(settledAt)
+  const created = Date.parse(split.created_at)
+  return !isNaN(boundary) && !isNaN(created) && created <= boundary
+}
+
 // ── Paid shares only (used for per-bill "paid on …" in the detail sheet) ──────
 export interface PairPaidEvent {
   name: string

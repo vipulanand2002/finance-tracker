@@ -95,7 +95,7 @@ Largest/most intricate files: `components/trips/TripDetailSheet.tsx` (~1.8k line
 
 **Balances** (`app/(dashboard)/balances/page.tsx`, client-side): per person, net = split shares owed between the pair + tagged items. Positive = they owe you. Use the pure helpers in `lib/settlement-history.ts` and `lib/close-balance.ts`; don't re-derive.
 - **Only shares between the user and that person count.** A bill paid by a third person is never part of the pair.
-- **Settling is an agreement, not a payment.** "Close Balance" (`PATCH /api/splits?type=close_balance`) marks the pair's unpaid shares paid, settles splits that become fully paid, and writes a `settlements` row. It must **never** create income/expense transactions. Activity recorded before `settled_at` belongs to the closed round.
+- **Settling is an agreement, not a payment.** "Close Balance" (`PATCH /api/splits?type=close_balance`) marks the pair's unpaid shares paid, settles splits that become fully paid, and writes a `settlements` row. It must **never** create income/expense transactions. Activity recorded before `settled_at` belongs to the closed round. It works in **both directions**: your unpaid shares on splits the *other* person created can't be marked paid (their record, RLS blocks it), so they're closed on your side only — `closedOnMySide` in `lib/settlement-history.ts` drops them from your balance once a settlement postdates the split; they still count for the other person until they close too.
 - Settlement history = recorded `settlements` rows + rounds derived from timestamps for older data (`buildPersonHistory`).
 - The same rules feed the Friends tab, the balance detail sheet and reminder emails (`/api/mail/reminder`); keep them consistent.
 

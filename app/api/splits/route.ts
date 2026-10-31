@@ -318,6 +318,18 @@ export async function PATCH(request: Request) {
     const pair = { userId: user.id, userEmail: user.email ?? '', email, name: contact_name ?? '', theirId }
     const matched = selectPairShares(userSplits, pair)
 
+    // Your unpaid shares on bills THEY created: those rows are their record, so they
+    // aren't marked paid here — the settlement below closes them on your side only
+    // (see closedOnMySide). They're still counted in what the settlement covered.
+    let foreignRes = await supabase.from('expense_splits').select(`${cols}, paid_by, paid_by_email, paid_by_name`)
+      .neq('created_by', user.id).eq('is_settled', false) as unknown as Res
+    if (foreignRes.error) {
+      foreignRes = await supabase.from('expense_splits').select(cols)
+        .neq('created_by', user.id).eq('is_settled', false) as unknown as Res
+    }
+    const foreignOwed = selectPairShares(foreignRes.data ?? [], pair).filter(r => r.owedBy === 'you')
+    const covered = [...matched, ...foreignOwed]
+
     // Mark them all as settled (paid) — same timestamp as the settlement record
     if (matched.length > 0) {
       await supabase
@@ -352,7 +364,7 @@ export async function PATCH(request: Request) {
     if (person_key) {
       const r2 = (n: number) => Math.round(n * 100) / 100
       const num = (v: unknown) => (typeof v === 'number' && isFinite(v) ? r2(v) : 0)
-      const owed = (who: 'them' | 'you') => r2(matched.filter(m => m.owedBy === who).reduce((a, m) => a + m.amount, 0))
+      const owed = (who: 'them' | 'you') => r2(covered.filter(m => m.owedBy === who).reduce((a, m) => a + m.amount, 0))
       const { error: insErr } = await supabase.from('settlements').insert({
         user_id: user.id,
         person_key,
@@ -368,8 +380,8 @@ export async function PATCH(request: Request) {
         received: num(tagged?.received),
         paid_to_them: num(tagged?.paid_to_them),
         charged_to_them: num(tagged?.charged_to_them),
-        share_count: matched.length,
-        split_ids: [...new Set(matched.map(m => m.split_id))],
+        share_count: covered.length,
+        split_ids: [...new Set(covered.map(m => m.split_id))],
       })
       if (insErr) settlementsMissing = true   // table not created yet (migration 045)
       else settlementSaved = true
