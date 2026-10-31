@@ -548,7 +548,7 @@ export default function TransactionList() {
             <Button variant="outline" onClick={() => setPdfOpen(true)} className="h-8 w-8 p-0" title="Import PDF">
               <FileUp className="w-4 h-4" />
             </Button>
-            <Button variant="outline" onClick={pasteSms} className="h-8 w-8 p-0" title="Paste UPI SMS">
+            <Button variant="outline" onClick={pasteSms} className="h-8 w-8 p-0" title="Paste bank / card SMS">
               <Smartphone className="w-4 h-4" />
             </Button>
             <Button onClick={openAdd} className="h-8 gap-1">

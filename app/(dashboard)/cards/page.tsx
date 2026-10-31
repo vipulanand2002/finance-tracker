@@ -432,7 +432,7 @@ export default function CardsPage() {
 
   const canEditBudgets = selectedCardId !== 'all' && selectedMonth !== 'all' && periodMode === 'monthly'
 
-  const { pasteSms, dialog: pasteSmsDialog } = usePasteSms()
+  const { pasteSms, dialog: pasteSmsDialog } = usePasteSms(selectedCardId !== 'all' ? selectedCardId : null)
 
   const analyticsCard = selectedCardId !== 'all' ? cards.find(c => c.id === selectedCardId) ?? null : null
 
@@ -535,7 +535,7 @@ export default function CardsPage() {
                     <Button
                       variant="outline" size="sm" className="h-8 text-xs"
                       onClick={pasteSms}
-                      title="Paste UPI SMS"
+                      title="Paste card SMS"
                     >
                       <Smartphone className="w-3.5 h-3.5 sm:mr-1" />
                       <span className="hidden sm:inline">Paste SMS</span>

@@ -12,11 +12,13 @@ import { Textarea } from '@/components/ui/textarea'
 // or "Block" tapped once). So: the Android app's native bridge first, then the web
 // clipboard API, and if both fail a text box — a long-press → Paste into a text
 // field is the system paste and needs no permission.
-export function usePasteSms() {
+// cardId: the card being viewed (Cards page) — a hint for messages that don't name the card
+export function usePasteSms(cardId?: string | null) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
 
-  const go = (text: string) => router.push(`/share?text=${encodeURIComponent(text)}`)
+  const go = (text: string) =>
+    router.push(`/share?text=${encodeURIComponent(text)}${cardId ? `&card_id=${encodeURIComponent(cardId)}` : ''}`)
 
   async function pasteSms() {
     // Inside the Android app the WebView can't read the clipboard, but the app can
@@ -51,9 +53,9 @@ function PasteSmsDialog({ open, onClose, onSubmit }: { open: boolean; onClose: (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Paste UPI SMS</DialogTitle>
+          <DialogTitle>Paste bank or card SMS</DialogTitle>
           <DialogDescription>
-            Long-press the box below and tap <strong>Paste</strong>, or type the message. We’ll read the amount, merchant and date from it.
+            Long-press the box below and tap <strong>Paste</strong>, or type the message. We’ll read the amount, merchant, date and card or account from it.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -62,7 +64,7 @@ function PasteSmsDialog({ open, onClose, onSubmit }: { open: boolean; onClose: (
             onChange={e => setText(e.target.value)}
             rows={5}
             autoFocus
-            placeholder="e.g. Rs.250.00 debited from A/c XX1234 on 21-Oct-26 to VPA swiggy@icici…"
+            placeholder="e.g. Rs.499.00 spent on HDFC Bank Credit Card XX1234 at SWIGGY on 29-10-2026…"
           />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>

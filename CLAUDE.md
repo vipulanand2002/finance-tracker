@@ -49,7 +49,10 @@ lib/
   nav-items.ts, use-nav-order.ts sidebar items + per-user order
   email-templates/*.ts           HTML builders for reminder/summary emails
   wallet-providers.ts            wallet/account provider list + computeBalances
-  parse-upi.ts                   regex parser for bank/UPI SMS (share target)
+  parse-sms.ts                   smart SMS parser for /share: card purchase / refund / bill payment, bank, wallet, UPI;
+                                 skips Avl Lmt/Bal amounts, flags OTP/declined/reminders; matchCard / matchAccount;
+                                 AI fallback at /api/ai/parse-sms returns the same shape
+  parse-upi.ts                   older UPI-only parser (parse-sms builds on it for direction & category)
   push.ts                        sendPushToUser (service role, prunes 410s)
 types/index.ts                   shared row types (partial — many files define local interfaces)
 supabase/migrations/001…046      schema history, applied manually
