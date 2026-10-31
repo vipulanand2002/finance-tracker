@@ -456,7 +456,7 @@ export default function TransactionList() {
   const isEmpty = view === 'card' ? groupedItems.length === 0 : transactions.length === 0
 
   return (
-    <div className="space-y-4">
+    <div className={`space-y-4 ${someSelected ? 'pb-20 md:pb-0' : ''}`}>
 
       {/* ── View tabs ── */}
       <div className="flex rounded-lg border overflow-hidden text-sm w-fit">
@@ -535,6 +535,13 @@ export default function TransactionList() {
 
           {/* Right-side action buttons — always visible */}
           <div className="flex gap-1.5 shrink-0">
+            {/* Desktop delete — on mobile the bottom selection bar has it */}
+            {someSelected && (
+              <Button variant="outline" onClick={() => setConfirmOpen(true)}
+                className="hidden md:inline-flex h-8 gap-1 border-destructive/40 text-destructive hover:bg-destructive hover:text-destructive-foreground">
+                <Trash2 className="w-4 h-4" /><span className="text-sm">Delete ({selectedIds.size})</span>
+              </Button>
+            )}
             <Button variant="outline" onClick={exportToExcel} className="h-8 w-8 p-0 sm:w-auto sm:px-2.5 sm:gap-1.5" title="Export to Excel">
               <Download className="w-4 h-4" /><span className="hidden sm:inline text-xs">Export</span>
             </Button>
@@ -548,14 +555,20 @@ export default function TransactionList() {
               <Plus className="w-4 h-4" /><span className="text-sm">Add</span>
             </Button>
           </div>
-          {someSelected && (
-            <Button variant="outline" onClick={() => setConfirmOpen(true)}
-              className="shrink-0 h-8 border-destructive/40 text-destructive hover:bg-destructive hover:text-destructive-foreground">
-              <Trash2 className="w-4 h-4 sm:mr-1" /><span className="text-sm">Delete ({selectedIds.size})</span>
-            </Button>
-          )}
         </div>
       </div>
+
+      {/* ── Mobile selection bar — pinned to the bottom so it never fights the toolbar for space ── */}
+      {someSelected && (
+        <div className="md:hidden fixed inset-x-3 z-40 flex items-center gap-2 rounded-xl border bg-card p-2 pl-4 shadow-lg"
+          style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.75rem)' }}>
+          <span className="flex-1 text-sm font-medium">{selectedIds.size} selected</span>
+          <Button variant="ghost" size="sm" className="h-9" onClick={() => setSelectedIds(new Set())}>Clear</Button>
+          <Button variant="destructive" size="sm" className="h-9 gap-1.5" onClick={() => setConfirmOpen(true)}>
+            <Trash2 className="w-4 h-4" />Delete
+          </Button>
+        </div>
+      )}
 
       {/* ── Transaction list ── */}
       <Card>
@@ -579,7 +592,6 @@ export default function TransactionList() {
                     <span className="text-xs text-muted-foreground">
                       {allSelected ? 'Deselect all' : `Select all (${transactions.length})`}
                     </span>
-                    {someSelected && <span className="ml-auto text-xs font-medium text-primary">{selectedIds.size} selected</span>}
                   </div>
                 )}
                 {view === 'card'
