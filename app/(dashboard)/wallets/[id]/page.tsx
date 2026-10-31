@@ -19,7 +19,7 @@ import AccountLogo from '@/components/wallets/AccountLogo'
 import AccountModal from '@/components/wallets/AccountModal'
 import TransferModal, { type TransferMode } from '@/components/wallets/TransferModal'
 import { formatCurrency, cn } from '@/lib/utils'
-import { KIND_LABEL, getProvider, type AccountWithBalance, type AccountTransfer } from '@/lib/wallet-providers'
+import { KIND_LABEL, getProvider, type AccountWithBalance, type AccountTransfer, accountFlow } from '@/lib/wallet-providers'
 import type { Transaction } from '@/types'
 
 const TransactionModal = dynamic(() => import('@/components/transactions/TransactionModal'), { ssr: false })
@@ -61,7 +61,7 @@ export default function WalletDetailPage() {
       const txs: Transaction[] = txRes.ok ? await txRes.json() : []
       const trs: AccountTransfer[] = trRes.ok ? await trRes.json() : []
       const rows: Activity[] = [
-        ...(Array.isArray(txs) ? txs : []).map(t => ({ kind: 'tx' as const, id: t.id, date: t.date, created: t.created_at, amount: t.type === 'income' ? t.amount : -t.amount, tx: t })),
+        ...(Array.isArray(txs) ? txs : []).map(t => ({ kind: 'tx' as const, id: t.id, date: t.date, created: t.created_at, amount: accountFlow(t), tx: t })),
         ...(Array.isArray(trs) ? trs : []).map(t => ({ kind: 'transfer' as const, id: t.id, date: t.date, created: t.created_at, amount: t.to_account_id === id ? Number(t.amount) : -Number(t.amount), transfer: t })),
       ]
       rows.sort((a, b) => b.date.localeCompare(a.date) || b.created.localeCompare(a.created))

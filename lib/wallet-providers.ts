@@ -93,16 +93,25 @@ export interface AccountWithBalance extends Account {
 
 const r2 = (n: number) => Math.round(n * 100) / 100
 
+/** Signed effect of a transaction on the account it's linked to. A Card Payment (paying a
+ *  card bill from this wallet / account) is always money OUT, whichever type it's saved
+ *  as — statement imports record bill payments as income on the card. */
+export function accountFlow(t: { amount: number; type: string; category?: string | null }): number {
+  const amt = Number(t.amount) || 0
+  if (t.category === 'Card Payment') return -amt
+  return t.type === 'income' ? amt : -amt
+}
+
 /** Current balance of each account from its opening balance, transactions and transfers. */
 export function computeBalances(
   accounts: Account[],
-  txs: { account_id: string | null; amount: number; type: string }[],
+  txs: { account_id: string | null; amount: number; type: string; category?: string | null }[],
   transfers: Pick<AccountTransfer, 'from_account_id' | 'to_account_id' | 'amount'>[],
 ): AccountWithBalance[] {
   return accounts.map(a => {
     const own = txs.filter(t => t.account_id === a.id)
-    const income = own.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0)
-    const expenses = own.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0)
+    const income = own.map(accountFlow).filter(v => v > 0).reduce((s, v) => s + v, 0)
+    const expenses = own.map(accountFlow).filter(v => v < 0).reduce((s, v) => s - v, 0)
     const transfersIn = transfers.filter(t => t.to_account_id === a.id).reduce((s, t) => s + Number(t.amount), 0)
     const transfersOut = transfers.filter(t => t.from_account_id === a.id).reduce((s, t) => s + Number(t.amount), 0)
     return {

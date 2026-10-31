@@ -262,12 +262,39 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
     }
   }
 
-  // A transaction is paid with a card OR from a wallet / account, never both
+  // A Card Payment is paying a card's bill: the card is the one being PAID, and the
+  // money can come from a wallet / account. It isn't spending, so it can't be split,
+  // tagged to friends or put on a trip.
+  const isCardPayment = form.category === 'Card Payment'
+
+  function changeCategory(category: string) {
+    if (category === 'Card Payment') {
+      setSplitEnabled(false)
+      setFriendsEnabled(false)
+      setTripEnabled(false)
+      setSelectedCycleId('none')
+      setForm(prev => ({ ...prev, category, contact_ids: [], trip_id: null, is_discrete: false }))
+      if (cards.length > 0) setCardEnabled(true)
+      return
+    }
+    // Leaving Card Payment: a normal transaction is paid with a card OR from an account
+    if (isCardPayment && form.card_id && form.account_id) {
+      setAccountEnabled(false)
+      setForm(prev => ({ ...prev, category, account_id: null }))
+      return
+    }
+    set('category', category)
+  }
+
+  // A normal transaction is paid with a card OR from a wallet / account, never both
+  // (a Card Payment can have both: the card being paid, and the account paying it)
   function toggleCard(on: boolean) {
     setCardEnabled(on)
     if (on) {
-      setAccountEnabled(false)
-      set('account_id', null)
+      if (!isCardPayment) {
+        setAccountEnabled(false)
+        set('account_id', null)
+      }
     } else {
       set('card_id', null)
       setSelectedCycleId('none')
@@ -277,9 +304,11 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
   function toggleAccount(on: boolean) {
     setAccountEnabled(on)
     if (on) {
-      setCardEnabled(false)
-      setForm(prev => ({ ...prev, card_id: null }))
-      setSelectedCycleId('none')
+      if (!isCardPayment) {
+        setCardEnabled(false)
+        setForm(prev => ({ ...prev, card_id: null }))
+        setSelectedCycleId('none')
+      }
     } else {
       set('account_id', null)
     }
@@ -367,6 +396,10 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
       toast.warning('Please fill in amount, category, and date to save')
       return
     }
+    if (isCardPayment && !form.card_id && cards.length > 0) {
+      toast.warning('Choose the card this payment is for')
+      return
+    }
 
     // "On behalf of a friend" — create a transaction in their account (optionally
     // linked to a shared trip and/or a split), authored by me.
@@ -445,11 +478,11 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
         is_recurring: form.is_recurring,
         is_discrete: form.trip_id ? form.is_discrete : false,
         receipt_url: form.receipt_url || null,
-        trip_id: form.trip_id || null,
-        // Primary contact (FK for join in transaction list)
-        contact_id: form.contact_ids[0] ?? null,
+        trip_id: isCardPayment ? null : (form.trip_id || null),
+        // Primary contact (FK for join in transaction list) — never on a card bill payment
+        contact_id: isCardPayment ? null : (form.contact_ids[0] ?? null),
         // Full contact list (requires contact_ids uuid[] column in DB)
-        contact_ids: form.contact_ids,
+        contact_ids: isCardPayment ? [] : form.contact_ids,
         card_id: form.card_id || null,
         account_id: form.account_id || null,
         split_id: linkedSplitId || null,
@@ -604,7 +637,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                   </Button>
                 )}
               </div>
-              <Select value={form.category} onValueChange={v => v && set('category', v)}>
+              <Select value={form.category} onValueChange={v => { if (v) changeCategory(v) }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select category" />
                 </SelectTrigger>
@@ -662,9 +695,10 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                           </Button>
                         </div>
                       ) : (
-                        <Switch checked={splitEnabled} onCheckedChange={toggleSplit} />
+                        <Switch checked={splitEnabled} onCheckedChange={toggleSplit} disabled={isCardPayment} />
                       )}
                     </div>
+                    {isCardPayment && <p className="text-xs text-muted-foreground">Not available for a card bill payment</p>}
 
                     {/* Inline participant editor */}
                     {splitEnabled && !linkedSplitId && (
@@ -687,9 +721,10 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                         <MapPin className="w-4 h-4 text-muted-foreground" />
                         Spent on a trip?
                       </span>
-                      <Switch checked={tripEnabled} onCheckedChange={toggleTrip} />
+                      <Switch checked={tripEnabled} onCheckedChange={toggleTrip} disabled={isCardPayment} />
                     </div>
-                    {tripEnabled && (
+                    {isCardPayment && <p className="text-xs text-muted-foreground">Not available for a card bill payment</p>}
+                    {tripEnabled && !isCardPayment && (
                       <>
                         <Select
                           value={form.trip_id ?? ''}
@@ -748,7 +783,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium flex items-center gap-2">
                         <CreditCard className="w-4 h-4 text-muted-foreground" />
-                        Paid with a card?
+                        {isCardPayment ? 'Paid for card' : 'Paid with a card?'}
                       </span>
                       <Switch checked={cardEnabled} onCheckedChange={toggleCard} />
                     </div>
@@ -766,7 +801,7 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                             <span className="truncate text-sm">
                               {form.card_id
                                 ? (() => { const c = cards.find(c => c.id === form.card_id); return c ? `${c.card_name}${c.last_four ? ` ••${c.last_four}` : ''}` : '…' })()
-                                : <span className="text-muted-foreground">Select a card</span>}
+                                : <span className="text-muted-foreground">{isCardPayment ? 'Which card did you pay?' : 'Select a card'}</span>}
                             </span>
                           </SelectTrigger>
                           <SelectContent>
@@ -778,8 +813,8 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                           </SelectContent>
                         </Select>
 
-                        {/* Billing cycle picker — only when the card has cycles */}
-                        {cardStatements.length > 0 && (
+                        {/* Billing cycle picker — only when the card has cycles (not for a bill payment) */}
+                        {cardStatements.length > 0 && !isCardPayment && (
                           <div className="space-y-1">
                             <Label className="text-xs text-muted-foreground">Billing cycle (optional)</Label>
                             <Select
@@ -817,13 +852,13 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                   </div>
                 )}
 
-                {/* Wallet / account toggle — mutually exclusive with Card */}
+                {/* Wallet / account toggle — mutually exclusive with Card, except on a Card Payment */}
                 {!onBehalfContactId && accounts.some(a => !a.is_archived || a.id === form.account_id) && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium flex items-center gap-2">
                         <Wallet className="w-4 h-4 text-muted-foreground" />
-                        {form.type === 'income' ? 'Received into a wallet / account?' : 'Paid from a wallet / account?'}
+                        {form.type === 'income' && !isCardPayment ? 'Received into a wallet / account?' : 'Paid from a wallet / account?'}
                       </span>
                       <Switch checked={accountEnabled} onCheckedChange={toggleAccount} />
                     </div>
@@ -856,9 +891,10 @@ export default function TransactionModal({ open, onClose, onSaved, transaction, 
                         <Users className="w-4 h-4 text-muted-foreground" />
                         Tag friends?
                       </span>
-                      <Switch checked={friendsEnabled} onCheckedChange={toggleFriends} />
+                      <Switch checked={friendsEnabled} onCheckedChange={toggleFriends} disabled={isCardPayment} />
                     </div>
-                    {friendsEnabled && (
+                    {isCardPayment && <p className="text-xs text-muted-foreground">Not available for a card bill payment</p>}
+                    {friendsEnabled && !isCardPayment && (
                       <div className="space-y-1.5">
                         {form.contact_ids.length > 0 && (
                           <div className="flex flex-wrap gap-1.5">

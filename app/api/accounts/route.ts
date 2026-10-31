@@ -58,7 +58,7 @@ export async function GET() {
   if (ids.length === 0) return NextResponse.json({ available: true, accounts: [] })
 
   const [txRes, trRes] = await Promise.all([
-    supabase.from('transactions').select('account_id, amount, type').eq('user_id', user.id).in('account_id', ids),
+    supabase.from('transactions').select('account_id, amount, type, category').eq('user_id', user.id).in('account_id', ids),
     supabase.from('account_transfers').select('from_account_id, to_account_id, amount').eq('user_id', user.id),
   ])
   if (txRes.error) return NextResponse.json({ error: txRes.error.message }, { status: 500 })
