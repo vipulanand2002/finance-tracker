@@ -4,5 +4,7 @@
     <string name="widget_title">Finance Tracker · Quick add</string>
     <string name="widget_expense">+ Expense</string>
     <string name="widget_income">+ Income</string>
-    <string name="widget_description">Add an expense or income in one tap</string>
+    <string name="widget_paste">Paste SMS</string>
+    <string name="widget_paste_short">SMS</string>
+    <string name="widget_description">Add an expense or income in one tap. Make it bigger to paste a bank or card SMS.</string>
 </resources>

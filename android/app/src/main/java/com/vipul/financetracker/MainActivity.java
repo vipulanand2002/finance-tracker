@@ -31,10 +31,15 @@ public class MainActivity extends Activity {
     // Production URL of the web app (deployed by Vercel from the master branch)
     static final String BASE_URL = "https://finance-tracker-mauve-sigma-65.vercel.app";
     static final String EXTRA_PATH = "path";
+    /** From the widget's "Paste SMS": read the clipboard and open Add from SMS */
+    static final String EXTRA_PASTE_SMS = "paste_sms";
     private static final int FILE_CHOOSER = 1001;
     private static final int REQ_NOTIFICATIONS = 1002;
 
     private WebView web;
+    // Clipboard can only be read once the window has focus (Android 10+), so a paste
+    // request from the widget waits for onWindowFocusChanged.
+    private boolean pendingPaste;
     private ValueCallback<Uri[]> filePathCallback;
 
     @Override
@@ -103,9 +108,45 @@ public class MainActivity extends Activity {
 
         if (savedInstanceState != null) {
             web.restoreState(savedInstanceState);
+        } else if (wantsPaste(getIntent())) {
+            pendingPaste = true; // page loads once the window has focus
         } else {
             web.loadUrl(urlFor(getIntent()));
         }
+    }
+
+    private static boolean wantsPaste(Intent intent) {
+        return intent != null && intent.getBooleanExtra(EXTRA_PASTE_SMS, false);
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && pendingPaste) loadPaste();
+    }
+
+    /** Open Add from SMS with whatever is on the clipboard (an empty paste box if nothing). */
+    private void loadPaste() {
+        pendingPaste = false;
+        String text = clipboardText().trim();
+        web.loadUrl(BASE_URL + "/share" + (text.isEmpty() ? "" : "?text=" + Uri.encode(text)));
+    }
+
+    /** Current clipboard text, or "" — call on the UI thread while the app has focus. */
+    private String clipboardText() {
+        try {
+            android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (cm != null && cm.hasPrimaryClip()) {
+                android.content.ClipData clip = cm.getPrimaryClip();
+                if (clip != null && clip.getItemCount() > 0) {
+                    CharSequence text = clip.getItemAt(0).coerceToText(this);
+                    if (text != null) return text.toString();
+                }
+            }
+        } catch (RuntimeException ignored) {
+            // clipboard unavailable — the page falls back to a paste box
+        }
+        return "";
     }
 
     private static String urlFor(Intent intent) {
@@ -123,6 +164,11 @@ public class MainActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        if (wantsPaste(intent)) {
+            pendingPaste = true;
+            if (hasWindowFocus()) loadPaste();
+            return;
+        }
         if (intent.getStringExtra(EXTRA_PATH) != null || intent.getData() != null) web.loadUrl(urlFor(intent));
     }
 
@@ -195,18 +241,7 @@ public class MainActivity extends Activity {
             final String[] out = {""};
             final java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
             runOnUiThread(() -> {
-                try {
-                    android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-                    if (cm != null && cm.hasPrimaryClip()) {
-                        android.content.ClipData clip = cm.getPrimaryClip();
-                        if (clip != null && clip.getItemCount() > 0) {
-                            CharSequence text = clip.getItemAt(0).coerceToText(MainActivity.this);
-                            if (text != null) out[0] = text.toString();
-                        }
-                    }
-                } catch (RuntimeException ignored) {
-                    // clipboard unavailable — the page falls back to a paste box
-                }
+                out[0] = clipboardText();
                 done.countDown();
             });
             try {
