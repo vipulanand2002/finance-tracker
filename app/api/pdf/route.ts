@@ -7,6 +7,11 @@ import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
 // output well within limits. 1 token ≈ 4 chars → 3,000 * 4 = 12,000 chars
 const MAX_CHUNK_CHARS = 12000
 
+// The whole import must finish (or fail with a clear message) well inside this limit,
+// instead of retrying an overloaded AI service until the platform kills the request.
+export const maxDuration = 120
+const WORK_BUDGET_MS = 100000
+
 async function extractPdfText(buffer: ArrayBuffer, password?: string): Promise<string> {
   // pdf-parse bundles its own pdfjs v2 which is Node.js-native (no browser APIs).
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -106,7 +111,7 @@ function extractJsonArray(raw: string): any[] {
   return []
 }
 
-async function parseChunk(chunkText: string, categories: string, billingContext: string): Promise<any[]> {
+async function parseChunk(chunkText: string, categories: string, billingContext: string, deadline: number): Promise<any[]> {
   const prompt = `You are a precise bank statement parser. Extract ONLY actual debit/credit transactions from the text below. ${billingContext}
 
 Respond with ONLY a valid JSON array — no explanation, no markdown, no code fences, all keys double-quoted.
@@ -144,7 +149,7 @@ ${chunkText}`
   let lastErr: any = null
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const raw = await geminiText(prompt, 0.1)
+      const raw = await geminiText(prompt, 0.1, { deadline })
       console.log(`[PDF] gemini outLen=${raw.length} preview=${raw.slice(0, 100)}`)
       if (raw.trim()) return extractJsonArray(raw)
       console.warn('[PDF] Gemini returned empty — retrying')
@@ -152,8 +157,8 @@ ${chunkText}`
       lastErr = err
       const status = err?.status ?? err?.response?.status
       const transient = status === 429 || status === 503 || (status >= 500 && status < 600)
-      if (transient && attempt < 2) {
-        const wait = 5000 * (attempt + 1)
+      if (transient && attempt < 2 && status !== 504 && Date.now() + 8000 < deadline) {
+        const wait = 3000 * (attempt + 1)
         console.warn(`[PDF] Gemini ${status} — waiting ${wait}ms (attempt ${attempt + 1}/3)`)
         await new Promise(r => setTimeout(r, wait))
         continue
@@ -261,12 +266,13 @@ export async function POST(request: Request) {
     const chunks = splitIntoChunks(compressed)
     console.log(`[PDF] ${chunks.length} chunk(s), compressed length: ${compressed.length}`)
     const allTransactions: any[] = []
+    const deadline = Date.now() + WORK_BUDGET_MS
 
-    for (let i = 0; i < chunks.length; i++) {
-      // Small proactive delay between chunks to stay under TPM on free tier
-      if (i > 0) await new Promise(r => setTimeout(r, 3000))
-      const txs = await parseChunk(chunks[i], allCategories, billingContext)
-      if (Array.isArray(txs)) allTransactions.push(...txs)
+    // Two chunks at a time: faster than one by one, and still gentle on the free-tier limits
+    for (let i = 0; i < chunks.length; i += 2) {
+      const batch = chunks.slice(i, i + 2)
+      const results = await Promise.all(batch.map(c => parseChunk(c, allCategories, billingContext, deadline)))
+      for (const txs of results) if (Array.isArray(txs)) allTransactions.push(...txs)
     }
 
     // Post-processing: drop clearly invalid rows
@@ -308,6 +314,12 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: 'AI rate limit hit. Please wait a minute and try again.' },
         { status: 429 }
+      )
+    }
+    if (status === 503 || status === 504 || status === 500 || /high demand|unavailable|taking too long/i.test(aiMsg)) {
+      return NextResponse.json(
+        { error: 'The AI service is very busy right now, so the statement couldn’t be read. Nothing was lost — please try again in a few minutes.' },
+        { status: 503 }
       )
     }
     if (status === 401 || status === 403 || /api key/i.test(aiMsg)) {

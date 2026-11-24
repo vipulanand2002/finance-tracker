@@ -9,7 +9,16 @@ import type { Transaction } from '@/types'
 export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-lite-latest'
 const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || 'gemini-3.8-flash'
 // Ordered, de-duped list of models to try in turn.
-const MODELS = [...new Set([GEMINI_MODEL, GEMINI_FALLBACK_MODEL])]
+// Extra stable models sit in different capacity pools, so a demand spike on one rarely hits all.
+// A model that doesn't exist answers 404 straight away and the next one is tried.
+const MODELS = [...new Set([GEMINI_MODEL, GEMINI_FALLBACK_MODEL, 'gemini-2.5-flash-lite', 'gemini-2.5-flash'])]
+// One call to one model may not take longer than this — an overloaded model can hang
+const CALL_TIMEOUT_MS = 30000
+
+export interface GenOptions {
+  /** Stop trying (and throw) once this time (ms since epoch) has passed */
+  deadline?: number
+}
 // 8192 is safe across all flash / flash-lite variants; our outputs are small.
 const MAX_OUTPUT_TOKENS = 8192
 
@@ -25,14 +34,23 @@ function client() {
 // "high demand") on the same model before falling through to the next one.
 // gemini-3.x flash can return 503 during demand spikes, so the fallback model
 // keeps chat/insights working when the primary is momentarily saturated.
-async function generate(contents: unknown, temperature: number): Promise<string> {
+async function generate(contents: unknown, temperature: number, opts: GenOptions = {}): Promise<string> {
   const cfg = { temperature, maxOutputTokens: MAX_OUTPUT_TOKENS }
   let lastErr: unknown = null
   for (const model of MODELS) {
     for (let attempt = 0; attempt < 2; attempt++) {
+      if (opts.deadline && Date.now() > opts.deadline - 2000) {
+        throw Object.assign(new Error('The AI service is taking too long to answer'), { status: 504 })
+      }
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const res = await client().models.generateContent({ model, contents: contents as any, config: cfg })
+        const call = client().models.generateContent({ model, contents: contents as any, config: cfg })
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const timeout = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(Object.assign(new Error('The AI service is taking too long to answer'), { status: 504 })), CALL_TIMEOUT_MS)
+        })
+        let res
+        try { res = await Promise.race([call, timeout]) } finally { clearTimeout(timer) }
         return res.text ?? ''
       } catch (err) {
         lastErr = err
@@ -41,7 +59,8 @@ async function generate(contents: unknown, temperature: number): Promise<string>
         // Auth / bad-request errors won't be fixed by retrying or another model
         if (status === 400 || status === 401 || status === 403) throw err
         const transient = status === 429 || status === 500 || status === 502 || status === 503 || status === 504
-        if (transient && attempt < 1) {
+        // A timeout (504 from us) means this model is stuck: move on rather than wait again
+        if (transient && attempt < 1 && status !== 504) {
           await new Promise(r => setTimeout(r, 700)) // brief backoff, then retry same model
           continue
         }
@@ -53,13 +72,13 @@ async function generate(contents: unknown, temperature: number): Promise<string>
 }
 
 // Plain text prompt → text.
-export async function geminiText(prompt: string, temperature = 0.2): Promise<string> {
-  return generate(prompt, temperature)
+export async function geminiText(prompt: string, temperature = 0.2, opts?: GenOptions): Promise<string> {
+  return generate(prompt, temperature, opts)
 }
 
 // Multimodal prompt (image or PDF bytes + instructions) → text.
-export async function geminiVision(prompt: string, base64: string, mimeType: string, temperature = 0.1): Promise<string> {
-  return generate([{ inlineData: { data: base64, mimeType } }, { text: prompt }], temperature)
+export async function geminiVision(prompt: string, base64: string, mimeType: string, temperature = 0.1, opts?: GenOptions): Promise<string> {
+  return generate([{ inlineData: { data: base64, mimeType } }, { text: prompt }], temperature, opts)
 }
 
 function buildTransactionSummary(transactions: Transaction[]): string {

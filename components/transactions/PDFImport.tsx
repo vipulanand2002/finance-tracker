@@ -58,7 +58,7 @@ export default function PDFImport({ open, onClose, onImported, preloadedTransact
     try {
       const fd = new FormData()
       fd.append('pdf', file)
-      const res = await fetch('/api/pdf', { method: 'POST', body: fd })
+      const res = await fetch('/api/pdf', { method: 'POST', body: fd, signal: AbortSignal.timeout(130000) })
 
       let data: any
       try {

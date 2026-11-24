@@ -135,13 +135,28 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
       if (statementDay) fd.append('statementDay', statementDay)
       if (cardId) fd.append('is_card', 'true')
 
-      const res = await fetch('/api/pdf', { method: 'POST', body: fd })
+      // Never wait forever: the server gives up after ~100 s, so the page does shortly after
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 130000)
+      let res: Response
+      try {
+        res = await fetch('/api/pdf', { method: 'POST', body: fd, signal: ctrl.signal })
+      } catch {
+        const msg = 'Reading the statement took too long, so it was stopped. The AI service may be busy — please try again in a few minutes.'
+        setParseError(msg)
+        toast.error(msg)
+        return
+      } finally {
+        clearTimeout(timer)
+      }
 
       let data: any
       try {
         data = await res.json()
       } catch {
-        toast.error('Server error — the PDF may be too large or took too long to process. Try a smaller statement.')
+        const msg = 'The server didn’t answer in time. Please try again — if it keeps happening, the AI service may be busy.'
+        setParseError(msg)
+        toast.error(msg)
         return
       }
 
@@ -151,9 +166,9 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
           toast.error('Incorrect password. Please check and try again.')
         } else if (pwdHeader === 'needed') {
           toast.error('This PDF is password-protected. Enter the password above.')
-        } else if (res.status === 429) {
-          setParseError(data.error)
         } else {
+          // Shown on the page as well as in a toast, so it can't be missed
+          setParseError(data.error)
           toast.error(data.error)
         }
         return
@@ -378,10 +393,11 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
                   </p>
                 </div>
 
-                {/* API error banner (e.g. quota exceeded) */}
+                {/* Error banner (AI busy, rate limit, timeout…) */}
                 {parseError && (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-                    {parseError}
+                    <p>{parseError}</p>
+                    <p className="text-xs mt-1 opacity-80">Choose the file again below to retry.</p>
                   </div>
                 )}
 
