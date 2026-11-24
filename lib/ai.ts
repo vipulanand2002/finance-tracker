@@ -6,19 +6,22 @@ import type { Transaction } from '@/types'
 // Primary: Flash-Lite — ~500 free requests/day, high-throughput, less prone to
 // 503 "high demand" than full Flash (~20/day). "-latest" alias never 404s on
 // model retirement. Fallback to full Flash if Flash-Lite isn't provisioned.
-export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-lite-latest'
+export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite'
 const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || 'gemini-3.8-flash'
 // Ordered, de-duped list of models to try in turn. Flash-Lite has by far the biggest free
 // allowance (15 requests/min, 500/day) so it goes first; full 3.8 Flash only has 5/min and
 // 20/day on the free tier, so it is the last resort. A model that 404s is skipped straight away.
-const MODELS = [...new Set([GEMINI_MODEL, 'gemini-3.5-flash-lite', GEMINI_FALLBACK_MODEL])]
+// Checked with the admin AI-status tab on 24 Nov: 3.5 Flash Lite and 3 Flash Preview answered in
+// under a second, while the "-latest" alias hung (504) and 3.8 Flash was overloaded — so the
+// aliases go last.
+const MODELS = [...new Set([GEMINI_MODEL, 'gemini-3-flash-preview', GEMINI_FALLBACK_MODEL, 'gemini-flash-lite-latest'])]
 
 // A model that just answered 429 (over its limit) is left alone for a while, so one busy
 // stretch doesn't waste the other limits on calls that are certain to fail.
 const coolDown = new Map<string, number>()
 const COOL_DOWN_MS = 10 * 60 * 1000
 // One call to one model may not take longer than this — an overloaded model can hang
-const CALL_TIMEOUT_MS = 30000
+const CALL_TIMEOUT_MS = 20000
 
 export interface GenOptions {
   /** Stop trying (and throw) once this time (ms since epoch) has passed */
