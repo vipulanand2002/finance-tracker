@@ -79,6 +79,42 @@ async function generate(contents: unknown, temperature: number, opts: GenOptions
   throw lastErr
 }
 
+// ── Diagnostics (admin page) ───────────────────────────────────────────────────
+export interface ModelProbe { model: string; ok: boolean; status?: number | string; ms: number; note?: string }
+
+/** One tiny request to each model, to see which ones answer right now. */
+export async function probeModels(models: string[]): Promise<ModelProbe[]> {
+  return Promise.all(models.map(async (model): Promise<ModelProbe> => {
+    const t0 = Date.now()
+    try {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error('no answer in 20 s'), { status: 504 })), 20000) })
+      try {
+        const res = await Promise.race([client().models.generateContent({ model, contents: 'Reply with the single word OK', config: { maxOutputTokens: 8, temperature: 0 } }), timeout])
+        return { model, ok: true, ms: Date.now() - t0, note: (res.text ?? '').trim().slice(0, 20) }
+      } finally { clearTimeout(timer) }
+    } catch (err) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const e = err as any
+      return { model, ok: false, status: e?.status ?? e?.code ?? 'error', ms: Date.now() - t0, note: String(e?.message ?? '').replace(/\s+/g, ' ').slice(0, 140) }
+    }
+  }))
+}
+
+/** Models the account can use that look like text models (for the admin page). */
+export async function listFlashModels(): Promise<string[]> {
+  const names: string[] = []
+  const pager = await client().models.list()
+  for await (const m of pager) {
+    const n = (m.name ?? '').replace('models/', '')
+    if (/flash|lite/i.test(n) && !/image|tts|live|audio|embed|vision|robot/i.test(n)) names.push(n)
+    if (names.length >= 40) break
+  }
+  return names
+}
+
+export const AI_MODELS_IN_USE = MODELS
+
 // Plain text prompt → text.
 export async function geminiText(prompt: string, temperature = 0.2, opts?: GenOptions): Promise<string> {
   return generate(prompt, temperature, opts)
