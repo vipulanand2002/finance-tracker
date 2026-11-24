@@ -75,8 +75,13 @@ export default function PDFImport({ open, onClose, onImported, preloadedTransact
 
       setTransactions(data.transactions.map((t: Omit<ParsedTransaction, 'selected'>) => ({ ...t, selected: true })))
       setStep('preview')
-      if (data.source === 'rules') {
-        toast.warning('The AI service is busy, so this statement was read with basic matching. Please check the descriptions and categories before importing.', { duration: 10000 })
+      if (data.source === 'rules' || data.source === 'mixed') {
+        toast.warning(
+          data.source === 'mixed'
+            ? 'The AI service was busy for part of this statement, so those rows were read with basic matching. Please check the descriptions and categories before importing.'
+            : 'The AI service is busy, so this statement was read with basic matching. Please check the descriptions and categories before importing.',
+          { duration: 10000 },
+        )
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to parse PDF')

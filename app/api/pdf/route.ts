@@ -12,7 +12,7 @@ const MAX_CHUNK_CHARS = 5000
 // instead of retrying an overloaded AI service until the platform kills the request.
 export const maxDuration = 120
 // AI gets this long; if it can't answer, the statement is read without AI (see parseStatementByRules)
-const WORK_BUDGET_MS = 45000
+const WORK_BUDGET_MS = 75000
 
 async function extractPdfText(buffer: ArrayBuffer, password?: string): Promise<string> {
   // pdf-parse bundles its own pdfjs v2 which is Node.js-native (no browser APIs).
@@ -272,34 +272,44 @@ export async function POST(request: Request) {
     const chunks = splitIntoChunks(compressed)
     console.log(`[PDF] ${chunks.length} chunk(s), compressed length: ${compressed.length}`)
     let allTransactions: any[] = []
-    let source: 'ai' | 'rules' = 'ai'
+    let source: 'ai' | 'rules' | 'mixed' = 'ai'
     let aiError: unknown = null
     const deadline = Date.now() + WORK_BUDGET_MS
 
     // AI first (best at categories and odd layouts). One chunk after another, with a short pause,
     // to stay under the free-tier rate limits.
-    try {
-      for (let i = 0; i < chunks.length; i++) {
+    // Each chunk is read by the AI; a chunk the AI can't read (busy, over its limit, out of time) is
+    // read with basic matching instead, so the parts the AI did read are never thrown away.
+    let aiChunks = 0
+    let ruleChunks = 0
+    let aiFailures = 0
+    for (let i = 0; i < chunks.length; i++) {
+      // After two failures in a row the AI is clearly unavailable: don't wait on it for the rest
+      if (aiFailures < 2) {
         if (i > 0) await new Promise(r => setTimeout(r, 1500))
-        const txs = await parseChunk(chunks[i], allCategories, billingContext, deadline)
-        if (Array.isArray(txs)) allTransactions.push(...txs)
+        try {
+          const txs = await parseChunk(chunks[i], allCategories, billingContext, deadline)
+          if (Array.isArray(txs)) allTransactions.push(...txs)
+          aiChunks++
+          aiFailures = 0
+          continue
+        } catch (err) {
+          aiFailures++
+          aiError = err
+          console.error(`[PDF] AI could not read chunk ${i + 1}/${chunks.length}, using basic matching for it:`, (err as any)?.status ?? (err as Error)?.message)
+        }
       }
-    } catch (err) {
-      aiError = err
-      console.error('[PDF] AI could not read the statement, falling back to rules:', (err as any)?.status ?? (err as Error)?.message)
+      const byRules = parseStatementByRules(chunks[i])
+      console.log(`[PDF] chunk ${i + 1}: basic matching found ${byRules.length} transaction(s)`)
+      allTransactions.push(...byRules)
+      ruleChunks++
     }
+    if (ruleChunks > 0) source = aiChunks > 0 ? 'mixed' : 'rules'
+    if (ruleChunks > 0) aiError = null
+    console.log(`[PDF] read by AI: ${aiChunks} chunk(s), by basic matching: ${ruleChunks} chunk(s)`)
 
-    // AI busy / over its limit / found nothing → read the rows directly so the import still works
-    if (aiError || allTransactions.length === 0) {
-      const byRules = parseStatementByRules(text)
-      console.log(`[PDF] rules fallback found ${byRules.length} transaction(s)`)
-      if (byRules.length > 0) {
-        allTransactions = byRules
-        source = 'rules'
-        aiError = null
-      }
-    }
-    if (aiError) throw aiError
+    // Nothing found anywhere → report the AI's problem if it had one
+    if (allTransactions.length === 0 && aiError) throw aiError
 
     // Post-processing: drop clearly invalid rows
     const JUNK_DESC = /^(balance|total|subtotal|opening|closing|minimum|credit limit|available|amount due|statement|reward|cashback earned|points|miles|interest|principal|fees?|charges?|date|description|debit|credit|particulars|narration|details|ref(erence)?|sl\.?\s*no|sr\.?\s*no|s\.?\s*no)\.?$/i
