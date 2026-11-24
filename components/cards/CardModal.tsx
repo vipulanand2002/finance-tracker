@@ -1,15 +1,20 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { toast } from 'sonner'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Loader2 } from 'lucide-react'
-import { getBankLogoUrl, detectNetwork, getCardTheme } from '@/lib/bank-logos'
-import CardDisplay, { CARD_GRADIENTS, type CardData } from './CardDisplay'
+import { ImageIcon, Loader2, Search, Sparkles, Upload, X } from 'lucide-react'
+import { getBankLogoUrl } from '@/lib/bank-logos'
+import {
+  GENERIC_BY_ID, GENERIC_DESIGNS, LEGACY_IDS, detectNetwork, matchCatalog, networkFromText, resolveLook, typeFromText,
+  type Network,
+} from '@/lib/card-catalog'
+import { cn } from '@/lib/utils'
+import CardDisplay, { type CardData } from './CardDisplay'
 
 interface Props {
   open: boolean
@@ -17,8 +22,6 @@ interface Props {
   onSaved: () => void
   card?: CardData | null
 }
-
-const COLORS = Object.keys(CARD_GRADIENTS) as (keyof typeof CARD_GRADIENTS)[]
 
 function ordinal(n: number) {
   const s = ['th', 'st', 'nd', 'rd']
@@ -34,18 +37,62 @@ const empty = {
   expiry_month: '',
   expiry_year: '',
   holder_name: '',
-  color: 'blue',
   cycle_start_day: '',
   statement_day: '',
 }
 
+const NETWORK_OPTIONS: { value: 'auto' | Network; label: string }[] = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'visa', label: 'Visa' },
+  { value: 'mastercard', label: 'Mastercard' },
+  { value: 'rupay', label: 'RuPay' },
+  { value: 'amex', label: 'Amex' },
+]
+const NETWORK_NAME: Record<Network, string> = { visa: 'Visa', mastercard: 'Mastercard', rupay: 'RuPay', amex: 'American Express', other: '' }
+
+interface ArtResult { thumb: string; url: string; title: string }
+
 export default function CardModal({ open, onClose, onSaved, card }: Props) {
   const [form, setForm] = useState(empty)
-  const [detectedNetwork, setDetectedNetwork] = useState<CardData['network']>('other')
+  const [networkChoice, setNetworkChoice] = useState<'auto' | Network>('auto')
+  // 'auto' (look chosen from the name), a design id, or 'img:<url>'
+  const [design, setDesign] = useState('auto')
   const [logoUrl, setLogoUrl] = useState('')
   const [saving, setSaving] = useState(false)
 
+  // Fields the user has typed into themselves are never overwritten by name matching
+  const bankTouched = useRef(false)
+  const typeTouched = useRef(false)
+
+  // Card art: pick a design, upload a picture, or find one online
+  const [artTab, setArtTab] = useState<'designs' | 'upload' | 'online'>('designs')
+  const [searchText, setSearchText] = useState('')
+  const [searching, setSearching] = useState(false)
+  const [results, setResults] = useState<ArtResult[] | null>(null)
+  const [searchNote, setSearchNote] = useState<string | null>(null)
+  const [linkText, setLinkText] = useState('')
+  const [busyUrl, setBusyUrl] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  function reset() {
+    setForm(empty)
+    setNetworkChoice('auto')
+    setDesign('auto')
+    setLogoUrl('')
+    setArtTab('designs')
+    setResults(null)
+    setSearchNote(null)
+    setLinkText('')
+    setSearchText('')
+    bankTouched.current = false
+    typeTouched.current = false
+  }
+
   useEffect(() => {
+    if (!open) return
+    // Loading the form for the card being edited (or a blank one) when the dialog opens
+    /* eslint-disable react-hooks/set-state-in-effect */
     if (card) {
       setForm({
         card_name: card.card_name,
@@ -55,64 +102,132 @@ export default function CardModal({ open, onClose, onSaved, card }: Props) {
         expiry_month: card.expiry_month ? String(card.expiry_month) : '',
         expiry_year: card.expiry_year ? String(card.expiry_year) : '',
         holder_name: card.holder_name ?? '',
-        color: card.color,
         cycle_start_day: card.cycle_start_day ? String(card.cycle_start_day) : '',
         statement_day: card.statement_day ? String(card.statement_day) : '',
       })
-      setDetectedNetwork(card.network)
+      setNetworkChoice(card.network !== 'other' ? card.network : 'auto')
+      setDesign(card.color.startsWith('img:') || (GENERIC_BY_ID.has(card.color) && !LEGACY_IDS.has(card.color)) ? card.color : 'auto')
       setLogoUrl(card.logo_url ?? '')
+      setSearchText(`${card.card_name} ${card.bank_name}`.trim())
+      bankTouched.current = true
+      typeTouched.current = true
     } else {
       reset()
     }
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [card, open])
 
-  function reset() {
-    setForm(empty)
-    setDetectedNetwork('other')
-    setLogoUrl('')
-  }
-
-  // Debounced bank logo fetch when bank name changes
-  const fetchLogo = useCallback((bankName: string) => {
-    if (bankName.trim().length < 2) { setLogoUrl(''); return }
-    const url = getBankLogoUrl(bankName)
-    setLogoUrl(url)
-  }, [])
+  // ── What we know about the card from what's been typed ──
+  const digits = form.card_number.replace(/\D/g, '')
+  const isMasked = form.card_number.includes('•')
+  const match = matchCatalog(form.card_name, form.bank_name)
+  const numberNetwork = isMasked ? 'other' : detectNetwork(digits)
+  const nameNetwork = networkFromText(`${form.card_name} ${form.bank_name}`)
+  const autoNetwork: Network = numberNetwork !== 'other' ? numberNetwork : (nameNetwork !== 'other' ? nameNetwork : (match?.network ?? 'other'))
+  const network: Network = networkChoice === 'auto' ? autoNetwork : networkChoice
 
   function handleBankNameChange(value: string) {
+    bankTouched.current = true
     setForm(f => ({ ...f, bank_name: value }))
-    fetchLogo(value)
+    setLogoUrl(value.trim().length >= 2 ? getBankLogoUrl(value) : '')
+  }
+
+  function handleCardNameChange(value: string) {
+    setForm(f => {
+      const next = { ...f, card_name: value }
+      const m = matchCatalog(value, f.bank_name)
+      // A recognised card fills in what it knows — unless the user already set it
+      if (m?.bank && !bankTouched.current) {
+        next.bank_name = m.bank
+        setLogoUrl(getBankLogoUrl(m.bank))
+      }
+      if (!typeTouched.current) {
+        const t = typeFromText(value) ?? m?.type
+        if (t) next.card_type = t
+      }
+      return next
+    })
+    if (!searchText || searchText === `${form.card_name} ${form.bank_name}`.trim()) setSearchText(`${value} ${form.bank_name}`.trim())
   }
 
   function handleCardNumberChange(value: string) {
-    // Format as groups of 4
-    const digits = value.replace(/\D/g, '').slice(0, 16)
-    const formatted = digits.replace(/(.{4})/g, '$1 ').trim()
-    setForm(f => ({ ...f, card_number: formatted }))
-    setDetectedNetwork(detectNetwork(digits))
+    const d = value.replace(/\D/g, '').slice(0, 16)
+    setForm(f => ({ ...f, card_number: d.replace(/(.{4})/g, '$1 ').trim() }))
   }
 
-  // Build preview card object
+  // ── Card art ──
+  async function searchOnline() {
+    const q = searchText.trim()
+    if (q.length < 3) { toast.error('Type the card name to search'); return }
+    setSearching(true)
+    setResults(null)
+    try {
+      const res = await fetch(`/api/cards/art-search?q=${encodeURIComponent(q)}`)
+      const data = await res.json()
+      setResults(Array.isArray(data.results) ? data.results : [])
+      setSearchNote(data.note ?? null)
+      if (!data.results?.length && !data.note) toast.info('No pictures found — try a simpler name, or upload your own')
+    } catch {
+      setResults([])
+      toast.error('Search isn’t available right now — you can upload a picture instead')
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  async function chooseOnline(url: string) {
+    setBusyUrl(url)
+    try {
+      const res = await fetch('/api/cards/art', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error ?? 'Could not use that image')
+      setDesign(`img:${data.url}`)
+      toast.success('Card picture applied')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not use that image')
+    } finally {
+      setBusyUrl(null)
+    }
+  }
+
+  async function uploadPicture(file: File) {
+    setUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/cards/art', { method: 'POST', body: fd })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error ?? 'Could not use that image')
+      setDesign(`img:${data.url}`)
+      toast.success('Card picture applied')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not use that image')
+    } finally {
+      setUploading(false)
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  // ── Preview + save ──
   const previewCard: CardData = {
     id: '',
-    card_name: form.card_name || 'Card Name',
-    bank_name: form.bank_name || 'Bank Name',
-    last_four: form.card_number.replace(/\D/g, '').slice(-4) || '0000',
+    card_name: form.card_name || 'Card name',
+    bank_name: form.bank_name || 'Bank name',
+    last_four: digits.slice(-4) || '0000',
     card_type: form.card_type,
-    network: detectedNetwork,
+    network,
     expiry_month: form.expiry_month ? parseInt(form.expiry_month) : null,
     expiry_year: form.expiry_year ? parseInt(form.expiry_year) : null,
     holder_name: form.holder_name || null,
-    color: form.color,
+    color: design,
     logo_url: logoUrl || null,
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
 
-    const rawDigits = form.card_number.replace(/\D/g, '')
-    const lastFour = rawDigits.slice(-4)
-    if (lastFour.length !== 4) { toast.error('Enter a valid card number'); return }
+    const lastFour = digits.slice(-4)
+    if (lastFour.length !== 4) { toast.error('Enter the card number, or at least its last 4 digits'); return }
     if (!form.bank_name.trim()) { toast.error('Enter the bank name'); return }
     if (!form.card_name.trim()) { toast.error('Enter a card name'); return }
 
@@ -123,21 +238,18 @@ export default function CardModal({ open, onClose, onSaved, card }: Props) {
         bank_name: form.bank_name.trim(),
         last_four: lastFour,
         card_type: form.card_type,
-        network: detectedNetwork,
+        network,
         expiry_month: form.expiry_month ? parseInt(form.expiry_month) : null,
         expiry_year: form.expiry_year ? parseInt(form.expiry_year) : null,
         holder_name: form.holder_name.trim() || null,
-        color: form.color,
+        color: design,
         logo_url: logoUrl || null,
         cycle_start_day: form.cycle_start_day ? parseInt(form.cycle_start_day) : null,
         statement_day: form.statement_day ? parseInt(form.statement_day) : null,
       }
 
-      const url = card ? `/api/cards?id=${card.id}` : '/api/cards'
-      const method = card ? 'PATCH' : 'POST'
-
-      const res = await fetch(url, {
-        method,
+      const res = await fetch(card ? `/api/cards?id=${card.id}` : '/api/cards', {
+        method: card ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
@@ -156,10 +268,12 @@ export default function CardModal({ open, onClose, onSaved, card }: Props) {
 
   const currentYear = new Date().getFullYear()
   const years = Array.from({ length: 15 }, (_, i) => currentYear + i)
+  const autoLook = resolveLook({ card_name: form.card_name, bank_name: form.bank_name, color: 'auto' })
+  const usingImage = design.startsWith('img:')
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) { reset(); onClose() } }}>
-      <DialogContent className="sm:max-w-lg max-h-[92vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{card ? 'Edit Card' : 'Add Card'}</DialogTitle>
         </DialogHeader>
@@ -171,7 +285,26 @@ export default function CardModal({ open, onClose, onSaved, card }: Props) {
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-3 py-1">
+        <form onSubmit={handleSubmit} className="space-y-4 py-1">
+          {/* Card Name first: it can fill in the rest */}
+          <div className="space-y-1">
+            <Label>Card Name *</Label>
+            <Input
+              placeholder="e.g. HDFC Infinia, Amazon Pay ICICI, SBI RuPay Platinum"
+              value={form.card_name}
+              onChange={e => handleCardNameChange(e.target.value)}
+              required
+            />
+            {match ? (
+              <p className="text-xs text-emerald-600 flex items-center gap-1">
+                <Sparkles className="w-3 h-3" /> Recognised: {match.label}
+                {match.network ? ` · ${NETWORK_NAME[match.network]}` : ''} — design applied
+              </p>
+            ) : form.card_name.trim().length > 2 ? (
+              <p className="text-xs text-muted-foreground">Not in our list — pick a design below, or upload / find a picture of the card.</p>
+            ) : null}
+          </div>
+
           {/* Bank Name */}
           <div className="space-y-1">
             <Label>Bank Name *</Label>
@@ -181,28 +314,11 @@ export default function CardModal({ open, onClose, onSaved, card }: Props) {
               onChange={e => handleBankNameChange(e.target.value)}
               required
             />
-            {logoUrl && (
-              <p className="text-xs text-muted-foreground">Logo fetched via Google services</p>
-            )}
-          </div>
-
-          {/* Card Name */}
-          <div className="space-y-1">
-            <Label>Card Name *</Label>
-            <Input
-              placeholder="e.g. Amazon Pay ICICI Credit Card"
-              value={form.card_name}
-              onChange={e => setForm(f => ({ ...f, card_name: e.target.value }))}
-              required
-            />
-            {getCardTheme(form.card_name) && (
-              <p className="text-xs text-emerald-600">Known card detected — design applied automatically</p>
-            )}
           </div>
 
           {/* Card Number */}
           <div className="space-y-1">
-            <Label>Card Number *</Label>
+            <Label>Card Number * <span className="text-xs font-normal text-muted-foreground">(or just the last 4 digits)</span></Label>
             <Input
               placeholder="1234 5678 9012 3456"
               value={form.card_number}
@@ -210,47 +326,170 @@ export default function CardModal({ open, onClose, onSaved, card }: Props) {
               maxLength={19}
               inputMode="numeric"
             />
-            {detectedNetwork !== 'other' && (
-              <p className="text-xs text-muted-foreground capitalize">
-                Detected: {detectedNetwork === 'mastercard' ? 'Mastercard' : detectedNetwork.toUpperCase()}
-              </p>
-            )}
           </div>
 
-          {/* Card Type + Color */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label>Card Type</Label>
-              <Select value={form.card_type} onValueChange={v => v && setForm(f => ({ ...f, card_type: v as typeof form.card_type }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="credit">Credit</SelectItem>
-                  <SelectItem value="debit">Debit</SelectItem>
-                  <SelectItem value="prepaid">Prepaid</SelectItem>
-                </SelectContent>
-              </Select>
+          {/* Network */}
+          <div className="space-y-1.5">
+            <Label>Card Network</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {NETWORK_OPTIONS.map(o => (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => setNetworkChoice(o.value)}
+                  className={cn(
+                    'px-3 py-1 rounded-full border text-xs transition-colors',
+                    networkChoice === o.value ? 'bg-primary text-primary-foreground border-primary' : 'text-muted-foreground hover:text-foreground hover:border-foreground/40',
+                  )}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {networkChoice === 'auto'
+                ? (autoNetwork !== 'other' ? `Detected: ${NETWORK_NAME[autoNetwork]}` : 'Couldn’t tell from the number or name — choose one above.')
+                : `Set to ${NETWORK_NAME[networkChoice as Network]}`}
+            </p>
+          </div>
+
+          {/* Card Type */}
+          <div className="space-y-1">
+            <Label>Card Type</Label>
+            <Select value={form.card_type} onValueChange={v => { if (v) { typeTouched.current = true; setForm(f => ({ ...f, card_type: v as typeof form.card_type })) } }}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="credit">Credit</SelectItem>
+                <SelectItem value="debit">Debit</SelectItem>
+                <SelectItem value="prepaid">Prepaid</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* ── Card design ── */}
+          <div className="space-y-2 rounded-lg border p-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-medium">Card design</p>
+              {usingImage && (
+                <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setDesign('auto')}>
+                  <X className="w-3 h-3 mr-1" /> Remove picture
+                </Button>
+              )}
             </div>
 
-            <div className="space-y-1">
-              <Label>
-                Card Color
-                {getCardTheme(form.card_name) && (
-                  <span className="ml-1 text-[10px] font-normal text-muted-foreground">(auto)</span>
-                )}
-              </Label>
-              <Select
-                value={form.color}
-                onValueChange={v => v && setForm(f => ({ ...f, color: v }))}
-                disabled={Boolean(getCardTheme(form.card_name))}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {COLORS.map(c => (
-                    <SelectItem key={c} value={c} className="capitalize">{c}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="flex items-center bg-muted rounded-lg p-0.5 text-xs">
+              {([['designs', 'Designs'], ['upload', 'Upload picture'], ['online', 'Find online']] as const).map(([v, label]) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setArtTab(v)}
+                  className={cn('flex-1 px-2 py-1.5 rounded-md transition-colors', artTab === v ? 'bg-background shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground')}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
+
+            {artTab === 'designs' && (
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 pt-1">
+                {/* Auto: the look we pick from the name/bank */}
+                <button type="button" onClick={() => setDesign('auto')} className="text-left space-y-1">
+                  <div className={cn('rounded-xl ring-offset-2 ring-offset-background', design === 'auto' ? 'ring-2 ring-primary' : 'ring-1 ring-transparent hover:ring-border')}>
+                    <CardDisplay card={previewCard} designOverride={autoLook.design} thumb />
+                  </div>
+                  <p className="text-[11px] text-muted-foreground truncate">{match ? match.label : 'Auto'}</p>
+                </button>
+                {GENERIC_DESIGNS.map(g => (
+                  <button key={g.id} type="button" onClick={() => setDesign(g.id)} className="text-left space-y-1">
+                    <div className={cn('rounded-xl ring-offset-2 ring-offset-background', design === g.id ? 'ring-2 ring-primary' : 'ring-1 ring-transparent hover:ring-border')}>
+                      <CardDisplay card={previewCard} designOverride={g} thumb />
+                    </div>
+                    <p className="text-[11px] text-muted-foreground truncate">{g.name}</p>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {artTab === 'upload' && (
+              <div className="space-y-2 pt-1">
+                <p className="text-xs text-muted-foreground">
+                  Use a photo or screenshot of your card — or the card art from your bank’s app. Don’t include the full number or CVV; the card shows only the last 4 digits.
+                </p>
+                <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) uploadPicture(f) }} />
+                <Button type="button" variant="outline" onClick={() => fileRef.current?.click()} disabled={uploading}>
+                  {uploading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />}
+                  {uploading ? 'Uploading…' : 'Choose a picture'}
+                </Button>
+              </div>
+            )}
+
+            {artTab === 'online' && (
+              <div className="space-y-3 pt-1">
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Card name, e.g. HDFC Infinia"
+                    value={searchText}
+                    onChange={e => setSearchText(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); searchOnline() } }}
+                  />
+                  <Button type="button" onClick={searchOnline} disabled={searching} aria-label="Search">
+                    {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                  </Button>
+                </div>
+
+                {results && results.length > 0 && (
+                  <div className="grid grid-cols-3 gap-2">
+                    {results.map(r => (
+                      <button
+                        key={r.url}
+                        type="button"
+                        title={r.title}
+                        disabled={!!busyUrl}
+                        onClick={() => chooseOnline(r.url)}
+                        className="relative aspect-[1.586/1] rounded-lg overflow-hidden border bg-muted hover:ring-2 hover:ring-primary disabled:opacity-60"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={r.thumb} alt={r.title} className="w-full h-full object-cover" loading="lazy" />
+                        {busyUrl === r.url && <span className="absolute inset-0 flex items-center justify-center bg-black/40"><Loader2 className="w-5 h-5 text-white animate-spin" /></span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {results && results.length === 0 && !searching && !searchNote && (
+                  <p className="text-xs text-muted-foreground flex items-center gap-1.5"><ImageIcon className="w-3.5 h-3.5" /> Nothing found. Try a shorter name, or paste a link / upload a picture.</p>
+                )}
+                {searchNote && (
+                  <p className="text-xs text-muted-foreground">
+                    {searchNote === 'quota'
+                      ? 'Today’s search limit has been reached. '
+                      : searchNote === 'not_configured'
+                        ? 'In-app search isn’t switched on yet. '
+                        : 'Search isn’t available right now. '}
+                    Find the card on Google Images, copy the picture’s link, and paste it below.
+                  </p>
+                )}
+
+                <a
+                  href={`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(`${searchText || form.card_name} card`)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+                >
+                  <Search className="w-3 h-3" /> Open Google Images in a new tab
+                </a>
+
+                <div className="space-y-1">
+                  <Label className="text-xs">Or paste an image link</Label>
+                  <div className="flex gap-2">
+                    <Input placeholder="https://…/card.png" value={linkText} onChange={e => setLinkText(e.target.value)} />
+                    <Button type="button" variant="outline" disabled={!!busyUrl || !linkText.trim().toLowerCase().startsWith("https://")} onClick={() => chooseOnline(linkText.trim())}>
+                      {busyUrl && busyUrl === linkText.trim() ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Use'}
+                    </Button>
+                  </div>
+                </div>
+                <p className="text-[11px] text-muted-foreground">Pictures belong to their owners — they’re saved only as the look of your own card.</p>
+              </div>
+            )}
           </div>
 
           {/* Expiry */}
