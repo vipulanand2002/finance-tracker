@@ -8,10 +8,15 @@ import type { Transaction } from '@/types'
 // model retirement. Fallback to full Flash if Flash-Lite isn't provisioned.
 export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-lite-latest'
 const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || 'gemini-3.8-flash'
-// Ordered, de-duped list of models to try in turn.
-// 'gemini-flash-latest' is a rolling alias, so it keeps working as models are retired (the 2.5
-// models now answer 404 "no longer available"). A model that 404s is skipped straight away.
-const MODELS = [...new Set([GEMINI_MODEL, GEMINI_FALLBACK_MODEL, 'gemini-flash-latest'])]
+// Ordered, de-duped list of models to try in turn. Flash-Lite has by far the biggest free
+// allowance (15 requests/min, 500/day) so it goes first; full 3.8 Flash only has 5/min and
+// 20/day on the free tier, so it is the last resort. A model that 404s is skipped straight away.
+const MODELS = [...new Set([GEMINI_MODEL, 'gemini-3.5-flash-lite', GEMINI_FALLBACK_MODEL])]
+
+// A model that just answered 429 (over its limit) is left alone for a while, so one busy
+// stretch doesn't waste the other limits on calls that are certain to fail.
+const coolDown = new Map<string, number>()
+const COOL_DOWN_MS = 10 * 60 * 1000
 // One call to one model may not take longer than this — an overloaded model can hang
 const CALL_TIMEOUT_MS = 30000
 
@@ -30,17 +35,18 @@ function client() {
   return new GoogleGenAI({ apiKey })
 }
 
-// Try each model in turn, retrying transient errors (429 rate limit, 5xx /
-// "high demand") on the same model before falling through to the next one.
-// gemini-3.x flash can return 503 during demand spikes, so the fallback model
-// keeps chat/insights working when the primary is momentarily saturated.
+// Try each model in turn. A "busy" answer (503) is retried a couple of times with a growing
+// pause, since those pass quickly; a rate-limit answer (429) means that model is used up, so
+// it moves on to the next at once.
 async function generate(contents: unknown, temperature: number, opts: GenOptions = {}): Promise<string> {
   const cfg = { temperature, maxOutputTokens: MAX_OUTPUT_TOKENS }
   let lastErr: unknown = null
-  for (const model of MODELS) {
-    for (let attempt = 0; attempt < 2; attempt++) {
+  const now = Date.now()
+  const available = MODELS.filter(m => (coolDown.get(m) ?? 0) <= now)
+  for (const model of available.length > 0 ? available : MODELS) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       if (opts.deadline && Date.now() > opts.deadline - 2000) {
-        throw Object.assign(new Error('The AI service is taking too long to answer'), { status: 504 })
+        throw lastErr ?? Object.assign(new Error('The AI service is taking too long to answer'), { status: 504 })
       }
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -60,13 +66,13 @@ async function generate(contents: unknown, temperature: number, opts: GenOptions
         if (!(status === 404 && lastErr)) lastErr = err
         // Auth / bad-request errors won't be fixed by retrying or another model
         if (status === 400 || status === 401 || status === 403) throw err
-        const transient = status === 429 || status === 500 || status === 502 || status === 503 || status === 504
-        // A timeout (504 from us) means this model is stuck: move on rather than wait again
-        if (transient && attempt < 1 && status !== 504 && status !== 429) {
-          await new Promise(r => setTimeout(r, 700)) // brief backoff, then retry same model
+        if (status === 429) { coolDown.set(model, Date.now() + COOL_DOWN_MS); break }
+        // Busy: pause and try the same model again (1.5 s, then 4 s)
+        if ((status === 503 || status === 500 || status === 502) && attempt < 2) {
+          await new Promise(r => setTimeout(r, attempt === 0 ? 1500 : 4000))
           continue
         }
-        break // exhausted this model (or 404 unavailable) → try the next one
+        break // timed out, retired (404) or still busy → next model
       }
     }
   }
