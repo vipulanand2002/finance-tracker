@@ -62,7 +62,7 @@ async function generate(contents: unknown, temperature: number, opts: GenOptions
         if (status === 400 || status === 401 || status === 403) throw err
         const transient = status === 429 || status === 500 || status === 502 || status === 503 || status === 504
         // A timeout (504 from us) means this model is stuck: move on rather than wait again
-        if (transient && attempt < 1 && status !== 504) {
+        if (transient && attempt < 1 && status !== 504 && status !== 429) {
           await new Promise(r => setTimeout(r, 700)) // brief backoff, then retry same model
           continue
         }

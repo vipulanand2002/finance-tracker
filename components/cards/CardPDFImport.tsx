@@ -185,6 +185,9 @@ export default function CardPDFImport({ open, onClose, onImported, cardId, cardN
         })
       )
       setTransactions(parsed)
+      if (data.source === 'rules') {
+        toast.warning('The AI service is busy, so this statement was read with basic matching. Please check the descriptions and categories before importing.', { duration: 10000 })
+      }
 
       // Pre-fill cycle range from min/max transaction dates; user can adjust
       if (cardId) {

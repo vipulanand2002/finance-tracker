@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { geminiText } from '@/lib/ai'
+import { parseStatementByRules } from '@/lib/statement-rules'
 import { NextResponse } from 'next/server'
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
 
@@ -10,7 +11,8 @@ const MAX_CHUNK_CHARS = 12000
 // The whole import must finish (or fail with a clear message) well inside this limit,
 // instead of retrying an overloaded AI service until the platform kills the request.
 export const maxDuration = 120
-const WORK_BUDGET_MS = 100000
+// AI gets this long; if it can't answer, the statement is read without AI (see parseStatementByRules)
+const WORK_BUDGET_MS = 45000
 
 async function extractPdfText(buffer: ArrayBuffer, password?: string): Promise<string> {
   // pdf-parse bundles its own pdfjs v2 which is Node.js-native (no browser APIs).
@@ -154,15 +156,9 @@ ${chunkText}`
       if (raw.trim()) return extractJsonArray(raw)
       console.warn('[PDF] Gemini returned empty — retrying')
     } catch (err: any) {
+      // geminiText already retries and falls through to other models; retrying here would
+      // only burn more of the rate limit
       lastErr = err
-      const status = err?.status ?? err?.response?.status
-      const transient = status === 429 || status === 503 || (status >= 500 && status < 600)
-      if (transient && attempt < 2 && status !== 504 && Date.now() + 8000 < deadline) {
-        const wait = 3000 * (attempt + 1)
-        console.warn(`[PDF] Gemini ${status} — waiting ${wait}ms (attempt ${attempt + 1}/3)`)
-        await new Promise(r => setTimeout(r, wait))
-        continue
-      }
       throw err
     }
   }
@@ -265,15 +261,35 @@ export async function POST(request: Request) {
     const compressed = compressPdfText(text)
     const chunks = splitIntoChunks(compressed)
     console.log(`[PDF] ${chunks.length} chunk(s), compressed length: ${compressed.length}`)
-    const allTransactions: any[] = []
+    let allTransactions: any[] = []
+    let source: 'ai' | 'rules' = 'ai'
+    let aiError: unknown = null
     const deadline = Date.now() + WORK_BUDGET_MS
 
-    // One chunk after another, with a short pause, to stay under the free-tier rate limits
-    for (let i = 0; i < chunks.length; i++) {
-      if (i > 0) await new Promise(r => setTimeout(r, 1500))
-      const txs = await parseChunk(chunks[i], allCategories, billingContext, deadline)
-      if (Array.isArray(txs)) allTransactions.push(...txs)
+    // AI first (best at categories and odd layouts). One chunk after another, with a short pause,
+    // to stay under the free-tier rate limits.
+    try {
+      for (let i = 0; i < chunks.length; i++) {
+        if (i > 0) await new Promise(r => setTimeout(r, 1500))
+        const txs = await parseChunk(chunks[i], allCategories, billingContext, deadline)
+        if (Array.isArray(txs)) allTransactions.push(...txs)
+      }
+    } catch (err) {
+      aiError = err
+      console.error('[PDF] AI could not read the statement, falling back to rules:', (err as any)?.status ?? (err as Error)?.message)
     }
+
+    // AI busy / over its limit / found nothing → read the rows directly so the import still works
+    if (aiError || allTransactions.length === 0) {
+      const byRules = parseStatementByRules(text)
+      console.log(`[PDF] rules fallback found ${byRules.length} transaction(s)`)
+      if (byRules.length > 0) {
+        allTransactions = byRules
+        source = 'rules'
+        aiError = null
+      }
+    }
+    if (aiError) throw aiError
 
     // Post-processing: drop clearly invalid rows
     const JUNK_DESC = /^(balance|total|subtotal|opening|closing|minimum|credit limit|available|amount due|statement|reward|cashback earned|points|miles|interest|principal|fees?|charges?|date|description|debit|credit|particulars|narration|details|ref(erence)?|sl\.?\s*no|sr\.?\s*no|s\.?\s*no)\.?$/i
@@ -303,7 +319,7 @@ export async function POST(request: Request) {
         })
       : filtered
 
-    return NextResponse.json({ transactions: result })
+    return NextResponse.json({ transactions: result, source })
   } catch (err: any) {
     // Surface the real Gemini error for easier diagnosis
     const aiMsg: string = err?.error?.error?.message ?? err?.message ?? ''
