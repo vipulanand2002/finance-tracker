@@ -19,18 +19,15 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, CreditCard, Pencil, Trash2, FileUp, BarChart3, Smartphone } from 'lucide-react'
-import CardDisplay, { type CardData } from '@/components/cards/CardDisplay'
+import { Plus, CreditCard, FileUp, BarChart3, Smartphone } from 'lucide-react'
+import { type CardData } from '@/components/cards/CardDisplay'
+import CardsShowcase, { ViewSwitcher, CARD_VIEWS, type CardsView } from '@/components/cards/CardsShowcase'
 import CardModal from '@/components/cards/CardModal'
 import CardPDFImport from '@/components/cards/CardPDFImport'
 import TransactionModal from '@/components/transactions/TransactionModal'
 import { CATEGORY_COLORS } from '@/lib/constants'
 import { formatCurrency } from '@/lib/utils'
 import type { Transaction, CardStatement } from '@/types'
-
-const NETWORK_LABEL: Record<string, string> = {
-  visa: 'Visa', mastercard: 'Mastercard', rupay: 'RuPay', amex: 'Amex', other: '',
-}
 
 interface CardBudget {
   id: string
@@ -299,6 +296,8 @@ export default function CardsPage() {
   const [analyticsPdfOpen, setAnalyticsPdfOpen] = useState(false)
 
   const [selectedCardId, setSelectedCardId] = useState<string>('all')
+  // How the cards are laid out (scroll / grid / stack / list), remembered on this device
+  const [cardsView, setCardsView] = useState<CardsView>('carousel')
   const [selectedMonth, setSelectedMonth] = useState<string>('all')
   const [periodMode, setPeriodMode] = useState<'monthly' | 'cycle'>('monthly')
   const [selectedCycle, setSelectedCycle] = useState<string>('all')
@@ -434,6 +433,20 @@ export default function CardsPage() {
 
   const { pasteSms, dialog: pasteSmsDialog } = usePasteSms(selectedCardId !== 'all' ? selectedCardId : null)
 
+  useEffect(() => {
+    Promise.resolve().then(() => {
+      try {
+        const saved = localStorage.getItem('cards_view')
+        if (saved && CARD_VIEWS.some(v => v.value === saved)) setCardsView(saved as CardsView)
+      } catch { /* storage unavailable */ }
+    })
+  }, [])
+
+  function changeCardsView(v: CardsView) {
+    setCardsView(v)
+    try { localStorage.setItem('cards_view', v) } catch { /* ignore */ }
+  }
+
   const analyticsCard = selectedCardId !== 'all' ? cards.find(c => c.id === selectedCardId) ?? null : null
 
   return (
@@ -443,9 +456,12 @@ export default function CardsPage() {
           <h1 className="text-2xl font-bold">Cards</h1>
           <p className="text-muted-foreground text-sm">Manage your credit and debit cards</p>
         </div>
-        <Button onClick={() => { setEditCard(null); setModalOpen(true) }}>
-          <Plus className="w-4 h-4 mr-1" /> Add Card
-        </Button>
+        <div className="flex items-center gap-2">
+          {cards.length > 1 && <ViewSwitcher value={cardsView} onChange={changeCardsView} />}
+          <Button onClick={() => { setEditCard(null); setModalOpen(true) }}>
+            <Plus className="w-4 h-4 mr-1" /> Add Card
+          </Button>
+        </div>
       </div>
 
       {loading ? (
@@ -467,49 +483,21 @@ export default function CardsPage() {
         </Card>
       ) : (
         <>
-          {/* Cards grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {cards.map(card => (
-              <div key={card.id} className="space-y-3">
-                <CardDisplay card={card} />
-                <div className="flex items-center justify-between px-1">
-                  <div className="space-y-0.5 min-w-0">
-                    <p className="text-sm font-medium truncate">{card.card_name}</p>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Badge variant="outline" className="text-xs capitalize">{card.card_type}</Badge>
-                      {card.network !== 'other' && (
-                        <Badge variant="secondary" className="text-xs">{NETWORK_LABEL[card.network]}</Badge>
-                      )}
-                    </div>
-                    {(() => {
-                      const outstanding = cardOutstanding(allCardTxs, card.id)
-                      return outstanding > 0 ? (
-                        <p className="text-xs font-medium text-red-500">
-                          Due: {formatCurrency(outstanding)}
-                        </p>
-                      ) : allCardTxs.some(t => t.card_id === card.id) ? (
-                        <p className="text-xs font-medium text-emerald-600">Fully paid</p>
-                      ) : null
-                    })()}
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <Button size="icon" variant="ghost" className="w-8 h-8 text-muted-foreground hover:text-primary"
-                      title="Import PDF statement" onClick={() => setPdfCard(card)}>
-                      <FileUp className="w-3.5 h-3.5" />
-                    </Button>
-                    <Button size="icon" variant="ghost" className="w-8 h-8" title="Edit card"
-                      onClick={() => { setEditCard(card); setModalOpen(true) }}>
-                      <Pencil className="w-3.5 h-3.5" />
-                    </Button>
-                    <Button size="icon" variant="ghost" className="w-8 h-8 text-muted-foreground hover:text-destructive"
-                      title="Remove card" onClick={() => deleteCard(card.id)}>
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+          {/* Cards — layout chosen with the switcher above */}
+          <CardsShowcase
+            cards={cards}
+            view={cards.length > 1 ? cardsView : 'grid'}
+            selectedId={selectedCardId}
+            onSelect={id => {
+              setSelectedCardId(id)
+              setSelectedCycle('all')
+              if (id === 'all' && periodMode === 'cycle') setPeriodMode('monthly')
+            }}
+            status={id => ({ due: cardOutstanding(allCardTxs, id), hasTxs: allCardTxs.some(t => t.card_id === id) })}
+            onImport={setPdfCard}
+            onEdit={card => { setEditCard(card); setModalOpen(true) }}
+            onDelete={deleteCard}
+          />
 
           {/* Spending Analytics */}
           <Card>
