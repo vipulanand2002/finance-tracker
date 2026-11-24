@@ -268,11 +268,11 @@ export async function POST(request: Request) {
     const allTransactions: any[] = []
     const deadline = Date.now() + WORK_BUDGET_MS
 
-    // Two chunks at a time: faster than one by one, and still gentle on the free-tier limits
-    for (let i = 0; i < chunks.length; i += 2) {
-      const batch = chunks.slice(i, i + 2)
-      const results = await Promise.all(batch.map(c => parseChunk(c, allCategories, billingContext, deadline)))
-      for (const txs of results) if (Array.isArray(txs)) allTransactions.push(...txs)
+    // One chunk after another, with a short pause, to stay under the free-tier rate limits
+    for (let i = 0; i < chunks.length; i++) {
+      if (i > 0) await new Promise(r => setTimeout(r, 1500))
+      const txs = await parseChunk(chunks[i], allCategories, billingContext, deadline)
+      if (Array.isArray(txs)) allTransactions.push(...txs)
     }
 
     // Post-processing: drop clearly invalid rows
@@ -314,6 +314,12 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: 'AI rate limit hit. Please wait a minute and try again.' },
         { status: 429 }
+      )
+    }
+    if (status === 404) {
+      return NextResponse.json(
+        { error: 'The AI model this app uses is no longer available. Please let the admin know so it can be updated.' },
+        { status: 503 }
       )
     }
     if (status === 503 || status === 504 || status === 500 || /high demand|unavailable|taking too long/i.test(aiMsg)) {

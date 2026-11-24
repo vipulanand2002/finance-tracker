@@ -9,9 +9,9 @@ import type { Transaction } from '@/types'
 export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-lite-latest'
 const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || 'gemini-3.8-flash'
 // Ordered, de-duped list of models to try in turn.
-// Extra stable models sit in different capacity pools, so a demand spike on one rarely hits all.
-// A model that doesn't exist answers 404 straight away and the next one is tried.
-const MODELS = [...new Set([GEMINI_MODEL, GEMINI_FALLBACK_MODEL, 'gemini-2.5-flash-lite', 'gemini-2.5-flash'])]
+// 'gemini-flash-latest' is a rolling alias, so it keeps working as models are retired (the 2.5
+// models now answer 404 "no longer available"). A model that 404s is skipped straight away.
+const MODELS = [...new Set([GEMINI_MODEL, GEMINI_FALLBACK_MODEL, 'gemini-flash-latest'])]
 // One call to one model may not take longer than this — an overloaded model can hang
 const CALL_TIMEOUT_MS = 30000
 
@@ -53,9 +53,11 @@ async function generate(contents: unknown, temperature: number, opts: GenOptions
         try { res = await Promise.race([call, timeout]) } finally { clearTimeout(timer) }
         return res.text ?? ''
       } catch (err) {
-        lastErr = err
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const status = (err as any)?.status ?? (err as any)?.code
+        console.warn(`[AI] ${model} failed (attempt ${attempt + 1}): ${status ?? (err as Error)?.message}`)
+        // Report the most useful failure: a "busy" / rate-limit error beats a retired-model 404
+        if (!(status === 404 && lastErr)) lastErr = err
         // Auth / bad-request errors won't be fixed by retrying or another model
         if (status === 400 || status === 401 || status === 403) throw err
         const transient = status === 429 || status === 500 || status === 502 || status === 503 || status === 504
