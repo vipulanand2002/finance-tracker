@@ -26,7 +26,14 @@ const CALL_TIMEOUT_MS = 20000
 export interface GenOptions {
   /** Stop trying (and throw) once this time (ms since epoch) has passed */
   deadline?: number
+  /** Cap on the answer length — small caps are cheaper for Google to serve when it is busy */
+  maxOutputTokens?: number
 }
+
+// The newer models "think" before answering by default, which makes short extraction jobs slow
+// and more likely to time out. Turn it off; a model that rejects the setting is remembered
+// and called without it.
+const thinkingRejected = new Set<string>()
 // 8192 is safe across all flash / flash-lite variants; our outputs are small.
 const MAX_OUTPUT_TOKENS = 8192
 
@@ -42,7 +49,7 @@ function client() {
 // pause, since those pass quickly; a rate-limit answer (429) means that model is used up, so
 // it moves on to the next at once.
 async function generate(contents: unknown, temperature: number, opts: GenOptions = {}): Promise<string> {
-  const cfg = { temperature, maxOutputTokens: MAX_OUTPUT_TOKENS }
+  const baseCfg = { temperature, maxOutputTokens: opts.maxOutputTokens ?? MAX_OUTPUT_TOKENS }
   let lastErr: unknown = null
   const now = Date.now()
   const available = MODELS.filter(m => (coolDown.get(m) ?? 0) <= now)
@@ -51,9 +58,11 @@ async function generate(contents: unknown, temperature: number, opts: GenOptions
       if (opts.deadline && Date.now() > opts.deadline - 2000) {
         throw lastErr ?? Object.assign(new Error('The AI service is taking too long to answer'), { status: 504 })
       }
+      const thinkingOff = !thinkingRejected.has(model)
+      const cfg = thinkingOff ? { ...baseCfg, thinkingConfig: { thinkingBudget: 0 } } : baseCfg
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const call = client().models.generateContent({ model, contents: contents as any, config: cfg })
+        const call = client().models.generateContent({ model, contents: contents as any, config: cfg as any })
         let timer: ReturnType<typeof setTimeout> | undefined
         const timeout = new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(Object.assign(new Error('The AI service is taking too long to answer'), { status: 504 })), CALL_TIMEOUT_MS)
@@ -67,6 +76,8 @@ async function generate(contents: unknown, temperature: number, opts: GenOptions
         console.warn(`[AI] ${model} failed (attempt ${attempt + 1}): ${status ?? (err as Error)?.message}`)
         // Report the most useful failure: a "busy" / rate-limit error beats a retired-model 404
         if (!(status === 404 && lastErr)) lastErr = err
+        // This model doesn't accept the no-thinking setting: remember, and retry without it
+        if (status === 400 && thinkingOff) { thinkingRejected.add(model); attempt--; continue }
         // Auth / bad-request errors won't be fixed by retrying or another model
         if (status === 400 || status === 401 || status === 403) throw err
         if (status === 429) { coolDown.set(model, Date.now() + COOL_DOWN_MS); break }

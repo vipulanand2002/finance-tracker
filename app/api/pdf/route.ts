@@ -6,7 +6,7 @@ import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/constants'
 
 // ~3,000 tokens of input text per chunk keeps each Gemini call fast and the
 // output well within limits. 1 token ≈ 4 chars → 3,000 * 4 = 12,000 chars
-const MAX_CHUNK_CHARS = 12000
+const MAX_CHUNK_CHARS = 5000
 
 // The whole import must finish (or fail with a clear message) well inside this limit,
 // instead of retrying an overloaded AI service until the platform kills the request.
@@ -151,7 +151,7 @@ ${chunkText}`
   let lastErr: any = null
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const raw = await geminiText(prompt, 0.1, { deadline })
+      const raw = await geminiText(prompt, 0.1, { deadline, maxOutputTokens: 3000 })
       console.log(`[PDF] gemini outLen=${raw.length} preview=${raw.slice(0, 100)}`)
       if (raw.trim()) return extractJsonArray(raw)
       console.warn('[PDF] Gemini returned empty — retrying')
@@ -197,7 +197,17 @@ function compressPdfText(text: string): string {
 }
 
 function splitIntoChunks(text: string): string[] {
-  const pages = text.split('\n<<PAGE_BREAK>>\n')
+  // A page longer than one chunk is cut at line boundaries, so no request is oversized
+  const pages = text.split('\n<<PAGE_BREAK>>\n').flatMap(page => {
+    if (page.length <= MAX_CHUNK_CHARS) return [page]
+    const parts: string[] = []
+    let part = ''
+    for (const line of page.split('\n')) {
+      if (part && part.length + line.length + 1 > MAX_CHUNK_CHARS) { parts.push(part); part = line } else part += (part ? '\n' : '') + line
+    }
+    if (part) parts.push(part)
+    return parts
+  })
   const chunks: string[] = []
   let current = ''
 
